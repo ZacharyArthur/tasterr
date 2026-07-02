@@ -1,0 +1,29 @@
+# AI tool artifacts (AGENTS.md, CLAUDE.md, and openspec/ ARE committed)
+.claude/
+.cursor/
+.codex/
+.gemini/
+.windsurf/
+.opencode/
+.aider*
+
+# Python
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+
+# Node
+node_modules/
+dist/
+
+# Env & data
+.env
+*.db
+*.sqlite*
+
+# OS
+Thumbs.db
+.DS_Store

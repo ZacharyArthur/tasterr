@@ -1,0 +1,35 @@
+schema: spec-driven
+
+context: |
+  Tasterr: self-hosted, Netflix-style discovery front-end for a household media
+  stack (TMDB catalog + Seerr identity/requests) with per-user learned taste
+  profiles. Solo-maintained. Values, in order: best practice, KISS, maintainable
+  code — when a feature and simplicity conflict, simplicity wins.
+
+  Stack: Python 3.13 + FastAPI + Pydantic v2 + SQLAlchemy 2.0/SQLite + httpx
+  (uv, ruff, pyright strict, pytest) | Vite + React + TypeScript strict +
+  Tailwind + TanStack Query (Biome, Vitest). One process, one Docker image,
+  in-process cache, asyncio background work. No Redis, no celery.
+
+  Hard invariants: secrets never reach the client (PublicConfig projection);
+  only backend clients/ performs outbound HTTP; Seerr outages degrade
+  (badges "Unknown"), never block browsing.
+
+  Process + git rules: AGENTS.md. Security threat model + per-area checklists:
+  docs/SECURITY.md. Founding design rationale: docs/PRD.md + docs/SPEC.md
+  (frozen blueprint — consult, never update).
+
+  Quality gate: `just check` must pass before any task or change is called done.
+
+rules:
+  proposal:
+    - Include a "Non-goals" section
+    - State which PRD milestone or existing capability the change advances
+  design:
+    - Include a "Security considerations" section answering the relevant
+      checklists in docs/SECURITY.md, or stating why none apply
+    - Justify any new dependency against the stack slate in AGENTS.md
+  tasks:
+    - Behavior tasks include their tests in the same task, never a trailing
+      catch-all "add tests" task
+    - The final task is always to run `just check` and fix any failures
