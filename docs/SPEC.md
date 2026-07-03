@@ -131,9 +131,11 @@ logic that unit-tests without mocks of the network.
 
 - The Seerr session cookie from login is stored on the Tasterr session row and attached to all
   per-user Seerr calls (requests, the user's own request history).
-- On Seerr `401`: Plex users → silent re-auth via stored Plex token → retry once. Local users
-  → surface `re_auth_required`; SPA shows a re-login prompt. Availability reads degrade to the
-  global path rather than failing.
+- On Seerr `401`/`403` (Seerr 3.3.0 returns **403** with a permission-error body for invalid
+  sessions — confirmed by the auth spike): Plex users → silent re-auth via stored Plex token →
+  retry once. Local users → surface `re_auth_required`; SPA shows a re-login prompt. 403 is
+  also Seerr's genuine permission-denied response, so never re-auth more than once per request.
+  Availability reads degrade to the global path rather than failing.
 - Availability *reads* may use the global Seerr API key (server setting) since they're not
   user-attributed — keeps badge hydration working even when a user's Seerr session lapses.
 

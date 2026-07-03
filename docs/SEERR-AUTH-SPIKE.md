@@ -1,6 +1,8 @@
 # Spike: Validate Seerr-delegated authentication
 
-**Status:** Not started — **this is the first work item of the project, before M0 scaffolding.**
+**Status:** ✅ Complete — run 2026-07-02 against Seerr **3.3.0** (`703faf9`). Outcome: **PASS**;
+one deviation (invalid sessions return 403, not 401) amended into SPEC §4.3; local login
+deferred to M1 contract tests. → Proceed to M0.
 **Type:** Throwaway spike. The script is disposable; the *findings* recorded here are the deliverable.
 **References:** [SPEC.md §4](./SPEC.md) (auth design), [PRD.md §9](./PRD.md) (risk table).
 
@@ -71,14 +73,14 @@ not committed to the repo — only this document's Findings section survives.
 
 ## Findings
 
-_To be filled in when the spike runs._
+Run 2026-07-02, LAN URL, Plex-backed admin account. All values redacted per SECURITY.md.
 
 | # | Question | Result | Evidence / notes |
 |---|---|---|---|
-| 1 | Plex PIN flow | — | |
-| 2 | Plex → Seerr login | — | |
-| 3 | Local login | — | |
-| 4 | Identity & admin | — | |
-| 5 | Request as user | — | |
-| 6 | Expiry & re-auth | — | |
-| 7 | Seerr version | — | |
+| 1 | Plex PIN flow | **PASS** | `POST plex.tv/api/v2/pins?strong=true` → 201 with pin id + code; user approves at `app.plex.tv/auth#?clientID=…&code=…`; polling the pin returns the auth token. Fresh `X-Plex-Client-Identifier` per run appears as a new device in Plex settings — production must persist one stable identifier. |
+| 2 | Plex → Seerr login | **PASS** | `POST /api/v1/auth/plex {authToken}` → 200 with full user object; `Set-Cookie: connect.sid=…; Path=/; HttpOnly; SameSite=Lax`, **30-day expiry**. No `Secure` flag over plain http (expected; our own session cookie handles that side). |
+| 3 | Local login | **DEFERRED** | Skipped (no local-account credentials supplied at run time). Same response shape expected; validate via M1 live contract tests before building the local path UI. |
+| 4 | Identity & admin | **PASS** | `GET /api/v1/auth/me` → stable `id`, `plexId`, `plexUsername`, `displayName`, `email`, and `permissions` int bitmask. Admin = bit 2 set (`permissions & 2`); observed `permissions=2` on the owner account (user id 1 = owner). Quota fields (`movieQuotaLimit` etc.) also present here. |
+| 5 | Request as user | **PASS** | `POST /api/v1/request {"mediaType":"movie","mediaId":<tmdbId>}` with only the session cookie → 201. `requestedBy.id` matched the logged-in user. Request landed already approved (`status: 2`) — admin auto-approve applied server-side, confirming Seerr enforces per-user rules. Cleanup `DELETE /api/v1/request/{id}` → 204. Note: request id and `media.id` are distinct entities. |
+| 6 | Expiry & re-auth | **PASS, with deviation** | Invalid session → **403** `{"status":403,"error":"You do not have permission to access this endpoint"}` — **not 401** as SPEC §4.3 assumed (§4.3 amended). Caveat: 403 is also Seerr's genuine permission-denied response, so re-auth at most once, then surface the error. Re-POSTing the *same stored Plex token* to `/auth/plex` → 200 + fresh `connect.sid`: silent re-auth confirmed. |
+| 7 | Seerr version | **3.3.0** | `GET /api/v1/status` (unauthenticated) → `{"version":"3.3.0","commitTag":"703faf9…"}`. This is the pinned known-good version for contract tests. |
