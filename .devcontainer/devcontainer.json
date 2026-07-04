@@ -1,0 +1,30 @@
+{
+	"name": "tasterr",
+	"build": { "dockerfile": "Dockerfile" },
+	"features": {
+		"ghcr.io/devcontainers/features/node:1": { "version": "24" },
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+	},
+	// Dependency trees live on container volumes: faster than Windows bind
+	// mounts, and host antivirus never touches (or quarantines) them.
+	"mounts": [
+		"source=tasterr-backend-venv,target=${containerWorkspaceFolder}/backend/.venv,type=volume",
+		"source=tasterr-frontend-node-modules,target=${containerWorkspaceFolder}/frontend/node_modules,type=volume"
+	],
+	"containerEnv": {
+		// venv volume and uv cache are different filesystems; copy, don't hardlink
+		"UV_LINK_MODE": "copy"
+	},
+	"postCreateCommand": "sudo chown -R vscode:vscode backend/.venv frontend/node_modules && (cd backend && uv sync) && (cd frontend && npm ci)",
+	"remoteUser": "vscode",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"charliermarsh.ruff",
+				"ms-python.python",
+				"biomejs.biome",
+				"skellock.just"
+			]
+		}
+	}
+}

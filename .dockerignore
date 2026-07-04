@@ -1,0 +1,26 @@
+# VCS & agent artifacts
+.git
+.github
+.claude
+.codex
+.opencode
+openspec
+docs
+
+# Python
+backend/.venv
+**/__pycache__
+backend/.pytest_cache
+backend/.ruff_cache
+backend/data
+
+# Node
+frontend/node_modules
+frontend/dist
+frontend/openapi.json
+
+# Env & data — secrets never enter the build context
+.env
+*.db
+*.sqlite*
+data

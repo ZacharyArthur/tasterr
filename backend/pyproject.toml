@@ -1,0 +1,83 @@
+[project]
+name = "tasterr"
+version = "0.1.0"
+description = "Self-hosted, Netflix-style discovery front-end for a household media stack"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic-settings>=2.8",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.21",
+    "alembic>=1.15",
+    "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11",
+    "pyright>=1.1.400",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.26",
+    "import-linter>=2.3",
+    "pip-audit>=2.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tasterr"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.importlinter]
+root_package = "tasterr"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Only clients/ performs outbound HTTP (httpx)"
+type = "forbidden"
+source_modules = [
+    "tasterr.api",
+    "tasterr.auth",
+    "tasterr.catalog",
+    "tasterr.rails",
+    "tasterr.recommend",
+    "tasterr.db",
+    "tasterr.main",
+    "tasterr.settings",
+]
+forbidden_modules = ["httpx"]
+
+[[tool.importlinter.contracts]]
+name = "api/ shapes browser responses; no other layer imports it"
+type = "forbidden"
+source_modules = [
+    "tasterr.auth",
+    "tasterr.clients",
+    "tasterr.catalog",
+    "tasterr.rails",
+    "tasterr.recommend",
+    "tasterr.db",
+]
+forbidden_modules = ["tasterr.api"]

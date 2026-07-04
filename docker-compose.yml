@@ -1,0 +1,31 @@
+# Example wiring: Tasterr beside Seerr on a shared network. Tasterr reaches
+# Seerr via the service name (SEERR_INTERNAL_URL=http://seerr:5055 in .env);
+# that URL never leaves the server.
+services:
+  tasterr:
+    build: .
+    image: tasterr:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - tasterr-data:/data
+    networks:
+      - media
+
+  # Uncomment (or point SEERR_INTERNAL_URL at your existing instance).
+  # seerr:
+  #   image: fallenbagel/jellyseerr:latest
+  #   restart: unless-stopped
+  #   volumes:
+  #     - seerr-config:/app/config
+  #   networks:
+  #     - media
+
+volumes:
+  tasterr-data:
+  # seerr-config:
+
+networks:
+  media:

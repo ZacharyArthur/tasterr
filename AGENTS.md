@@ -30,13 +30,33 @@ Invariants (enforced by boundary tests + PublicConfig regression test, not prose
 2. **Only `clients/` does outbound HTTP**; only `api/` shapes browser responses.
 3. **Seerr down degrades** (badges "Unknown", requests disabled) — never blocks browsing.
 
+## Development environment — devcontainer REQUIRED
+
+**All development happens inside the devcontainer (`.devcontainer/`). No exceptions.**
+Do not install, repair, or run the toolchain (uv, Python, node/npm, just) on the
+Windows host — the host toolchain is deliberately absent and unmaintained (host
+antivirus has quarantined toolchain binaries and project sources mid-session;
+see m0-scaffold design.md, decision 12). If a command needs uv/npm/just, it runs
+in the container, full stop.
+
+- The repo stays in the local folder, bind-mounted at `/workspaces/tasterr` —
+  edits and git history are the same files on the host.
+- `backend/.venv` and `frontend/node_modules` live on named container volumes and
+  must never materialize on the host filesystem.
+- VS Code: "Reopen in Container". Headless / agents:
+  `npx @devcontainers/cli up --workspace-folder .` once, then
+  `npx @devcontainers/cli exec --workspace-folder . <command>` for everything else.
+- `docker build` / `docker run` work inside the container via
+  docker-outside-of-docker (they drive the host engine).
+
 ## Quality gate
 
 ```
 just check     # ruff + pyright + pytest + frontend typecheck/test/build
 ```
 
-Never claim work is done until it passes. CI runs the exact same command on PRs.
+Run it **inside the devcontainer** (see above); CI runs the exact same command on
+PRs. Never claim work is done until it passes.
 
 ## Development workflow (OpenSpec)
 
