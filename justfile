@@ -22,9 +22,10 @@ types:
     cd backend && uv run python scripts/dump_openapi.py ../frontend/openapi.json
     cd frontend && npx openapi-typescript openapi.json -o src/lib/api.gen.ts
 
-# Dependency audit — advisory, not part of `check`.
+# Dependency audit — advisory, not part of `check`. The `-` keeps a backend
+# advisory from hiding the frontend report.
 audit:
-    cd backend && uv run pip-audit
+    -cd backend && uv run pip-audit
     cd frontend && npm audit
 
 dev-backend:

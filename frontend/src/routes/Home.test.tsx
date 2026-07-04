@@ -19,10 +19,8 @@ test("renders backend health from /api/v1/health", async () => {
 		status: 200,
 		json: async () => body,
 	} as Response;
-	vi.stubGlobal(
-		"fetch",
-		vi.fn(async () => response),
-	);
+	const fetchMock = vi.fn(async () => response);
+	vi.stubGlobal("fetch", fetchMock);
 
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
@@ -36,4 +34,5 @@ test("renders backend health from /api/v1/health", async () => {
 	expect(await screen.findByText("ok")).toBeTruthy();
 	expect(screen.getByText("configured")).toBeTruthy();
 	expect(screen.getByText("not configured")).toBeTruthy();
+	expect(fetchMock).toHaveBeenCalledWith("/api/v1/health");
 });

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tasterr.main import create_app
 from tasterr.settings import Settings
@@ -21,12 +22,13 @@ def _settings(tmp_path: Path, **overrides: object) -> Settings:
     return Settings.model_validate({**defaults, **overrides})
 
 
-def test_factory_startup_runs_migrations(tmp_path: Path) -> None:
+def test_factory_startup_runs_migrations_and_shares_engine(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     app = create_app(settings)
 
     with TestClient(app):
         assert settings.database_path.exists()
+        assert isinstance(app.state.engine, AsyncEngine)
 
 
 def test_health_ok_and_unconfigured_by_default(tmp_path: Path) -> None:
@@ -96,3 +98,42 @@ def test_unknown_api_route_stays_json_404(tmp_path: Path) -> None:
     assert response.status_code == 404
     assert response.headers["content-type"] == "application/json"
     assert response.json() == {"detail": "Not Found"}
+
+
+def test_unknown_api_route_is_json_404_for_any_method(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings.static_dir.mkdir(parents=True)
+    (settings.static_dir / "index.html").write_text("<!doctype html>")
+
+    with TestClient(create_app(settings)) as client:
+        for method in ("post", "put", "delete", "patch"):
+            response = getattr(client, method)("/api/v1/nope")
+            assert response.status_code == 404, method
+            assert response.headers["content-type"] == "application/json"
+
+
+def test_non_get_to_spa_path_is_405(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings.static_dir.mkdir(parents=True)
+    (settings.static_dir / "index.html").write_text("<!doctype html>")
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/settings")
+
+    assert response.status_code == 405
+    assert response.headers["allow"] == "GET, HEAD"
+
+
+def test_wrong_method_on_known_api_route_is_405(tmp_path: Path) -> None:
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        response = client.post("/api/v1/health")
+
+    assert response.status_code == 405
+    assert "GET" in response.headers["allow"]
+
+
+def test_trace_on_unknown_api_route_is_404(tmp_path: Path) -> None:
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        response = client.request("TRACE", "/api/v1/nope")
+
+    assert response.status_code == 404

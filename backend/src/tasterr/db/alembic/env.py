@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from alembic import context
 from sqlalchemy import Connection, engine_from_config, pool
 
@@ -30,6 +33,12 @@ def run_migrations_online() -> None:
     if connection is not None:
         do_run_migrations(connection)
         return
+
+    # CLI path: honor DATABASE_PATH so manual migrations target the same file
+    # the app uses; the ini URL is only a dev fallback.
+    database_path = os.environ.get("DATABASE_PATH")
+    if database_path:
+        config.set_main_option("sqlalchemy.url", f"sqlite:///{Path(database_path).as_posix()}")
 
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),

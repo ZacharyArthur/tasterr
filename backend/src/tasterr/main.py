@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from tasterr.api.meta import router as meta_router
 from tasterr.db.engine import create_engine
@@ -17,8 +18,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings if settings is not None else get_settings()
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    async def lifespan(started_app: FastAPI) -> AsyncGenerator[None]:
         engine = create_engine(app_settings.database_path)
+        started_app.state.engine = engine
         try:
             await upgrade_to_head(engine)
             yield
@@ -37,22 +39,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_settings] = lambda: app_settings
 
     app.include_router(meta_router, prefix="/api/v1")
-    _mount_spa(app, app_settings.static_dir)
+    app.add_middleware(SpaFallback, static_dir=app_settings.static_dir)
     return app
 
 
-def _mount_spa(app: FastAPI, static_dir: Path) -> None:
-    """Serve built SPA assets; any unknown non-API path falls back to index.html."""
-    static_root = static_dir.resolve()
-    index_file = static_root / "index.html"
+class SpaFallback:
+    """Serve the built SPA for non-API paths, at the ASGI level.
 
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa(full_path: str) -> Response:  # pyright: ignore[reportUnusedFunction]
-        if full_path == "api" or full_path.startswith("api/"):
-            return JSONResponse({"detail": "Not Found"}, status_code=404)
-        candidate = (static_root / full_path).resolve()
-        if candidate.is_file() and candidate.is_relative_to(static_root):
+    /api/* traffic passes through untouched so the router fully owns its
+    method semantics (404 for unknown paths, 405 with Allow for known paths,
+    for every HTTP verb). Everything else: GET/HEAD serve a real file or fall
+    back to index.html; other methods are 405.
+    """
+
+    def __init__(self, app: ASGIApp, static_dir: Path) -> None:
+        self.app = app
+        self.static_root = static_dir.resolve()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or self._is_api(scope["path"]):
+            await self.app(scope, receive, send)
+            return
+        response = self._spa_response(scope["path"], scope["method"])
+        await response(scope, receive, send)
+
+    @staticmethod
+    def _is_api(path: str) -> bool:
+        return path == "/api" or path.startswith("/api/")
+
+    def _spa_response(self, path: str, method: str) -> Response:
+        if method not in ("GET", "HEAD"):
+            return JSONResponse(
+                {"detail": "Method Not Allowed"},
+                status_code=405,
+                headers={"Allow": "GET, HEAD"},
+            )
+        candidate = (self.static_root / path.lstrip("/")).resolve()
+        if candidate.is_file() and candidate.is_relative_to(self.static_root):
             return FileResponse(candidate)
+        index_file = self.static_root / "index.html"
         if index_file.is_file():
             return FileResponse(index_file)
         return JSONResponse({"detail": "SPA assets not built"}, status_code=404)

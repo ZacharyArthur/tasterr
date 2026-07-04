@@ -11,6 +11,7 @@ ENV_VARS = (
     "SEERR_API_KEY",
     "TASTERR_SECRET_KEY",
     "DATABASE_PATH",
+    "STATIC_DIR",
     "TASTERR_HOST",
     "TASTERR_PORT",
 )
@@ -25,8 +26,12 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_settings_populate_from_env(clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TMDB_API_KEY", "tmdb-key-from-env")
     monkeypatch.setenv("SEERR_INTERNAL_URL", "http://seerr:5055")
+    monkeypatch.setenv("SEERR_EXTERNAL_URL", "https://requests.example.com")
     monkeypatch.setenv("SEERR_API_KEY", "seerr-key-from-env")
+    monkeypatch.setenv("TASTERR_SECRET_KEY", "fernet-key-from-env")
     monkeypatch.setenv("DATABASE_PATH", "custom/tasterr.db")
+    monkeypatch.setenv("STATIC_DIR", "built/spa")
+    monkeypatch.setenv("TASTERR_HOST", "127.0.0.1")
     monkeypatch.setenv("TASTERR_PORT", "9000")
 
     settings = Settings()
@@ -34,7 +39,12 @@ def test_settings_populate_from_env(clean_env: None, monkeypatch: pytest.MonkeyP
     assert settings.tmdb_api_key is not None
     assert settings.tmdb_api_key.get_secret_value() == "tmdb-key-from-env"
     assert settings.seerr_internal_url == "http://seerr:5055"
+    assert settings.seerr_external_url == "https://requests.example.com"
+    assert settings.tasterr_secret_key is not None
+    assert settings.tasterr_secret_key.get_secret_value() == "fernet-key-from-env"
     assert settings.database_path == Path("custom/tasterr.db")
+    assert settings.static_dir == Path("built/spa")
+    assert settings.tasterr_host == "127.0.0.1"
     assert settings.tasterr_port == 9000
     assert settings.tmdb_configured is True
     assert settings.seerr_configured is True

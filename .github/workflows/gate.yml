@@ -26,3 +26,7 @@ jobs:
 
       # The same command developers and agents run locally — no divergence.
       - run: just check
+
+      # SPEC §9: dependency audit in the PR gate as a non-blocking advisory.
+      - run: just audit
+        continue-on-error: true

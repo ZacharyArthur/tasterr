@@ -35,6 +35,6 @@ VOLUME /data
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-    CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).status == 200 else 1)"]
+    CMD ["python", "-c", "import os, sys, urllib.request; port = os.environ.get('TASTERR_PORT', '8000'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/api/v1/health', timeout=3).status == 200 else 1)"]
 
-CMD ["uvicorn", "tasterr.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "tasterr"]

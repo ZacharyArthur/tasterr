@@ -7,7 +7,17 @@ from pydantic import SecretStr
 
 from tasterr.settings import PublicConfig, Settings
 
-SECRET_MARKERS = ("key", "secret", "token", "internal", "password", "cookie")
+SECRET_MARKERS = (
+    "key",
+    "secret",
+    "token",
+    "internal",
+    "password",
+    "cookie",
+    "credential",
+    "bearer",
+    "connection",
+)
 SENTINEL = "SENTINEL-SECRET-VALUE"
 
 
@@ -33,18 +43,45 @@ def test_schema_contains_no_secret_field_names() -> None:
             assert marker not in name.lower(), f"secret-looking field {name!r} in PublicConfig"
 
 
-def test_serialized_output_contains_no_secret_values() -> None:
-    # seerr_external_url is deliberately not sentineled: it is client-visible by
-    # design (SPEC §9 redirects) and may legitimately join PublicConfig later.
-    settings = Settings(
-        tmdb_api_key=SecretStr(f"{SENTINEL}-tmdb"),
-        seerr_internal_url=f"http://{SENTINEL}-seerr:5055",
-        seerr_external_url="https://requests.example.com",
-        seerr_api_key=SecretStr(f"{SENTINEL}-seerr-key"),
-        tasterr_secret_key=SecretStr(f"{SENTINEL}-fernet"),
-        database_path=Path(f"{SENTINEL}/tasterr.db"),
-    )
+# Fields allowed to reach the client or that are non-sensitive operational
+# knobs. Every other Settings field is sentineled automatically below, so a new
+# field must either be added here (a reviewed decision) or it gets a sentinel —
+# the test cannot drift from the model.
+CLIENT_SAFE_FIELDS = {
+    "seerr_external_url",  # client-visible by design (SPEC §9 redirects)
+    "tasterr_host",
+    "tasterr_port",
+    "static_dir",
+}
 
-    dumped = PublicConfig.from_settings(settings).model_dump_json()
+
+def _sentineled_settings() -> Settings:
+    values: dict[str, object] = {}
+    for name, field in Settings.model_fields.items():
+        if name in CLIENT_SAFE_FIELDS:
+            continue
+        annotation = str(field.annotation)
+        if "SecretStr" in annotation:
+            values[name] = SecretStr(f"{SENTINEL}-{name}")
+        elif "Path" in annotation:
+            values[name] = Path(f"{SENTINEL}-{name}/file")
+        else:
+            values[name] = f"{SENTINEL}-{name}"
+    return Settings.model_validate(values)
+
+
+def test_serialized_output_contains_no_secret_values() -> None:
+    dumped = PublicConfig.from_settings(_sentineled_settings()).model_dump_json()
 
     assert SENTINEL not in dumped
+
+
+def test_public_config_has_no_secretstr_fields() -> None:
+    """Complements the sentinel check: pydantic masks SecretStr on dump, so a
+    projected-but-wrapped secret would never surface a sentinel. Secret-shaped
+    fields do not belong in the client projection at all, masked or not.
+    """
+    for name, field in PublicConfig.model_fields.items():
+        assert "SecretStr" not in str(field.annotation), (
+            f"SecretStr-typed field {name!r} in PublicConfig"
+        )
