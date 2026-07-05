@@ -47,6 +47,17 @@ class PinStore:
             return None
         return pending.plex_pin_id
 
+    def pop(self, handle: str) -> int | None:
+        """Atomically take the handle — the single-use step once the PIN is
+        claimed. Being synchronous, it cannot interleave with another request's
+        pop between awaits, so overlapping polls yield exactly one winner."""
+        pending = self._pending.pop(handle, None)
+        if pending is None:
+            return None
+        if self._clock() - pending.created >= TTL_SECONDS:
+            return None
+        return pending.plex_pin_id
+
     def consume(self, handle: str) -> None:
         self._pending.pop(handle, None)
 

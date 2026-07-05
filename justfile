@@ -23,7 +23,8 @@ types:
     cd frontend && npx openapi-typescript openapi.json -o src/lib/api.gen.ts
 
 # Live Seerr contract tests (excluded from `check`): set TASTERR_LIVE_SEERR_URL,
-# TASTERR_LIVE_SEERR_EMAIL, TASTERR_LIVE_SEERR_PASSWORD in the environment first.
+# TASTERR_LIVE_SEERR_EMAIL, TASTERR_LIVE_SEERR_PASSWORD (and optionally
+# TASTERR_LIVE_PLEX_TOKEN for the /auth/plex path) in the environment first.
 test-live:
     cd backend && uv run pytest -m live -s
 

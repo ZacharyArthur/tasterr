@@ -140,16 +140,20 @@ async def poll_plex_pin(
     if plex_token is None:
         return PinPollResponse(status="pending")
 
+    # Atomically take the handle before the Seerr exchange: overlapping polls
+    # on a claimed PIN mint exactly one session; the losers get the same
+    # generic 404 as an expired handle.
+    if ctx.pins.pop(pin_id) is None:
+        raise HTTPException(status_code=404, detail=PIN_NOT_FOUND)
+
     try:
         login = await ctx.seerr.login_plex(plex_token)
     except UpstreamRejected as error:  # Seerr refused this Plex account
-        ctx.pins.consume(pin_id)
         logger.info("auth: plex login rejected by seerr")
         raise HTTPException(status_code=401, detail="Sign-in failed") from error
     except UpstreamUnavailable as error:
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
 
-    ctx.pins.consume(pin_id)
     user, token = await complete_login(db, ctx.secret_key, login, "plex", plex_token)
     _set_cookie(request, response, token)
     logger.info("auth: plex login succeeded user_id=%s", user.id)

@@ -48,7 +48,8 @@ const USER = {
 	is_admin: false,
 };
 
-test("plex flow: opens approval url, polls, refreshes auth state", async () => {
+test("plex flow: opens approval url, keeps polling, then refreshes auth state", async () => {
+	let polls = 0;
 	stubFetch({
 		"/api/v1/auth/plex/pin": () => ({
 			status: 200,
@@ -57,10 +58,12 @@ test("plex flow: opens approval url, polls, refreshes auth state", async () => {
 				auth_url: "https://app.plex.tv/auth#?x",
 			},
 		}),
-		"/api/v1/auth/plex/pin/opaque-handle": () => ({
-			status: 200,
-			body: { status: "ok", user: USER },
-		}),
+		"/api/v1/auth/plex/pin/opaque-handle": () => {
+			polls += 1;
+			return polls === 1
+				? { status: 200, body: { status: "pending", user: null } }
+				: { status: 200, body: { status: "ok", user: USER } };
+		},
 	});
 	const open = vi.fn();
 	vi.stubGlobal("open", open);
@@ -74,10 +77,16 @@ test("plex flow: opens approval url, polls, refreshes auth state", async () => {
 		"_blank",
 		"noopener",
 	);
-	await vi.waitFor(() => {
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY });
+	// First poll answers pending; the 2s refetch interval must fire again.
+	await vi.waitFor(() => expect(polls).toBeGreaterThanOrEqual(2), {
+		timeout: 5000,
+		interval: 100,
 	});
-});
+	await vi.waitFor(
+		() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+		{ timeout: 5000 },
+	);
+}, 15000);
 
 test("plex flow: expired handle surfaces a retry message", async () => {
 	stubFetch({

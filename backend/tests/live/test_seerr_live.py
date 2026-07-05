@@ -6,12 +6,16 @@ are never committed; see SECURITY.md working notes):
     TASTERR_LIVE_SEERR_URL       e.g. http://192.0.2.10:5055
     TASTERR_LIVE_SEERR_EMAIL     local-account email
     TASTERR_LIVE_SEERR_PASSWORD  local-account password
+    TASTERR_LIVE_PLEX_TOKEN      optional: a Plex auth token, to also validate
+                                 the /auth/plex stored-token path (the exact
+                                 call M3's silent re-auth depends on)
 
 Validates the contract the recorded fixtures in tests/test_clients_seerr.py
 assume — including the auth spike's one deferred question (local login) and
-its 403-not-401 deviation — and prints the Seerr version tested. The Plex
-login path needs interactive PIN approval, so it stays covered by the spike
-findings and the fixture suite; known-good version: 3.3.0.
+its 403-not-401 deviation — and prints the Seerr version tested. The
+interactive PIN half of the Plex flow still needs a human at plex.tv; supply
+a token obtained from any signed-in Plex client to cover the Seerr side.
+Known-good version: 3.3.0.
 """
 
 import os
@@ -27,10 +31,16 @@ pytestmark = pytest.mark.live
 URL = os.environ.get("TASTERR_LIVE_SEERR_URL", "").rstrip("/")
 EMAIL = os.environ.get("TASTERR_LIVE_SEERR_EMAIL", "")
 PASSWORD = os.environ.get("TASTERR_LIVE_SEERR_PASSWORD", "")
+PLEX_TOKEN = os.environ.get("TASTERR_LIVE_PLEX_TOKEN", "")
 
 requires_env = pytest.mark.skipif(
     not (URL and EMAIL and PASSWORD),
     reason="TASTERR_LIVE_SEERR_URL/EMAIL/PASSWORD not set",
+)
+
+requires_plex_token = pytest.mark.skipif(
+    not (URL and PLEX_TOKEN),
+    reason="TASTERR_LIVE_SEERR_URL/TASTERR_LIVE_PLEX_TOKEN not set",
 )
 
 
@@ -72,3 +82,16 @@ async def test_wrong_credentials_are_rejected() -> None:
     async with httpx.AsyncClient(timeout=10.0) as http:
         with pytest.raises(UpstreamRejected):
             await SeerrAuthClient(http, URL).login_local(EMAIL, "definitely-not-the-password")
+
+
+@requires_plex_token
+async def test_plex_stored_token_login_contract() -> None:
+    """Seerr accepts a stored Plex token at /auth/plex — the silent re-auth
+    primitive M3 builds on, and the non-interactive half of the Plex flow."""
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        login = await SeerrAuthClient(http, URL).login_plex(PLEX_TOKEN)
+
+        assert login.cookie.startswith("connect.sid=")
+        assert login.user.id > 0
+        assert isinstance(login.user.permissions, int)
+        assert login.user.resolved_display_name

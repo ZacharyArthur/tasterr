@@ -59,6 +59,25 @@ def test_consumed_handle_is_single_use() -> None:
     assert store.get(handle) is None
 
 
+def test_pop_atomically_takes_the_handle() -> None:
+    store = PinStore(clock=FakeClock())
+    handle = store.create(123456)
+
+    assert store.pop(handle) == 123456
+    assert store.pop(handle) is None  # second taker loses
+    assert store.get(handle) is None
+
+
+def test_pop_respects_ttl() -> None:
+    clock = FakeClock()
+    store = PinStore(clock=clock)
+    handle = store.create(123456)
+
+    clock.advance(TTL_SECONDS + 1)
+
+    assert store.pop(handle) is None
+
+
 def test_pending_count_stays_bounded() -> None:
     clock = FakeClock()
     store = PinStore(clock=clock)

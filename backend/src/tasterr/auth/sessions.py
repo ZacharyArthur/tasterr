@@ -2,6 +2,7 @@
 
 import hashlib
 import secrets
+from dataclasses import dataclass
 from datetime import timedelta
 
 from sqlalchemy import delete, select
@@ -48,10 +49,18 @@ async def mint_session(
     return token
 
 
-async def resolve_session(db: AsyncSession, token: str) -> tuple[UserSession, User] | None:
+@dataclass
+class ResolvedSession:
+    session: UserSession
+    user: User
+    slid: bool  # expiry window was extended — the caller should refresh the cookie
+
+
+async def resolve_session(db: AsyncSession, token: str) -> ResolvedSession | None:
     """Validate a raw token: exact-match lookup on its one-way hash, so no
-    secret-dependent comparison happens in our code. Expired rows are deleted
-    on touch; activity slides expiry (throttled)."""
+    secret-dependent comparison happens in our code (SECURITY.md's
+    constant-time item is satisfied by construction — nothing is compared).
+    Expired rows are deleted on touch; activity slides expiry (throttled)."""
     row = (
         await db.execute(
             select(UserSession, User)
@@ -68,11 +77,12 @@ async def resolve_session(db: AsyncSession, token: str) -> tuple[UserSession, Us
         await db.delete(session)
         await db.commit()
         return None
-    if now - session.last_seen_at >= SLIDE_AFTER:
+    slid = now - session.last_seen_at >= SLIDE_AFTER
+    if slid:
         session.last_seen_at = now
         session.expires_at = now + SESSION_TTL
         await db.commit()
-    return session, user
+    return ResolvedSession(session=session, user=user, slid=slid)
 
 
 async def revoke_session(db: AsyncSession, session: UserSession) -> None:

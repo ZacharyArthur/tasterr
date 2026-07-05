@@ -46,8 +46,11 @@ def _probe_app(tmp_path: Path) -> FastAPI:
     return app
 
 
-def _seed_session(tmp_path: Path, *, is_admin: bool = False, expired: bool = False) -> str:
-    """Create a user + session directly in the SQLite file; returns the raw token."""
+def _seed_session(
+    tmp_path: Path, *, is_admin: bool = False, expired: bool = False, stale: bool = False
+) -> str:
+    """Create a user + session directly in the SQLite file; returns the raw token.
+    `stale` backdates last activity past the slide threshold."""
 
     async def _run() -> str:
         engine = create_engine(tmp_path / "tasterr.db")
@@ -67,6 +70,7 @@ def _seed_session(tmp_path: Path, *, is_admin: bool = False, expired: bool = Fal
                 token = new_token()
                 now = utcnow()
                 expires = now - timedelta(seconds=5) if expired else now + SESSION_TTL
+                last_seen = now - timedelta(hours=2) if stale else now
                 db.add(
                     UserSession(
                         token_hash=hash_token(token),
@@ -75,7 +79,7 @@ def _seed_session(tmp_path: Path, *, is_admin: bool = False, expired: bool = Fal
                         plex_token_enc=None,
                         created_at=now,
                         expires_at=expires,
-                        last_seen_at=now,
+                        last_seen_at=last_seen,
                     )
                 )
                 await db.commit()
@@ -122,6 +126,33 @@ def test_session_gate_passes_valid_token(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"user_id": 1}
+
+
+def test_stale_session_gets_a_refreshed_cookie(tmp_path: Path) -> None:
+    """When the server-side window slides, the cookie's Max-Age must slide too."""
+    app = _probe_app(tmp_path)
+    token = _seed_session(tmp_path, stale=True)
+
+    with TestClient(app) as client:
+        client.cookies.set(COOKIE_NAME, token)
+        response = client.get("/api/v1/probe/session")
+
+    assert response.status_code == 200
+    header = response.headers["set-cookie"]
+    assert header.startswith(f"{COOKIE_NAME}={token}")
+    assert "max-age=2592000" in header.lower()
+
+
+def test_fresh_session_gets_no_cookie_churn(tmp_path: Path) -> None:
+    app = _probe_app(tmp_path)
+    token = _seed_session(tmp_path)
+
+    with TestClient(app) as client:
+        client.cookies.set(COOKIE_NAME, token)
+        response = client.get("/api/v1/probe/session")
+
+    assert response.status_code == 200
+    assert "set-cookie" not in response.headers
 
 
 def test_admin_gate_rejects_non_admin(tmp_path: Path) -> None:
@@ -174,6 +205,16 @@ def test_same_origin_falls_back_to_origin_header(tmp_path: Path) -> None:
     assert matching.status_code == 200
     assert mismatched.status_code == 403
     assert opaque.status_code == 403
+
+
+def test_origin_fallback_requires_matching_scheme(tmp_path: Path) -> None:
+    # http:// origin against an https request is cross-origin even on the same host.
+    with TestClient(_probe_app(tmp_path), base_url="https://testserver") as client:
+        downgraded = client.post("/api/v1/probe/mutate", headers={"Origin": "http://testserver"})
+        matching = client.post("/api/v1/probe/mutate", headers={"Origin": "https://testserver"})
+
+    assert downgraded.status_code == 403
+    assert matching.status_code == 200
 
 
 def test_fetch_metadata_wins_over_origin(tmp_path: Path) -> None:

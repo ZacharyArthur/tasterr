@@ -2,19 +2,28 @@
 # only the unknown-type rules rather than sprinkling casts.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 
+import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from tasterr.api.auth import AuthContext, get_auth_context
 from tasterr.auth.pins import PinStore
+from tasterr.auth.sessions import mint_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.plex import PlexAuthClient, PlexPin
 from tasterr.clients.seerr import SeerrAuthClient, SeerrLogin, SeerrUser
+from tasterr.db.engine import create_engine
+from tasterr.db.migrate import upgrade_to_head
+from tasterr.db.models import User, UserSession
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -30,12 +39,15 @@ class FakePlex:
         self.pin = PlexPin(id=123456, code="abcd1234efgh")
         self.token: str | None = None
         self.expired = False
+        self.delay = 0.0  # lets race tests widen the poll window
 
     async def create_pin(self) -> PlexPin:
         return self.pin
 
     async def poll_pin(self, pin_id: int) -> str | None:
         assert pin_id == self.pin.id
+        if self.delay:
+            await asyncio.sleep(self.delay)
         if self.expired:
             raise UpstreamRejected(404)
         return self.token
@@ -82,21 +94,22 @@ class Harness:
     pins: PinStore = field(default_factory=PinStore)
 
 
-def _harness(tmp_path: Path, *, configured: bool = True) -> Harness:
+def _harness(tmp_path: Path, *, configured: bool = True, with_secret: bool = True) -> Harness:
     overrides: dict[str, object] = {
         "database_path": tmp_path / "tasterr.db",
         "static_dir": tmp_path / "static",
     }
     if configured:
         overrides |= {
-            "tasterr_secret_key": SECRET,
             "seerr_internal_url": "http://seerr:5055",
             "seerr_api_key": "seerr-api-key",
         }
+        if with_secret:
+            overrides |= {"tasterr_secret_key": SECRET}
     harness = Harness(
         app=create_app(Settings.model_validate(overrides)), db_path=tmp_path / "tasterr.db"
     )
-    if configured:
+    if configured and with_secret:
         # Real get_auth_context still guards the unconfigured case (tested below).
         harness.app.dependency_overrides[get_auth_context] = lambda: AuthContext(
             secret_key=SECRET,
@@ -224,6 +237,37 @@ def test_plex_token_is_encrypted_at_rest(tmp_path: Path) -> None:
     assert SEERR_COOKIE.encode() in raw  # stored verbatim per SPEC §5, server-side only
 
 
+async def test_concurrent_claimed_polls_mint_exactly_one_session(tmp_path: Path) -> None:
+    """Overlapping polls on a claimed PIN: one wins the handle, one gets the
+    generic 404, and only a single session row exists afterwards."""
+    harness = _harness(tmp_path)
+    harness.plex.delay = 0.02  # both polls pass the peek before either can claim
+    app = harness.app
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            created = await client.post("/api/v1/auth/plex/pin")
+            handle = created.json()["pin_id"]
+            harness.plex.token = PLEX_TOKEN
+
+            first, second = await asyncio.gather(
+                client.get(f"/api/v1/auth/plex/pin/{handle}"),
+                client.get(f"/api/v1/auth/plex/pin/{handle}"),
+            )
+
+    assert sorted([first.status_code, second.status_code]) == [200, 404]
+
+    engine = create_engine(harness.db_path)
+    try:
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with maker() as db:
+            count = (await db.execute(select(func.count()).select_from(UserSession))).scalar_one()
+    finally:
+        await engine.dispose()
+    assert count == 1
+
+
 # --- Local login (4.3) ---
 
 
@@ -238,6 +282,8 @@ def test_local_login_mints_session(tmp_path: Path) -> None:
         assert response.status_code == 200
         assert response.json()["display_name"] == "Viewer"
         assert "tasterr_session=" in response.headers["set-cookie"]
+        assert SEERR_COOKIE not in response.text
+        assert "connect.sid" not in response.headers.get("set-cookie", "")
         assert client.get("/api/v1/auth/me").status_code == 200
 
 
@@ -316,6 +362,45 @@ def test_admin_requires_permission_bit_two(tmp_path: Path) -> None:
     assert response.json()["is_admin"] is False
 
 
+def _read_last_login(db_path: Path) -> datetime:
+    async def _run() -> datetime:
+        engine = create_engine(db_path)
+        try:
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as db:
+                return (await db.execute(select(User.last_login_at))).scalar_one()
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def test_repeat_login_refreshes_last_login_at(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    payload = {"email": "a@b.c", "password": "hunter2-password-sentinel"}
+    with TestClient(harness.app) as client:
+        client.post("/api/v1/auth/local", json=payload)
+        first = _read_last_login(harness.db_path)
+        client.post("/api/v1/auth/local", json=payload)
+        second = _read_last_login(harness.db_path)
+
+    assert second > first
+
+
+def test_relogin_with_existing_cookie_rotates_the_token(tmp_path: Path) -> None:
+    """No fixation: presenting a live session cookie at login still mints fresh."""
+    harness = _harness(tmp_path)
+    payload = {"email": "a@b.c", "password": "hunter2-password-sentinel"}
+    with TestClient(harness.app) as client:
+        client.post("/api/v1/auth/local", json=payload)
+        first = client.cookies.get("tasterr_session")
+        client.post("/api/v1/auth/local", json=payload)  # old cookie rides along
+        second = client.cookies.get("tasterr_session")
+
+    assert first is not None and second is not None
+    assert first != second
+
+
 # --- Me + logout (4.5) ---
 
 
@@ -372,6 +457,48 @@ def test_unconfigured_auth_returns_generic_503(tmp_path: Path) -> None:
     assert pin.status_code == local.status_code == 503
     assert pin.json() == {"detail": "Authentication unavailable"}
     assert health.status_code == 200
+
+
+def test_missing_secret_key_alone_disables_auth(tmp_path: Path) -> None:
+    harness = _harness(tmp_path, with_secret=False)  # Seerr configured, key absent
+    with TestClient(harness.app) as client:
+        response = client.post("/api/v1/auth/local", json={"email": "a@b.c", "password": "x"})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Authentication unavailable"}
+
+
+def _seed_session_token(db_path: Path) -> str:
+    async def _run() -> str:
+        engine = create_engine(db_path)
+        try:
+            await upgrade_to_head(engine)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as db:
+                user = User(
+                    seerr_user_id=99,
+                    display_name="Seeded",
+                    avatar_url=None,
+                    auth_type="local",
+                    is_admin=False,
+                )
+                db.add(user)
+                await db.flush()
+                return await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def test_me_and_logout_still_work_while_auth_unconfigured(tmp_path: Path) -> None:
+    """Degradation contract: existing sessions outlive a lost Seerr config."""
+    harness = _harness(tmp_path, configured=False)
+    token = _seed_session_token(harness.db_path)
+    with TestClient(harness.app) as client:
+        client.cookies.set("tasterr_session", token)
+        assert client.get("/api/v1/auth/me").status_code == 200
+        assert client.post("/api/v1/auth/logout").status_code == 204
 
 
 def test_seerr_down_is_generic_502_and_health_still_up(tmp_path: Path) -> None:

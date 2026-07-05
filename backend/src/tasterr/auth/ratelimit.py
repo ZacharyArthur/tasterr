@@ -36,6 +36,12 @@ class TokenBucket:
         if bucket is None:
             if len(self._buckets) >= self._max_keys:
                 self._prune(now)
+            if len(self._buckets) >= self._max_keys:
+                # Still full after pruning: a unique-key flood. Fail closed for
+                # new keys rather than resetting existing buckets — clearing
+                # would hand every exhausted offender a fresh allowance. Real
+                # exposure is gated on M6's forwarded-header trust decision.
+                return False
             bucket = _Bucket(tokens=self._capacity, updated=now)
             self._buckets[key] = bucket
         else:
@@ -52,6 +58,3 @@ class TokenBucket:
         full_after = self._capacity / self._refill if self._refill > 0 else 0.0
         for key in [k for k, b in self._buckets.items() if now - b.updated >= full_after]:
             del self._buckets[key]
-        if len(self._buckets) >= self._max_keys:
-            # Pathological flood: reset rather than grow without bound.
-            self._buckets.clear()

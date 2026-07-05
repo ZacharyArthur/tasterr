@@ -73,9 +73,8 @@ async def test_resolve_round_trip(db: AsyncSession) -> None:
     resolved = await resolve_session(db, token)
 
     assert resolved is not None
-    session, resolved_user = resolved
-    assert resolved_user.id == user.id
-    assert session.seerr_cookie == "connect.sid=s%3Aabc"
+    assert resolved.user.id == user.id
+    assert resolved.session.seerr_cookie == "connect.sid=s%3Aabc"
 
 
 async def test_unknown_token_resolves_to_none(db: AsyncSession) -> None:
@@ -107,9 +106,9 @@ async def test_activity_slides_expiry_after_threshold(db: AsyncSession) -> None:
     resolved = await resolve_session(db, token)
 
     assert resolved is not None
-    session, _ = resolved
-    assert session.last_seen_at > stale
-    assert session.expires_at > utcnow() + SESSION_TTL - timedelta(hours=1)
+    assert resolved.slid is True
+    assert resolved.session.last_seen_at > stale
+    assert resolved.session.expires_at > utcnow() + SESSION_TTL - timedelta(hours=1)
 
 
 async def test_slide_is_throttled_below_threshold(db: AsyncSession) -> None:
@@ -125,9 +124,9 @@ async def test_slide_is_throttled_below_threshold(db: AsyncSession) -> None:
     resolved = await resolve_session(db, token)
 
     assert resolved is not None
-    session, _ = resolved
-    assert session.last_seen_at == recent
-    assert session.expires_at == expires
+    assert resolved.slid is False
+    assert resolved.session.last_seen_at == recent
+    assert resolved.session.expires_at == expires
 
 
 async def test_every_login_mints_a_fresh_token(db: AsyncSession) -> None:
@@ -146,7 +145,7 @@ async def test_revoke_deletes_the_row(db: AsyncSession) -> None:
     resolved = await resolve_session(db, token)
     assert resolved is not None
 
-    await revoke_session(db, resolved[0])
+    await revoke_session(db, resolved.session)
 
     assert await resolve_session(db, token) is None
 

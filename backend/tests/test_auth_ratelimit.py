@@ -63,3 +63,18 @@ def test_key_count_stays_bounded() -> None:
         clock.advance(10.0)  # each earlier bucket fully refills, so it gets pruned
 
     assert len(bucket._buckets) <= 8  # pyright: ignore[reportPrivateUsage]
+
+
+def test_unique_key_flood_fails_closed_and_preserves_state() -> None:
+    clock = FakeClock()
+    bucket = TokenBucket(capacity=1, refill_per_second=1.0, clock=clock, max_keys=8)
+    assert bucket.allow("victim")
+    assert not bucket.allow("victim")  # exhausted before the flood
+
+    results = [bucket.allow(f"bot-{i}") for i in range(20)]
+
+    # 7 slots remain after the victim's; every later new key is denied outright
+    assert results[:7] == [True] * 7
+    assert results[7:] == [False] * 13
+    # Crucially, the flood never reset the victim's exhausted bucket.
+    assert not bucket.allow("victim")
