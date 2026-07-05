@@ -42,6 +42,10 @@ def _probe_app(tmp_path: Path) -> FastAPI:
     def probe_mutate() -> dict[str, bool]:
         return {"ok": True}
 
+    @router.get("/api/v1/probe/boom")
+    def probe_boom(_: Annotated[AuthedSession, Depends(require_session)]) -> dict[str, bool]:
+        raise RuntimeError("unhandled crash after auth")
+
     app.include_router(router)
     return app
 
@@ -154,6 +158,23 @@ def test_stale_session_refresh_survives_error_responses(tmp_path: Path) -> None:
         response = client.get("/api/v1/probe/admin")
 
     assert response.status_code == 403
+    header = response.headers["set-cookie"]
+    assert header.startswith(f"{COOKIE_NAME}={token}")
+    assert "max-age=2592000" in header.lower()
+
+
+def test_stale_session_refresh_survives_unhandled_500(tmp_path: Path) -> None:
+    """Even a crash response carries the refresh: SessionCookieSlide wraps
+    outside the server-error boundary, so ServerErrorMiddleware's fabricated
+    500 still flows through it."""
+    app = _probe_app(tmp_path)
+    token = _seed_session(tmp_path, stale=True)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        client.cookies.set(COOKIE_NAME, token)
+        response = client.get("/api/v1/probe/boom")
+
+    assert response.status_code == 500
     header = response.headers["set-cookie"]
     assert header.startswith(f"{COOKIE_NAME}={token}")
     assert "max-age=2592000" in header.lower()

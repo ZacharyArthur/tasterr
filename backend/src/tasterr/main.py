@@ -45,7 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # OpenAPI/docs are not served: the schema is dumped offline for typegen
     # (`just types`), and no browser needs it (default-deny).
-    app = FastAPI(
+    app = Tasterr(
         title="Tasterr",
         lifespan=lifespan,
         openapi_url=None,
@@ -60,18 +60,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
     app.add_middleware(SpaFallback, static_dir=app_settings.static_dir)
-    app.add_middleware(SessionCookieSlide)
     return app
+
+
+class Tasterr(FastAPI):
+    """FastAPI with SessionCookieSlide wrapped around the *entire* middleware
+    stack. Ordinary `add_middleware` would place it inside Starlette's
+    outermost ServerErrorMiddleware, whose fabricated unhandled-500 responses
+    would then bypass the cookie refresh."""
+
+    def build_middleware_stack(self) -> ASGIApp:
+        return SessionCookieSlide(super().build_middleware_stack())
 
 
 class SessionCookieSlide:
     """Re-issue the sliding session cookie on the way out, whatever the status.
 
     require_session flags the refresh on request.state; writing the header
-    here instead of in the dependency means error responses (an admin gate's
-    403) still slide, and any response that sets the session cookie itself
-    (login's fresh token, logout's deletion) wins outright — the same cookie
-    name is never sent twice (RFC 6265).
+    here instead of in the dependency means every error response — an admin
+    gate's 403 up to and including an unhandled 500 — still slides, and any
+    response that sets the session cookie itself (login's fresh token,
+    logout's deletion) wins outright — the same cookie name is never sent
+    twice (RFC 6265).
     """
 
     def __init__(self, app: ASGIApp) -> None:
