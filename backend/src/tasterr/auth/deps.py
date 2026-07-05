@@ -1,0 +1,63 @@
+"""Request dependencies: DB session, current user (default-deny), admin, CSRF origin."""
+
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+from typing import Annotated, cast
+from urllib.parse import urlsplit
+
+from fastapi import Depends, HTTPException, Request
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from tasterr.auth.cookies import COOKIE_NAME
+from tasterr.auth.sessions import resolve_session
+from tasterr.db.models import User, UserSession
+
+
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession]:
+    maker = cast("async_sessionmaker[AsyncSession]", request.app.state.sessionmaker)
+    async with maker() as db:
+        yield db
+
+
+@dataclass
+class AuthedSession:
+    user: User
+    session: UserSession
+
+
+async def require_session(
+    request: Request, db: Annotated[AsyncSession, Depends(get_db)]
+) -> AuthedSession:
+    token = request.cookies.get(COOKIE_NAME)
+    if token is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    resolved = await resolve_session(db, token)
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    session, user = resolved
+    return AuthedSession(user=user, session=session)
+
+
+async def require_admin(
+    authed: Annotated[AuthedSession, Depends(require_session)],
+) -> AuthedSession:
+    if not authed.user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin required")
+    return authed
+
+
+def require_same_origin(request: Request) -> None:
+    """CSRF guard for mutations (SPEC §9). Browsers always send fetch metadata
+    (or at least Origin); requests carrying neither are non-browser clients and
+    pass — CSRF is a browser attack. SameSite=Lax is the independent second layer.
+    """
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        if site in ("same-origin", "none"):
+            return
+        raise HTTPException(status_code=403, detail="Cross-origin request rejected")
+    origin = request.headers.get("origin")
+    if origin is not None:
+        host = request.headers.get("host", "")
+        if urlsplit(origin).netloc.lower() != host.lower():
+            raise HTTPException(status_code=403, detail="Cross-origin request rejected")

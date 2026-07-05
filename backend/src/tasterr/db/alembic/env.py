@@ -4,10 +4,11 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import Connection, engine_from_config, pool
 
+from tasterr.db.models import Base
+
 config = context.config
 
-# Model metadata for autogenerate; populated once ORM models exist.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

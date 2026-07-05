@@ -35,11 +35,18 @@ any non-`/api` path, while unknown `/api/v1/*` paths return a JSON 404.
 - **WHEN** a client requests an undefined `/api/v1/*` path
 - **THEN** the backend responds 404 with a JSON body, not `index.html`
 
-### Requirement: Hello-world SPA calls the API through the typed client
-The frontend SHALL render a minimal page that fetches `/api/v1/health` through the
-OpenAPI-generated client via TanStack Query and displays the result.
+### Requirement: SPA shell is auth-gated
+The SPA SHALL resolve auth state from `GET /api/v1/auth/me` on load.
+Unauthenticated visitors see the login screen; authenticated users see the app
+shell, which displays the current user and the backend health fetched through the
+OpenAPI-generated typed client via TanStack Query.
 
-#### Scenario: SPA shows backend health
-- **WHEN** the SPA loads with the backend running
-- **THEN** it displays the health status returned by `/api/v1/health`
+#### Scenario: Unauthenticated visitor
+- **WHEN** the SPA loads and `/api/v1/auth/me` returns 401
+- **THEN** the login screen is shown and no authenticated content renders
+
+#### Scenario: Authenticated user sees the shell
+- **WHEN** the SPA loads with a valid session
+- **THEN** it shows the authenticated shell with the current user's display name
+  and the health status returned by `/api/v1/health`
 

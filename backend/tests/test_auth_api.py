@@ -1,0 +1,466 @@
+# starlette's TestClient ships partially-unknown method annotations; relax
+# only the unknown-type rules rather than sprinkling casts.
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import cast
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tasterr.api.auth import AuthContext, get_auth_context
+from tasterr.auth.pins import PinStore
+from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.plex import PlexAuthClient, PlexPin
+from tasterr.clients.seerr import SeerrAuthClient, SeerrLogin, SeerrUser
+from tasterr.main import create_app
+from tasterr.settings import Settings
+
+SECRET = "test-secret-key"
+PLEX_TOKEN = "plex-auth-token-sentinel"
+SEERR_COOKIE = "connect.sid=s%3Aseerr-cookie-sentinel"
+
+
+class FakePlex:
+    """Same surface as PlexAuthClient; `token` simulates the user approving."""
+
+    def __init__(self) -> None:
+        self.pin = PlexPin(id=123456, code="abcd1234efgh")
+        self.token: str | None = None
+        self.expired = False
+
+    async def create_pin(self) -> PlexPin:
+        return self.pin
+
+    async def poll_pin(self, pin_id: int) -> str | None:
+        assert pin_id == self.pin.id
+        if self.expired:
+            raise UpstreamRejected(404)
+        return self.token
+
+    def auth_url(self, code: str) -> str:
+        return f"https://app.plex.tv/auth#?clientID=test&code={code}"
+
+
+class FakeSeerr:
+    def __init__(self) -> None:
+        self.user = SeerrUser.model_validate(
+            {"id": 7, "displayName": "Viewer", "avatar": "https://a/b.png", "permissions": 2}
+        )
+        self.accepted = {("a@b.c", "hunter2-password-sentinel")}
+        self.down = False
+        self.login_calls = 0
+
+    def _login(self) -> SeerrLogin:
+        return SeerrLogin(user=self.user, cookie=SEERR_COOKIE)
+
+    async def login_plex(self, auth_token: str) -> SeerrLogin:
+        self.login_calls += 1
+        if self.down:
+            raise UpstreamUnavailable("seerr down")
+        if auth_token != PLEX_TOKEN:
+            raise UpstreamRejected(403)
+        return self._login()
+
+    async def login_local(self, email: str, password: str) -> SeerrLogin:
+        self.login_calls += 1
+        if self.down:
+            raise UpstreamUnavailable("seerr down")
+        if (email, password) not in self.accepted:
+            raise UpstreamRejected(403)
+        return self._login()
+
+
+@dataclass
+class Harness:
+    app: FastAPI
+    db_path: Path
+    plex: FakePlex = field(default_factory=FakePlex)
+    seerr: FakeSeerr = field(default_factory=FakeSeerr)
+    pins: PinStore = field(default_factory=PinStore)
+
+
+def _harness(tmp_path: Path, *, configured: bool = True) -> Harness:
+    overrides: dict[str, object] = {
+        "database_path": tmp_path / "tasterr.db",
+        "static_dir": tmp_path / "static",
+    }
+    if configured:
+        overrides |= {
+            "tasterr_secret_key": SECRET,
+            "seerr_internal_url": "http://seerr:5055",
+            "seerr_api_key": "seerr-api-key",
+        }
+    harness = Harness(
+        app=create_app(Settings.model_validate(overrides)), db_path=tmp_path / "tasterr.db"
+    )
+    if configured:
+        # Real get_auth_context still guards the unconfigured case (tested below).
+        harness.app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+            secret_key=SECRET,
+            plex=cast(PlexAuthClient, harness.plex),
+            seerr=cast(SeerrAuthClient, harness.seerr),
+            pins=harness.pins,
+        )
+    return harness
+
+
+def _start_pin_login(client: TestClient) -> str:
+    response = client.post("/api/v1/auth/plex/pin")
+    assert response.status_code == 200
+    return response.json()["pin_id"]
+
+
+# --- Plex PIN flow (4.2) ---
+
+
+def test_create_pin_returns_opaque_handle_and_auth_url(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        response = client.post("/api/v1/auth/plex/pin")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["auth_url"].startswith("https://app.plex.tv/auth#?")
+    assert body["pin_id"] != "123456"
+    assert "123456" not in response.text  # raw plex.tv PIN id never leaves the server
+
+
+def test_poll_pending_sets_no_cookie(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        response = client.get(f"/api/v1/auth/plex/pin/{handle}")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "pending", "user": None}
+    assert "set-cookie" not in response.headers
+
+
+def test_poll_after_approval_logs_in(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+
+        response = client.get(f"/api/v1/auth/plex/pin/{handle}")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["user"] == {
+            "id": 1,
+            "display_name": "Viewer",
+            "avatar_url": "https://a/b.png",
+            "is_admin": True,
+        }
+        assert "tasterr_session=" in response.headers["set-cookie"]
+        assert PLEX_TOKEN not in response.text
+        assert SEERR_COOKIE not in response.text
+
+        me = client.get("/api/v1/auth/me")
+        assert me.status_code == 200
+        assert me.json()["display_name"] == "Viewer"
+
+
+def test_handle_is_single_use_after_login(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        assert client.get(f"/api/v1/auth/plex/pin/{handle}").status_code == 200
+
+        replay = client.get(f"/api/v1/auth/plex/pin/{handle}")
+
+    assert replay.status_code == 404
+
+
+def test_poll_unknown_handle_is_generic_404(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        response = client.get("/api/v1/auth/plex/pin/no-such-handle")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Unknown or expired sign-in attempt"}
+
+
+def test_poll_expired_plex_pin_is_404_and_consumed(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.expired = True
+
+        first = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        harness.plex.expired = False
+        second = client.get(f"/api/v1/auth/plex/pin/{handle}")
+
+    assert first.status_code == 404
+    assert second.status_code == 404  # consumed on expiry, not retryable
+
+
+def test_seerr_rejecting_plex_account_is_generic_401(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = "some-token-seerr-refuses"
+
+        response = client.get(f"/api/v1/auth/plex/pin/{handle}")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Sign-in failed"}
+
+
+def test_plex_token_is_encrypted_at_rest(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        assert client.get(f"/api/v1/auth/plex/pin/{handle}").status_code == 200
+
+    raw = harness.db_path.read_bytes()
+    assert PLEX_TOKEN.encode() not in raw  # Fernet ciphertext only
+    assert SEERR_COOKIE.encode() in raw  # stored verbatim per SPEC §5, server-side only
+
+
+# --- Local login (4.3) ---
+
+
+def test_local_login_mints_session(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        response = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["display_name"] == "Viewer"
+        assert "tasterr_session=" in response.headers["set-cookie"]
+        assert client.get("/api/v1/auth/me").status_code == 200
+
+
+def test_local_login_failures_are_indistinguishable(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        wrong_password = client.post(
+            "/api/v1/auth/local", json={"email": "a@b.c", "password": "wrong"}
+        )
+        unknown_account = client.post(
+            "/api/v1/auth/local", json={"email": "nobody@b.c", "password": "wrong"}
+        )
+
+    assert wrong_password.status_code == unknown_account.status_code == 401
+    assert (
+        wrong_password.json() == unknown_account.json() == {"detail": "Invalid email or password"}
+    )
+
+
+def test_credentials_never_persisted_or_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    harness = _harness(tmp_path)
+    with caplog.at_level("DEBUG"), TestClient(harness.app) as client:
+        client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+
+    assert "hunter2-password-sentinel" not in caplog.text
+    assert b"hunter2-password-sentinel" not in harness.db_path.read_bytes()
+
+
+# --- User upsert + admin derivation (4.4) ---
+
+
+def test_repeat_login_updates_user_in_place(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        first = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+        assert first.json() == {
+            "id": 1,
+            "display_name": "Viewer",
+            "avatar_url": "https://a/b.png",
+            "is_admin": True,
+        }
+
+        harness.seerr.user.display_name = "Renamed"
+        harness.seerr.user.permissions = 0  # admin revoked in Seerr
+
+        second = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+
+    assert second.json() == {
+        "id": 1,  # same row, not a duplicate
+        "display_name": "Renamed",
+        "avatar_url": "https://a/b.png",
+        "is_admin": False,
+    }
+
+
+def test_admin_requires_permission_bit_two(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    harness.seerr.user.permissions = 4  # some other permission bit
+    with TestClient(harness.app) as client:
+        response = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+
+    assert response.json()["is_admin"] is False
+
+
+# --- Me + logout (4.5) ---
+
+
+def test_me_without_session_is_401(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_me_makes_no_seerr_calls(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+        calls_after_login = harness.seerr.login_calls
+
+        for _ in range(3):
+            assert client.get("/api/v1/auth/me").status_code == 200
+
+    assert harness.seerr.login_calls == calls_after_login
+
+
+def test_logout_revokes_server_side(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+        session_cookie = client.cookies.get("tasterr_session")
+        assert session_cookie is not None
+
+        logout = client.post("/api/v1/auth/logout")
+        assert logout.status_code == 204
+        assert "max-age=0" in logout.headers["set-cookie"].lower()
+
+        # Replaying the revoked cookie must fail server-side.
+        client.cookies.set("tasterr_session", session_cookie)
+        assert client.get("/api/v1/auth/me").status_code == 401
+
+
+# --- Unconfigured / degraded (4.6) ---
+
+
+def test_unconfigured_auth_returns_generic_503(tmp_path: Path) -> None:
+    harness = _harness(tmp_path, configured=False)
+    with TestClient(harness.app) as client:
+        pin = client.post("/api/v1/auth/plex/pin")
+        local = client.post("/api/v1/auth/local", json={"email": "a", "password": "b"})
+        health = client.get("/api/v1/health")
+
+    assert pin.status_code == local.status_code == 503
+    assert pin.json() == {"detail": "Authentication unavailable"}
+    assert health.status_code == 200
+
+
+def test_seerr_down_is_generic_502_and_health_still_up(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    harness.seerr.down = True
+    with TestClient(harness.app) as client:
+        response = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+        health = client.get("/api/v1/health")
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Sign-in service unavailable"}
+    assert "seerr" not in response.text.lower() or "Sign-in" in response.text
+    assert health.status_code == 200
+
+
+# --- Session-gated /config (4.7) ---
+
+
+def test_config_requires_session(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        assert client.get("/api/v1/config").status_code == 401
+
+
+def test_config_serves_public_projection_without_secrets(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    assert response.json() == {"tmdb_configured": False, "seerr_configured": True}
+    assert SECRET not in response.text
+    assert "seerr:5055" not in response.text
+
+
+# --- Hardening wiring (4.8) ---
+
+
+def test_cross_origin_login_rejected_before_seerr_call(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        response = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+            headers={"Sec-Fetch-Site": "cross-site"},
+        )
+
+    assert response.status_code == 403
+    assert harness.seerr.login_calls == 0
+
+
+def test_login_burst_hits_rate_limit(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        statuses = [
+            client.post(
+                "/api/v1/auth/local", json={"email": "a@b.c", "password": "wrong"}
+            ).status_code
+            for _ in range(12)
+        ]
+
+    assert statuses[:10] == [401] * 10
+    assert statuses[10:] == [429, 429]
+
+
+def test_pin_polling_is_exempt_from_login_bucket(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        statuses = {client.get(f"/api/v1/auth/plex/pin/{handle}").status_code for _ in range(25)}
+
+    assert statuses == {200}
+
+
+def test_session_cookie_secure_follows_scheme(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    payload = {"email": "a@b.c", "password": "hunter2-password-sentinel"}
+
+    with TestClient(harness.app, base_url="http://testserver") as client:
+        plain = client.post("/api/v1/auth/local", json=payload)
+    with TestClient(harness.app, base_url="https://testserver") as client:
+        secure = client.post("/api/v1/auth/local", json=payload)
+
+    assert "secure" not in plain.headers["set-cookie"].lower()
+    assert "secure" in secure.headers["set-cookie"].lower()

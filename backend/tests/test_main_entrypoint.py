@@ -26,3 +26,4 @@ def test_main_binds_uvicorn_from_settings(monkeypatch: pytest.MonkeyPatch) -> No
     assert captured["factory"] is True
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 9000
+    assert captured["proxy_headers"] is True

@@ -1,14 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { HealthResponse } from "../lib/api";
+import type { HealthResponse, User } from "../lib/api";
 import { Home } from "./Home";
 
 afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-test("renders backend health from /api/v1/health", async () => {
+const USER: User = {
+	id: 1,
+	display_name: "Viewer",
+	avatar_url: null,
+	is_admin: false,
+};
+
+test("renders the signed-in user and backend health", async () => {
 	const body = {
 		status: "ok",
 		tmdb_configured: true,
@@ -27,12 +34,14 @@ test("renders backend health from /api/v1/health", async () => {
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<Home />
+			<Home user={USER} />
 		</QueryClientProvider>,
 	);
 
 	expect(await screen.findByText("ok")).toBeTruthy();
+	expect(screen.getByText("Viewer")).toBeTruthy();
 	expect(screen.getByText("configured")).toBeTruthy();
 	expect(screen.getByText("not configured")).toBeTruthy();
-	expect(fetchMock).toHaveBeenCalledWith("/api/v1/health");
+	expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+	expect(fetchMock).toHaveBeenCalledWith("/api/v1/health", undefined);
 });

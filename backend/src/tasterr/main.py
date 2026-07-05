@@ -6,9 +6,15 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, Response
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from tasterr.api.auth import router as auth_router
 from tasterr.api.meta import router as meta_router
+from tasterr.auth.pins import PinStore
+from tasterr.auth.ratelimit import TokenBucket
+from tasterr.auth.sessions import sweep_expired
+from tasterr.clients.http import create_http_client
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.settings import Settings, get_settings
@@ -21,10 +27,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(started_app: FastAPI) -> AsyncGenerator[None]:
         engine = create_engine(app_settings.database_path)
         started_app.state.engine = engine
+        http = create_http_client()
+        started_app.state.http = http
         try:
             await upgrade_to_head(engine)
+            sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+            started_app.state.sessionmaker = sessionmaker
+            async with sessionmaker() as db:
+                await sweep_expired(db)
             yield
         finally:
+            await http.aclose()
             await engine.dispose()
 
     # OpenAPI/docs are not served: the schema is dumped offline for typegen
@@ -39,6 +52,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.dependency_overrides[get_settings] = lambda: app_settings
 
     app.include_router(meta_router, prefix="/api/v1")
+    app.include_router(auth_router, prefix="/api/v1")
+    app.state.pin_store = PinStore()
+    # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
+    app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
     app.add_middleware(SpaFallback, static_dir=app_settings.static_dir)
     return app
 

@@ -22,6 +22,11 @@ types:
     cd backend && uv run python scripts/dump_openapi.py ../frontend/openapi.json
     cd frontend && npx openapi-typescript openapi.json -o src/lib/api.gen.ts
 
+# Live Seerr contract tests (excluded from `check`): set TASTERR_LIVE_SEERR_URL,
+# TASTERR_LIVE_SEERR_EMAIL, TASTERR_LIVE_SEERR_PASSWORD in the environment first.
+test-live:
+    cd backend && uv run pytest -m live -s
+
 # Dependency audit — advisory, not part of `check`. The `-` keeps a backend
 # advisory from hiding the frontend report.
 audit:
