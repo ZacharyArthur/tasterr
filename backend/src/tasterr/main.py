@@ -3,14 +3,17 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tasterr.api.auth import router as auth_router
 from tasterr.api.meta import router as meta_router
+from tasterr.auth.cookies import COOKIE_NAME, session_cookie_header
 from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import sweep_expired
@@ -57,7 +60,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
     app.add_middleware(SpaFallback, static_dir=app_settings.static_dir)
+    app.add_middleware(SessionCookieSlide)
     return app
+
+
+class SessionCookieSlide:
+    """Re-issue the sliding session cookie on the way out, whatever the status.
+
+    require_session flags the refresh on request.state; writing the header
+    here instead of in the dependency means error responses (an admin gate's
+    403) still slide, and any response that sets the session cookie itself
+    (login's fresh token, logout's deletion) wins outright — the same cookie
+    name is never sent twice (RFC 6265).
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_refresh(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                token = cast("str | None", scope.get("state", {}).get("session_cookie_refresh"))
+                if token is not None:
+                    headers = MutableHeaders(scope=message)
+                    prefix = f"{COOKIE_NAME}="
+                    if not any(v.startswith(prefix) for v in headers.getlist("set-cookie")):
+                        headers.append(
+                            "set-cookie",
+                            session_cookie_header(token, secure=scope.get("scheme") == "https"),
+                        )
+            await send(message)
+
+        await self.app(scope, receive, send_with_refresh)
 
 
 class SpaFallback:

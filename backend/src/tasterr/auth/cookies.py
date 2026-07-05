@@ -32,3 +32,10 @@ def clear_session_cookie(response: Response, *, secure: bool) -> None:
         secure=secure,
         path="/",
     )
+
+
+def session_cookie_header(token: str, *, secure: bool) -> str:
+    """The full Set-Cookie header value, for code writing raw ASGI headers."""
+    response = Response()
+    set_session_cookie(response, token, secure=secure)
+    return response.headers["set-cookie"]

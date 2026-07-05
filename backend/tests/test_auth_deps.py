@@ -143,6 +143,22 @@ def test_stale_session_gets_a_refreshed_cookie(tmp_path: Path) -> None:
     assert "max-age=2592000" in header.lower()
 
 
+def test_stale_session_refresh_survives_error_responses(tmp_path: Path) -> None:
+    """A 403 from the admin gate must still carry the slid cookie refresh —
+    the DB slide and the browser cookie must never diverge."""
+    app = _probe_app(tmp_path)
+    token = _seed_session(tmp_path, stale=True)  # seeded non-admin
+
+    with TestClient(app) as client:
+        client.cookies.set(COOKIE_NAME, token)
+        response = client.get("/api/v1/probe/admin")
+
+    assert response.status_code == 403
+    header = response.headers["set-cookie"]
+    assert header.startswith(f"{COOKIE_NAME}={token}")
+    assert "max-age=2592000" in header.lower()
+
+
 def test_fresh_session_gets_no_cookie_churn(tmp_path: Path) -> None:
     app = _probe_app(tmp_path)
     token = _seed_session(tmp_path)

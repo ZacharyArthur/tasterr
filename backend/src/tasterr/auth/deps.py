@@ -4,10 +4,10 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Annotated, cast
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tasterr.auth.cookies import COOKIE_NAME, set_session_cookie
+from tasterr.auth.cookies import COOKIE_NAME
 from tasterr.auth.sessions import resolve_session
 from tasterr.db.models import User, UserSession
 
@@ -25,7 +25,7 @@ class AuthedSession:
 
 
 async def require_session(
-    request: Request, response: Response, db: Annotated[AsyncSession, Depends(get_db)]
+    request: Request, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> AuthedSession:
     token = request.cookies.get(COOKIE_NAME)
     if token is None:
@@ -34,9 +34,12 @@ async def require_session(
     if resolved is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if resolved.slid:
-        # The server-side window slid; re-issue the cookie so its Max-Age
-        # slides too — otherwise the browser drops it 30 days after login.
-        set_session_cookie(response, token, secure=request.url.scheme == "https")
+        # The server-side window slid, so the cookie's Max-Age must slide too.
+        # Flagged for the SessionCookieSlide middleware rather than written
+        # here: FastAPI drops dependency-set headers on error responses (an
+        # admin gate's 403 must still refresh), and login/logout responses
+        # that set the cookie themselves must win without duplicate headers.
+        request.state.session_cookie_refresh = token
     return AuthedSession(user=resolved.user, session=resolved.session)
 
 

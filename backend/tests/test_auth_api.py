@@ -1,10 +1,11 @@
 # starlette's TestClient ships partially-unknown method annotations; relax
 # only the unknown-type rules rather than sprinkling casts.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportUnknownArgumentType=false
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -23,7 +24,7 @@ from tasterr.clients.plex import PlexAuthClient, PlexPin
 from tasterr.clients.seerr import SeerrAuthClient, SeerrLogin, SeerrUser
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User, UserSession
+from tasterr.db.models import User, UserSession, utcnow
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -468,7 +469,7 @@ def test_missing_secret_key_alone_disables_auth(tmp_path: Path) -> None:
     assert response.json() == {"detail": "Authentication unavailable"}
 
 
-def _seed_session_token(db_path: Path) -> str:
+def _seed_session_token(db_path: Path, *, stale: bool = False) -> str:
     async def _run() -> str:
         engine = create_engine(db_path)
         try:
@@ -484,11 +485,33 @@ def _seed_session_token(db_path: Path) -> str:
                 )
                 db.add(user)
                 await db.flush()
-                return await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+                token = await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+                if stale:
+                    row = (await db.execute(select(UserSession))).scalar_one()
+                    row.last_seen_at = utcnow() - timedelta(hours=2)
+                    await db.commit()
+                return token
         finally:
             await engine.dispose()
 
     return asyncio.run(_run())
+
+
+def test_stale_logout_clears_with_a_single_cookie_header(tmp_path: Path) -> None:
+    """Logout's deletion must be the only Set-Cookie — never paired with a
+    sliding refresh for the same name (RFC 6265: duplicate names are
+    unreliable client-side)."""
+    harness = _harness(tmp_path)
+    token = _seed_session_token(harness.db_path, stale=True)
+
+    with TestClient(harness.app) as client:
+        client.cookies.set("tasterr_session", token)
+        response = client.post("/api/v1/auth/logout")
+
+    assert response.status_code == 204
+    cookie_headers: list[str] = response.headers.get_list("set-cookie")
+    assert len(cookie_headers) == 1
+    assert "max-age=0" in cookie_headers[0].lower()
 
 
 def test_me_and_logout_still_work_while_auth_unconfigured(tmp_path: Path) -> None:
