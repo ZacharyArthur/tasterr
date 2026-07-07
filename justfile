@@ -2,7 +2,7 @@
 set windows-shell := ["cmd.exe", "/c"]
 
 # Full quality gate — identical for humans, agents, and CI.
-check: check-backend check-frontend
+check: check-backend check-types-fresh check-frontend
 
 check-backend:
     cd backend && uv run ruff check .
@@ -21,6 +21,14 @@ check-frontend:
 types:
     cd backend && uv run python scripts/dump_openapi.py ../frontend/openapi.json
     cd frontend && npx openapi-typescript openapi.json -o src/lib/api.gen.ts
+
+# Fail the gate if the committed generated API types have drifted from the schema.
+# Regenerates to a scratch file and diffs — no git, so it works the same in the
+# devcontainer (bind-mounted repo) and in CI.
+check-types-fresh:
+    cd backend && uv run python scripts/dump_openapi.py ../frontend/openapi.json
+    cd frontend && npx openapi-typescript openapi.json -o src/lib/api.gen.ts.check
+    cd frontend && { diff -u src/lib/api.gen.ts src/lib/api.gen.ts.check; rc=$?; rm -f src/lib/api.gen.ts.check; exit $rc; }
 
 # Live Seerr contract tests (excluded from `check`): set TASTERR_LIVE_SEERR_URL,
 # TASTERR_LIVE_SEERR_EMAIL, TASTERR_LIVE_SEERR_PASSWORD (and optionally

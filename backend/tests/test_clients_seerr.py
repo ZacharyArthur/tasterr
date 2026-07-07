@@ -79,6 +79,20 @@ async def test_timeout_is_unavailable() -> None:
         await _client(handler).login_plex("plex-token")
 
 
+async def test_transport_error_drops_cause_and_url() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    with pytest.raises(UpstreamUnavailable) as excinfo:
+        await _client(handler).login_plex("plex-token")
+
+    # The internal Seerr URL rides in the request the httpx error carries; the
+    # fixed message and dropped __cause__ keep it out of both the message and the
+    # exception chain an error tracker would capture.
+    assert BASE_URL not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
+
+
 async def test_missing_session_cookie_is_unavailable() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=USER_FIXTURE)  # no Set-Cookie

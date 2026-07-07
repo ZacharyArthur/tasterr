@@ -1,52 +1,77 @@
-import { useQuery } from "@tanstack/react-query";
-import { getHealth, type User } from "../lib/api";
-import { useLogout } from "../lib/auth";
+import { useEffect, useRef } from "react";
+import { Hero } from "../components/Hero";
+import { Rail } from "../components/Rail";
+import { useHome, useRails } from "../lib/browse";
 
-export function Home({ user }: { user: User }) {
-	const health = useQuery({ queryKey: ["health"], queryFn: getHealth });
-	const logout = useLogout();
+export function Home() {
+	const home = useHome();
+	const rails = useRails();
+	const sentinel = useRef<HTMLDivElement>(null);
 
+	const { hasNextPage, isFetchingNextPage, fetchNextPage } = rails;
+	useEffect(() => {
+		const node = sentinel.current;
+		if (!node) {
+			return;
+		}
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+					void fetchNextPage();
+				}
+			},
+			{ rootMargin: "600px" },
+		);
+		observer.observe(node);
+		return () => observer.disconnect();
+	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+	if (home.isPending) {
+		return <FeedSkeleton />;
+	}
+	if (home.isError) {
+		return (
+			<main className="p-8 text-red-400">Couldn't load your home feed.</main>
+		);
+	}
+
+	const extraRails = rails.data?.pages.flatMap((page) => page.rails) ?? [];
 	return (
-		<main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-100">
-			<h1 className="text-4xl font-bold tracking-tight">Tasterr</h1>
-			<p className="text-neutral-400">
-				Signed in as{" "}
-				<span className="font-medium text-neutral-200">
-					{user.display_name}
-				</span>
-			</p>
-			{health.isPending && (
-				<p className="text-neutral-400">Checking backend…</p>
+		<main className="flex flex-col gap-8 pb-16">
+			<Hero slides={home.data.hero} />
+			<div className="flex flex-col gap-8">
+				{home.data.rails.map((rail) => (
+					<Rail key={rail.id} rail={rail} />
+				))}
+				{extraRails.map((rail) => (
+					<Rail key={rail.id} rail={rail} />
+				))}
+			</div>
+			<div ref={sentinel} className="h-4" />
+			{isFetchingNextPage && (
+				<p className="px-4 text-neutral-500 sm:px-8">Loading more…</p>
 			)}
-			{health.isError && <p className="text-red-400">Backend unreachable</p>}
-			{health.isSuccess && (
-				<dl className="flex gap-6 text-sm text-neutral-400">
-					<div>
-						<dt className="font-medium text-neutral-200">Backend</dt>
-						<dd>{health.data.status}</dd>
+		</main>
+	);
+}
+
+function FeedSkeleton() {
+	return (
+		<main className="flex flex-col gap-8 pb-16" aria-busy="true">
+			<div className="h-[52vh] min-h-80 w-full motion-safe:animate-pulse bg-neutral-900" />
+			{[0, 1, 2].map((row) => (
+				<div key={row} className="flex flex-col gap-2">
+					<div className="mx-4 h-5 w-40 motion-safe:animate-pulse rounded bg-neutral-800 sm:mx-8" />
+					<div className="flex gap-3 px-4 sm:px-8">
+						{[0, 1, 2, 3, 4, 5].map((card) => (
+							<div
+								key={card}
+								className="aspect-[2/3] w-32 shrink-0 motion-safe:animate-pulse rounded-md bg-neutral-800 sm:w-40"
+							/>
+						))}
 					</div>
-					<div>
-						<dt className="font-medium text-neutral-200">TMDB</dt>
-						<dd>
-							{health.data.tmdb_configured ? "configured" : "not configured"}
-						</dd>
-					</div>
-					<div>
-						<dt className="font-medium text-neutral-200">Seerr</dt>
-						<dd>
-							{health.data.seerr_configured ? "configured" : "not configured"}
-						</dd>
-					</div>
-				</dl>
-			)}
-			<button
-				type="button"
-				onClick={() => logout.mutate()}
-				disabled={logout.isPending}
-				className="mt-4 rounded border border-neutral-700 px-4 py-2 text-sm text-neutral-300 transition-colors hover:bg-neutral-900 disabled:opacity-60"
-			>
-				Sign out
-			</button>
+				</div>
+			))}
 		</main>
 	);
 }

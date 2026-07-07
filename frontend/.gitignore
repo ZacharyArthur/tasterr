@@ -14,6 +14,8 @@ dist-ssr
 
 # intermediate schema dump; the generated src/lib/api.gen.ts IS committed
 openapi.json
+# scratch file the type-freshness gate check regenerates and diffs
+src/lib/api.gen.ts.check
 
 # Editor directories and files
 .vscode/*

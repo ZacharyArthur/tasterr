@@ -97,3 +97,26 @@ def test_exemption_is_top_level_only(tmp_path: Path) -> None:
     offenders = _offenders("httpx", exempt={Path("clients")}, src=tmp_path)
 
     assert offenders == [str(Path("catalog/clients/sneaky.py"))]
+
+
+def test_domain_models_do_not_import_settings() -> None:
+    """Response/domain layers (catalog/, rails/) never import secret settings
+    (SPEC §11); the api layer injects region/keys instead."""
+    offenders = [
+        f
+        for f in _offenders("tasterr.settings", exempt=set())
+        if f.startswith(("catalog", "rails"))
+    ]
+    assert offenders == [], f"settings imported by a domain/response-model module: {offenders}"
+
+
+def test_settings_import_in_a_domain_module_is_detected(tmp_path: Path) -> None:
+    """Regression probe: a deliberate settings import in catalog/ is caught."""
+    (tmp_path / "catalog").mkdir()
+    (tmp_path / "catalog" / "leak.py").write_text(
+        "from tasterr import settings\n", encoding="utf-8"
+    )
+
+    offenders = _offenders("tasterr.settings", exempt=set(), src=tmp_path)
+
+    assert offenders == [str(Path("catalog/leak.py"))]

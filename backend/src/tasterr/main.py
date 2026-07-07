@@ -5,19 +5,25 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import cast
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tasterr.api.auth import router as auth_router
+from tasterr.api.home import router as home_router
 from tasterr.api.meta import router as meta_router
+from tasterr.api.search import router as search_router
+from tasterr.api.title import router as title_router
 from tasterr.auth.cookies import COOKIE_NAME, session_cookie_header
 from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import sweep_expired
+from tasterr.cache import Cache
+from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.http import create_http_client
+from tasterr.clients.tmdb import CatalogNotConfigured
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.settings import Settings, get_settings
@@ -56,11 +62,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(meta_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(home_router, prefix="/api/v1")
+    app.include_router(title_router, prefix="/api/v1")
+    app.include_router(search_router, prefix="/api/v1")
     app.state.pin_store = PinStore()
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
+    app.state.catalog_cache = Cache()
+    # Catalog failures map to generic browser errors (no upstream detail leaks).
+    # UpstreamRejected (TMDB 4xx) that an endpoint doesn't handle itself (title/
+    # detail maps its own 404) also degrades to a generic 502.
+    app.add_exception_handler(CatalogNotConfigured, _catalog_unconfigured)
+    app.add_exception_handler(UpstreamUnavailable, _catalog_unavailable)
+    app.add_exception_handler(UpstreamRejected, _catalog_unavailable)
     app.add_middleware(SpaFallback, static_dir=app_settings.static_dir)
     return app
+
+
+async def _catalog_unconfigured(_request: Request, _exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "Catalog unavailable"})
+
+
+async def _catalog_unavailable(_request: Request, _exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": "Catalog service unavailable"})
 
 
 class Tasterr(FastAPI):

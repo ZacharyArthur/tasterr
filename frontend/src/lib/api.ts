@@ -8,6 +8,14 @@ export type User = components["schemas"]["UserResponse"];
 export type PinCreateResponse = components["schemas"]["PinCreateResponse"];
 export type PinPollResponse = components["schemas"]["PinPollResponse"];
 export type PublicConfig = components["schemas"]["PublicConfig"];
+export type HomeFeed = components["schemas"]["HomeFeed"];
+export type RailsPage = components["schemas"]["RailsPage"];
+export type Rail = components["schemas"]["Rail"];
+export type HeroSlide = components["schemas"]["HeroSlide"];
+export type MediaSummary = components["schemas"]["MediaSummary"];
+export type MediaDetail = components["schemas"]["MediaDetail"];
+export type SearchResponse = components["schemas"]["SearchResponse"];
+export type MediaType = MediaSummary["media_type"];
 
 export class ApiError extends Error {
 	readonly status: number;
@@ -83,4 +91,22 @@ export function loginLocal(email: string, password: string): Promise<User> {
 
 export function logout(): Promise<void> {
 	return postJson<void>("/api/v1/auth/logout");
+}
+
+export function getHome(): Promise<HomeFeed> {
+	return request<HomeFeed>("/api/v1/home");
+}
+
+export function getRails(cursor: number): Promise<RailsPage> {
+	return request<RailsPage>(`/api/v1/rails?cursor=${cursor}`);
+}
+
+export function getTitle(type: MediaType, id: number): Promise<MediaDetail> {
+	return request<MediaDetail>(`/api/v1/title/${type}/${id}`);
+}
+
+export function searchTitles(query: string): Promise<SearchResponse> {
+	return request<SearchResponse>(
+		`/api/v1/search?q=${encodeURIComponent(query)}`,
+	);
 }

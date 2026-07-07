@@ -50,8 +50,8 @@ class SeerrAuthClient:
     async def _login(self, path: str, payload: dict[str, str]) -> SeerrLogin:
         try:
             response = await self._http.post(f"{self._base}{path}", json=payload)
-        except httpx.HTTPError as error:
-            raise UpstreamUnavailable(str(error)) from error
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
         if response.status_code >= 500:
             raise UpstreamUnavailable(f"seerr returned {response.status_code}")
         if response.status_code >= 400:

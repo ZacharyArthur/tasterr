@@ -123,10 +123,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Home */
+        get: operations["get_home_api_v1_home_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Rails */
+        get: operations["get_rails_api_v1_rails_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/title/{media_type}/{tmdb_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Title */
+        get: operations["get_title_api_v1_title__media_type___tmdb_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search */
+        get: operations["search_api_v1_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Genre */
+        Genre: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -144,12 +219,140 @@ export interface components {
             /** Seerr Configured */
             seerr_configured: boolean;
         };
+        /** HeroSlide */
+        HeroSlide: {
+            item: components["schemas"]["MediaSummary"];
+            /** Logo Path */
+            logo_path: string | null;
+            trailer: components["schemas"]["Video"] | null;
+            /** Certification */
+            certification: string | null;
+            /** Runtime */
+            runtime: number | null;
+            /**
+             * Genres
+             * @default []
+             */
+            genres: string[];
+        };
+        /** HomeFeed */
+        HomeFeed: {
+            /**
+             * Hero
+             * @default []
+             */
+            hero: components["schemas"]["HeroSlide"][];
+            /**
+             * Rails
+             * @default []
+             */
+            rails: components["schemas"]["Rail"][];
+        };
         /** LocalLoginRequest */
         LocalLoginRequest: {
             /** Email */
             email: string;
             /** Password */
             password: string;
+        };
+        /** MediaDetail */
+        MediaDetail: {
+            /** Id */
+            id: number;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "tv";
+            /** Title */
+            title: string;
+            /** Overview */
+            overview: string;
+            /** Poster Path */
+            poster_path: string | null;
+            /** Backdrop Path */
+            backdrop_path: string | null;
+            /** Year */
+            year: number | null;
+            /** Vote Average */
+            vote_average: number;
+            /** Tagline */
+            tagline: string;
+            /**
+             * Genres
+             * @default []
+             */
+            genres: components["schemas"]["Genre"][];
+            /** Runtime */
+            runtime: number | null;
+            /** Release Date */
+            release_date: string | null;
+            /** Certification */
+            certification: string | null;
+            /** Logo Path */
+            logo_path: string | null;
+            trailer: components["schemas"]["Video"] | null;
+            /**
+             * Cast
+             * @default []
+             */
+            cast: components["schemas"]["Person"][];
+            /**
+             * Crew
+             * @default []
+             */
+            crew: components["schemas"]["Person"][];
+            watch: components["schemas"]["WatchProviders"];
+            /**
+             * Recommendations
+             * @default []
+             */
+            recommendations: components["schemas"]["MediaSummary"][];
+            /**
+             * Similar
+             * @default []
+             */
+            similar: components["schemas"]["MediaSummary"][];
+            /**
+             * Seasons
+             * @default []
+             */
+            seasons: components["schemas"]["SeasonSummary"][];
+            /** Number Of Seasons */
+            number_of_seasons: number | null;
+        };
+        /** MediaSummary */
+        MediaSummary: {
+            /** Id */
+            id: number;
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "tv";
+            /** Title */
+            title: string;
+            /** Overview */
+            overview: string;
+            /** Poster Path */
+            poster_path: string | null;
+            /** Backdrop Path */
+            backdrop_path: string | null;
+            /** Year */
+            year: number | null;
+            /** Vote Average */
+            vote_average: number;
+        };
+        /** Person */
+        Person: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+            /** Profile Path */
+            profile_path: string | null;
         };
         /** PinCreateResponse */
         PinCreateResponse: {
@@ -167,6 +370,15 @@ export interface components {
             status: "pending" | "ok";
             user?: components["schemas"]["UserResponse"] | null;
         };
+        /** ProviderInfo */
+        ProviderInfo: {
+            /** Provider Id */
+            provider_id: number;
+            /** Name */
+            name: string;
+            /** Logo Path */
+            logo_path: string | null;
+        };
         /**
          * PublicConfig
          * @description The only settings shape ever serialized toward the client.
@@ -179,6 +391,53 @@ export interface components {
             tmdb_configured: boolean;
             /** Seerr Configured */
             seerr_configured: boolean;
+        };
+        /** Rail */
+        Rail: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Kind
+             * @default standard
+             * @enum {string}
+             */
+            kind: "standard" | "genre" | "top10";
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["MediaSummary"][];
+        };
+        /** RailsPage */
+        RailsPage: {
+            /**
+             * Rails
+             * @default []
+             */
+            rails: components["schemas"]["Rail"][];
+            /** Next Cursor */
+            next_cursor?: number | null;
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            /**
+             * Results
+             * @default []
+             */
+            results: components["schemas"]["MediaSummary"][];
+        };
+        /** SeasonSummary */
+        SeasonSummary: {
+            /** Season Number */
+            season_number: number;
+            /** Name */
+            name: string;
+            /** Episode Count */
+            episode_count: number;
+            /** Air Date */
+            air_date: string | null;
         };
         /** UserResponse */
         UserResponse: {
@@ -203,6 +462,42 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** Video */
+        Video: {
+            /** Key */
+            key: string;
+            /** Site */
+            site: string;
+            /** Type */
+            type: string;
+            /** Name */
+            name: string;
+            /** Official */
+            official: boolean;
+        };
+        /** WatchProviders */
+        WatchProviders: {
+            /**
+             * Flatrate
+             * @default []
+             */
+            flatrate: components["schemas"]["ProviderInfo"][];
+            /**
+             * Rent
+             * @default []
+             */
+            rent: components["schemas"]["ProviderInfo"][];
+            /**
+             * Buy
+             * @default []
+             */
+            buy: components["schemas"]["ProviderInfo"][];
+            /**
+             * Free
+             * @default []
+             */
+            free: components["schemas"]["ProviderInfo"][];
         };
     };
     responses: never;
@@ -372,6 +667,120 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_home_api_v1_home_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HomeFeed"];
+                };
+            };
+        };
+    };
+    get_rails_api_v1_rails_get: {
+        parameters: {
+            query?: {
+                cursor?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RailsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_title_api_v1_title__media_type___tmdb_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                media_type: "movie" | "tv";
+                tmdb_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_api_v1_search_get: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

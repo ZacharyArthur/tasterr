@@ -42,8 +42,8 @@ class PlexAuthClient:
             response = await self._http.post(
                 PINS_URL, params={"strong": "true"}, headers=self._headers()
             )
-        except httpx.HTTPError as error:
-            raise UpstreamUnavailable(str(error)) from error
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("plex.tv request failed") from None
         _raise_for_status(response)
         try:
             return PlexPin.model_validate(response.json())
@@ -55,8 +55,8 @@ class PlexAuthClient:
         plex.tv answers 404 for expired or unknown PINs."""
         try:
             response = await self._http.get(f"{PINS_URL}/{pin_id}", headers=self._headers())
-        except httpx.HTTPError as error:
-            raise UpstreamUnavailable(str(error)) from error
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("plex.tv request failed") from None
         _raise_for_status(response)
         try:
             return _PinStatus.model_validate(response.json()).auth_token

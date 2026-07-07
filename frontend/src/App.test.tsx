@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 
@@ -14,7 +15,17 @@ const USER = {
 	avatar_url: null,
 	is_admin: false,
 };
-const HEALTH = { status: "ok", tmdb_configured: false, seerr_configured: true };
+const HOME = {
+	hero: [],
+	rails: [
+		{ id: "trending", title: "Trending Now", kind: "standard", items: [] },
+	],
+};
+const RAILS = { rails: [], next_cursor: null };
+
+function jsonResponse(body: unknown, status = 200): Response {
+	return { ok: status < 400, status, json: async () => body } as Response;
+}
 
 function renderApp() {
 	const queryClient = new QueryClient({
@@ -22,7 +33,9 @@ function renderApp() {
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<App />
+			<MemoryRouter>
+				<App />
+			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 }
@@ -30,38 +43,31 @@ function renderApp() {
 test("unauthenticated visitors see the login screen only", async () => {
 	vi.stubGlobal(
 		"fetch",
-		vi.fn(async (input: RequestInfo | URL) => {
-			expect(String(input)).toBe("/api/v1/auth/me");
-			return {
-				ok: false,
-				status: 401,
-				json: async () => ({ detail: "Not authenticated" }),
-			} as Response;
-		}),
+		vi.fn(async () => jsonResponse({ detail: "Not authenticated" }, 401)),
 	);
-
 	renderApp();
-
 	expect(
 		await screen.findByRole("button", { name: "Sign in with Plex" }),
 	).toBeTruthy();
-	expect(screen.queryByText(/Signed in as/)).toBeNull();
+	expect(screen.queryByText("Sign out")).toBeNull();
 });
 
-test("authenticated users see the shell with their name and health", async () => {
+test("authenticated users see the routed browse shell", async () => {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			const body = url === "/api/v1/auth/me" ? USER : HEALTH;
-			return { ok: true, status: 200, json: async () => body } as Response;
+			if (url === "/api/v1/auth/me") return jsonResponse(USER);
+			if (url === "/api/v1/home") return jsonResponse(HOME);
+			return jsonResponse(RAILS);
 		}),
 	);
-
 	renderApp();
-
 	expect(await screen.findByText("Viewer")).toBeTruthy();
-	expect(await screen.findByText("ok")).toBeTruthy();
+	expect(await screen.findByText("Trending Now")).toBeTruthy();
+	expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+	expect(screen.getByText(/not endorsed or certified/)).toBeTruthy(); // TMDB attribution
+	expect(screen.getByRole("img", { name: "TMDB" })).toBeTruthy(); // TMDB logo
 	expect(
 		screen.queryByRole("button", { name: "Sign in with Plex" }),
 	).toBeNull();
@@ -71,30 +77,23 @@ test("logout returns to the login screen", async () => {
 	let signedIn = true;
 	vi.stubGlobal(
 		"fetch",
-		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
 			if (url === "/api/v1/auth/logout") {
-				expect(init?.method).toBe("POST");
 				signedIn = false;
-				return { ok: true, status: 204, json: async () => null } as Response;
+				return jsonResponse(null, 204);
 			}
 			if (url === "/api/v1/auth/me") {
 				return signedIn
-					? ({ ok: true, status: 200, json: async () => USER } as Response)
-					: ({
-							ok: false,
-							status: 401,
-							json: async () => ({ detail: "Not authenticated" }),
-						} as Response);
+					? jsonResponse(USER)
+					: jsonResponse({ detail: "no" }, 401);
 			}
-			return { ok: true, status: 200, json: async () => HEALTH } as Response;
+			if (url === "/api/v1/home") return jsonResponse(HOME);
+			return jsonResponse(RAILS);
 		}),
 	);
-
 	renderApp();
-
 	fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
-
 	expect(
 		await screen.findByRole("button", { name: "Sign in with Plex" }),
 	).toBeTruthy();

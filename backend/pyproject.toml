@@ -12,6 +12,7 @@ dependencies = [
     "alembic>=1.15",
     "httpx>=0.28",
     "cryptography>=44",
+    "cachetools>=7.1.4",
 ]
 
 [dependency-groups]
@@ -71,6 +72,7 @@ source_modules = [
     "tasterr.catalog",
     "tasterr.rails",
     "tasterr.recommend",
+    "tasterr.cache",
     "tasterr.db",
     "tasterr.main",
     "tasterr.settings",
@@ -93,3 +95,14 @@ source_modules = [
     "tasterr.db",
 ]
 forbidden_modules = ["tasterr.api"]
+
+# Response/domain models must carry no secret configuration (SPEC §11). The
+# domain layers never import settings; the api layer injects region/keys instead.
+[[tool.importlinter.contracts]]
+name = "Domain/response models never import secret settings"
+type = "forbidden"
+source_modules = [
+    "tasterr.catalog",
+    "tasterr.rails",
+]
+forbidden_modules = ["tasterr.settings"]
