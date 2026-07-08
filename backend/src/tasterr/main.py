@@ -12,8 +12,10 @@ from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from tasterr.api.auth import router as auth_router
+from tasterr.api.availability import router as availability_router
 from tasterr.api.home import router as home_router
 from tasterr.api.meta import router as meta_router
+from tasterr.api.request import router as request_router
 from tasterr.api.search import router as search_router
 from tasterr.api.title import router as title_router
 from tasterr.auth.cookies import COOKIE_NAME, session_cookie_header
@@ -65,10 +67,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(home_router, prefix="/api/v1")
     app.include_router(title_router, prefix="/api/v1")
     app.include_router(search_router, prefix="/api/v1")
+    app.include_router(availability_router, prefix="/api/v1")
+    app.include_router(request_router, prefix="/api/v1")
     app.state.pin_store = PinStore()
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
     app.state.catalog_cache = Cache()
+    # A separate bounded cache for short-TTL Seerr availability reads, so they
+    # never evict the longer-lived TMDB entries (and vice versa).
+    app.state.seerr_cache = Cache()
     # Catalog failures map to generic browser errors (no upstream detail leaks).
     # UpstreamRejected (TMDB 4xx) that an endpoint doesn't handle itself (title/
     # detail maps its own 404) also degrades to a generic 502.

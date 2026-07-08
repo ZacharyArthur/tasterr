@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { HeroSlide } from "../lib/api";
+import { AvailabilityContext, availabilityKey } from "../lib/availability";
 import { backdropUrl, logoUrl } from "../lib/images";
 import { usePrefersReducedMotion } from "../lib/useReducedMotion";
+import { AvailabilityBadge } from "./AvailabilityBadge";
 
 const ROTATE_MS = 7000;
 
 export function Hero({ slides }: { slides: HeroSlide[] }) {
 	const location = useLocation();
 	const reducedMotion = usePrefersReducedMotion();
+	const availabilityMap = useContext(AvailabilityContext);
 	const [index, setIndex] = useState(0);
 	const count = slides.length;
 
@@ -29,6 +32,8 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
 	}
 	const backdrop = backdropUrl(slide.item.backdrop_path);
 	const logo = logoUrl(slide.logo_path);
+	const availability =
+		availabilityMap[availabilityKey(slide.item.media_type, slide.item.id)];
 	return (
 		<section className="relative h-[52vh] min-h-80 w-full overflow-hidden">
 			{backdrop && (
@@ -52,6 +57,7 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
 					</h1>
 				)}
 				<div className="flex flex-wrap items-center gap-3 text-sm text-neutral-300">
+					<AvailabilityBadge availability={availability} />
 					{slide.item.year !== null && <span>{slide.item.year}</span>}
 					{slide.certification && (
 						<span className="rounded border border-neutral-500 px-1.5 text-xs">

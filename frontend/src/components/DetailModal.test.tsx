@@ -74,7 +74,7 @@ test("renders the title detail sections", async () => {
 		await screen.findByRole("heading", { name: "Deep Movie" }),
 	).toBeTruthy();
 	expect(screen.getByText("An overview.")).toBeTruthy();
-	expect(screen.getByText("Where to watch")).toBeTruthy();
+	expect(screen.getByText("Where & how to watch")).toBeTruthy();
 	expect(screen.getByText("Netflix")).toBeTruthy();
 	expect(screen.getByText("Actor One")).toBeTruthy();
 	expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MediaCard } from "../components/MediaCard";
+import { AvailabilityContext, useAvailabilityMap } from "../lib/availability";
 import { useSearch } from "../lib/browse";
 import { useDebounced } from "../lib/useDebounced";
 
@@ -9,6 +10,7 @@ export function Search() {
 	const [text, setText] = useState(() => params.get("q") ?? "");
 	const query = useDebounced(text, 300);
 	const results = useSearch(query);
+	const availability = useAvailabilityMap(results.data?.results ?? []);
 
 	// Mirror the debounced query into the URL (shareable/back-button) without
 	// pushing a history entry per keystroke.
@@ -36,11 +38,13 @@ export function Search() {
 				<p className="text-neutral-400">No results for “{query}”.</p>
 			)}
 			{results.data && results.data.results.length > 0 && (
-				<div className="flex flex-wrap gap-4">
-					{results.data.results.map((item) => (
-						<MediaCard key={`${item.media_type}-${item.id}`} item={item} />
-					))}
-				</div>
+				<AvailabilityContext.Provider value={availability.data ?? {}}>
+					<div className="flex flex-wrap gap-4">
+						{results.data.results.map((item) => (
+							<MediaCard key={`${item.media_type}-${item.id}`} item={item} />
+						))}
+					</div>
+				</AvailabilityContext.Provider>
 			)}
 		</main>
 	);

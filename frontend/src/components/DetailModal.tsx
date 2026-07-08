@@ -8,7 +8,9 @@ import {
 	profileUrl,
 	providerLogoUrl,
 } from "../lib/images";
+import { AvailabilityBadge } from "./AvailabilityBadge";
 import { MediaCard } from "./MediaCard";
+import { RequestButton } from "./RequestButton";
 
 function isMediaType(value: string | undefined): value is MediaType {
 	return value === "movie" || value === "tv";
@@ -119,6 +121,7 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 					<h2 className="text-3xl font-bold text-neutral-50">{detail.title}</h2>
 				)}
 				<div className="flex flex-wrap items-center gap-3 text-sm text-neutral-400">
+					<AvailabilityBadge availability={detail.availability} />
 					{detail.year !== null && <span>{detail.year}</span>}
 					{detail.runtime !== null && <span>{detail.runtime} min</span>}
 					{detail.certification && (
@@ -135,11 +138,16 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 				)}
 				<p className="text-neutral-300">{detail.overview}</p>
 
-				{providers.length > 0 && (
-					<section className="flex flex-col gap-2">
-						<h3 className="text-sm font-semibold text-neutral-200">
-							Where to watch
-						</h3>
+				<section className="flex flex-col gap-3">
+					<h3 className="text-sm font-semibold text-neutral-200">
+						Where &amp; how to watch
+					</h3>
+					<RequestButton
+						type={detail.media_type}
+						id={detail.id}
+						availability={detail.availability}
+					/>
+					{providers.length > 0 && (
 						<ul className="flex flex-wrap gap-3">
 							{providers.map((provider) => (
 								<li
@@ -157,8 +165,8 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 								</li>
 							))}
 						</ul>
-					</section>
-				)}
+					)}
+				</section>
 
 				{cast.length > 0 && (
 					<section className="flex flex-col gap-2">

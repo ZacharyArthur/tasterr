@@ -191,10 +191,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Availability */
+        post: operations["post_availability_api_v1_availability_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Request */
+        post: operations["create_request_api_v1_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * Availability
+         * @description A title's library status. `known` is false only when Seerr was unreachable —
+         *     distinguishing "Seerr says not-in-library" from "we couldn't reach Seerr".
+         */
+        Availability: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "available" | "partial" | "processing" | "pending" | "not_requested" | "unknown";
+            /** Known */
+            known: boolean;
+        };
+        /** AvailabilityItem */
+        AvailabilityItem: {
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "tv";
+            /** Id */
+            id: number;
+        };
+        /** AvailabilityRequest */
+        AvailabilityRequest: {
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["AvailabilityItem"][];
+        };
         /** Genre */
         Genre: {
             /** Id */
@@ -320,6 +386,7 @@ export interface components {
             seasons: components["schemas"]["SeasonSummary"][];
             /** Number Of Seasons */
             number_of_seasons: number | null;
+            availability?: components["schemas"]["Availability"] | null;
         };
         /** MediaSummary */
         MediaSummary: {
@@ -419,6 +486,32 @@ export interface components {
             rails: components["schemas"]["Rail"][];
             /** Next Cursor */
             next_cursor?: number | null;
+        };
+        /** RequestBody */
+        RequestBody: {
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "tv";
+            /** Tmdb Id */
+            tmdb_id: number;
+        };
+        /**
+         * RequestResponse
+         * @description A single discriminated outcome the SPA branches on. `availability` is the new
+         *     library status on success; `seerr_url` is the server-built "Request in Seerr"
+         *     fallback (present whenever the external URL is configured).
+         */
+        RequestResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "re_auth_required" | "unavailable" | "failed";
+            availability?: components["schemas"]["Availability"] | null;
+            /** Seerr Url */
+            seerr_url?: string | null;
         };
         /** SearchResponse */
         SearchResponse: {
@@ -771,6 +864,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_availability_api_v1_availability_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AvailabilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["Availability"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_request_api_v1_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestResponse"];
                 };
             };
             /** @description Validation Error */

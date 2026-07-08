@@ -2,8 +2,9 @@
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,28 @@ class Settings(BaseSettings):
     static_dir: Path = Path("static")
     tasterr_host: str = "0.0.0.0"
     tasterr_port: int = 8000
+
+    @field_validator("seerr_internal_url", "seerr_external_url")
+    @classmethod
+    def _http_url_or_none(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """Seerr URLs must be http(s) — the external one becomes a client-facing
+        redirect (SPEC §9: built from *validated* config). A malformed value
+        degrades to unset rather than crashing boot (the M0 resilience rule):
+        /health then reports Seerr unconfigured, and no unvalidated string can
+        reach an `href` or an outbound request target.
+
+        The external URL additionally rejects embedded credentials
+        (`https://user:pass@host`), which would leak into the browser `href`; the
+        internal URL is server-side only and may legitimately carry basic-auth for
+        a reverse-proxied Seerr."""
+        if value is None:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return None
+        if info.field_name == "seerr_external_url" and (parsed.username or parsed.password):
+            return None
+        return value
 
     @property
     def tmdb_configured(self) -> bool:

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { Hero } from "../components/Hero";
 import { Rail } from "../components/Rail";
+import type { MediaSummary } from "../lib/api";
+import { AvailabilityContext, useAvailabilityMap } from "../lib/availability";
 import { useHome, useRails } from "../lib/browse";
 
 export function Home() {
@@ -26,6 +28,16 @@ export function Home() {
 		return () => observer.disconnect();
 	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+	// Every title on screen, batch-hydrated after the feed paints (never blocking
+	// the initial render). Grows as infinite scroll loads more rails.
+	const extraRails = rails.data?.pages.flatMap((page) => page.rails) ?? [];
+	const items: MediaSummary[] = [
+		...(home.data?.hero.map((slide) => slide.item) ?? []),
+		...(home.data?.rails.flatMap((rail) => rail.items) ?? []),
+		...extraRails.flatMap((rail) => rail.items),
+	];
+	const availability = useAvailabilityMap(items);
+
 	if (home.isPending) {
 		return <FeedSkeleton />;
 	}
@@ -35,23 +47,24 @@ export function Home() {
 		);
 	}
 
-	const extraRails = rails.data?.pages.flatMap((page) => page.rails) ?? [];
 	return (
-		<main className="flex flex-col gap-8 pb-16">
-			<Hero slides={home.data.hero} />
-			<div className="flex flex-col gap-8">
-				{home.data.rails.map((rail) => (
-					<Rail key={rail.id} rail={rail} />
-				))}
-				{extraRails.map((rail) => (
-					<Rail key={rail.id} rail={rail} />
-				))}
-			</div>
-			<div ref={sentinel} className="h-4" />
-			{isFetchingNextPage && (
-				<p className="px-4 text-neutral-500 sm:px-8">Loading more…</p>
-			)}
-		</main>
+		<AvailabilityContext.Provider value={availability.data ?? {}}>
+			<main className="flex flex-col gap-8 pb-16">
+				<Hero slides={home.data.hero} />
+				<div className="flex flex-col gap-8">
+					{home.data.rails.map((rail) => (
+						<Rail key={rail.id} rail={rail} />
+					))}
+					{extraRails.map((rail) => (
+						<Rail key={rail.id} rail={rail} />
+					))}
+				</div>
+				<div ref={sentinel} className="h-4" />
+				{isFetchingNextPage && (
+					<p className="px-4 text-neutral-500 sm:px-8">Loading more…</p>
+				)}
+			</main>
+		</AvailabilityContext.Provider>
 	);
 }
 

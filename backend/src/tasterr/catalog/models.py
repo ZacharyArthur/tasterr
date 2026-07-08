@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from tasterr.catalog.availability import Availability
+
 MediaType = Literal["movie", "tv"]
 RailKind = Literal["standard", "genre", "top10"]
 
@@ -78,6 +80,9 @@ class MediaDetail(MediaSummary):
     similar: list[MediaSummary] = []
     seasons: list[SeasonSummary] = []
     number_of_seasons: int | None
+    # Populated by the title endpoint (M3); None until then and on the normalizer's
+    # own output, which is TMDB-only. Seerr-down leaves it Unknown, never absent.
+    availability: Availability | None = None
 
 
 class HeroSlide(BaseModel):

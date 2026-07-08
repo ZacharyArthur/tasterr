@@ -2,6 +2,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { HeroSlide } from "../lib/api";
+import { AvailabilityContext } from "../lib/availability";
 import { Hero } from "./Hero";
 
 afterEach(() => {
@@ -74,4 +75,41 @@ test("does not rotate under reduced motion", () => {
 	});
 	expect(screen.getByRole("heading", { name: "First" })).toBeTruthy();
 	expect(screen.queryByRole("heading", { name: "Second" })).toBeNull();
+});
+
+test("shows the availability badge for the current slide", () => {
+	stubMatchMedia(true); // reduced motion → stable first slide (movie:1)
+	render(
+		<MemoryRouter>
+			<AvailabilityContext.Provider
+				value={{ "movie:1": { status: "available", known: true } }}
+			>
+				<Hero slides={[slide(1, "First"), slide(2, "Second")]} />
+			</AvailabilityContext.Provider>
+		</MemoryRouter>,
+	);
+	expect(screen.getByText("Available")).toBeTruthy();
+});
+
+test("updates the badge as the hero rotates to the next slide", () => {
+	vi.useFakeTimers();
+	stubMatchMedia(false); // motion allowed → rotates
+	render(
+		<MemoryRouter>
+			<AvailabilityContext.Provider
+				value={{
+					"movie:1": { status: "available", known: true },
+					"movie:2": { status: "pending", known: true },
+				}}
+			>
+				<Hero slides={[slide(1, "First"), slide(2, "Second")]} />
+			</AvailabilityContext.Provider>
+		</MemoryRouter>,
+	);
+	expect(screen.getByText("Available")).toBeTruthy(); // slide 1 (movie:1)
+	act(() => {
+		vi.advanceTimersByTime(7000);
+	});
+	expect(screen.getByText("Requested")).toBeTruthy(); // slide 2 (movie:2 → pending)
+	expect(screen.queryByText("Available")).toBeNull();
 });

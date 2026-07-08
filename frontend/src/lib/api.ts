@@ -16,6 +16,11 @@ export type MediaSummary = components["schemas"]["MediaSummary"];
 export type MediaDetail = components["schemas"]["MediaDetail"];
 export type SearchResponse = components["schemas"]["SearchResponse"];
 export type MediaType = MediaSummary["media_type"];
+export type Availability = components["schemas"]["Availability"];
+export type AvailabilityStatus = Availability["status"];
+export type RequestResponse = components["schemas"]["RequestResponse"];
+/** Keyed by `"<media_type>:<id>"`, the shape `POST /availability` returns. */
+export type AvailabilityMap = Record<string, Availability>;
 
 export class ApiError extends Error {
 	readonly status: number;
@@ -109,4 +114,26 @@ export function searchTitles(query: string): Promise<SearchResponse> {
 	return request<SearchResponse>(
 		`/api/v1/search?q=${encodeURIComponent(query)}`,
 	);
+}
+
+export function getConfig(): Promise<PublicConfig> {
+	return request<PublicConfig>("/api/v1/config");
+}
+
+/** Batch-hydrate library status for the given titles (SPEC §6). */
+export function postAvailability(
+	items: { media_type: MediaType; id: number }[],
+): Promise<AvailabilityMap> {
+	return postJson<AvailabilityMap>("/api/v1/availability", { items });
+}
+
+/** Request a title as the current user; returns a discriminated outcome. */
+export function createRequest(
+	mediaType: MediaType,
+	tmdbId: number,
+): Promise<RequestResponse> {
+	return postJson<RequestResponse>("/api/v1/request", {
+		media_type: mediaType,
+		tmdb_id: tmdbId,
+	});
 }

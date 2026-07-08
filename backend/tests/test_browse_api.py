@@ -4,18 +4,24 @@
 # pyright: reportUnknownArgumentType=false
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from tasterr.api.availability import get_availability
 from tasterr.api.catalog import get_catalog
 from tasterr.auth.sessions import mint_session
+from tasterr.cache import Cache
+from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, WatchProviders
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.seerr import SeerrClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import User
@@ -119,7 +125,12 @@ def _app(tmp_path: Path, *, tmdb: bool = True) -> FastAPI:
     }
     if tmdb:
         overrides["tmdb_api_key"] = "tmdb-key"
-    return create_app(Settings.model_validate(overrides))
+    app = create_app(Settings.model_validate(overrides))
+    # Default browse tests exercise the catalog, not Seerr — give them a no-client
+    # availability service so title detail never makes a live Seerr call. Tests that
+    # assert availability re-override get_availability with a mock-backed client.
+    app.dependency_overrides[get_availability] = lambda: AvailabilityService(None, Cache())
+    return app
 
 
 def _seed_session(db_path: Path) -> str:
@@ -243,6 +254,45 @@ def test_title_unknown_id_is_generic_404(tmp_path: Path) -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Title not found"}
+
+
+def _override_availability(
+    app: FastAPI, handler: Callable[[httpx.Request], httpx.Response]
+) -> None:
+    cache = Cache()
+
+    def dep() -> AvailabilityService:
+        http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        return AvailabilityService(SeerrClient(http, "http://seerr:5055", "k"), cache)
+
+    app.dependency_overrides[get_availability] = dep
+
+
+def test_title_detail_includes_availability(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
+    _override_availability(app, lambda _: httpx.Response(200, json={"mediaInfo": {"status": 5}}))
+    db_path = tmp_path / "tasterr.db"
+    with _authed_client(app, db_path) as client:
+        response = client.get("/api/v1/title/movie/42")
+
+    assert response.status_code == 200
+    assert response.json()["availability"] == {"status": "available", "known": True}
+
+
+def test_title_availability_degrades_when_seerr_down(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
+    _override_availability(app, lambda _: httpx.Response(503, text="down"))
+    db_path = tmp_path / "tasterr.db"
+    with _authed_client(app, db_path) as client:
+        response = client.get("/api/v1/title/movie/42")
+
+    # Seerr down never fails or blanks the detail — availability just reads Unknown.
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == 42
+    assert body["availability"] == {"status": "unknown", "known": False}
 
 
 # ── Search (4.3) ─────────────────────────────────────────────────────────────
