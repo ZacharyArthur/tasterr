@@ -233,3 +233,117 @@ async def test_extra_rails_paginate_then_complete() -> None:
         pages += 1
         assert pages < 20  # guard against a runaway cursor
     assert pages >= 2  # catalogue spans multiple pages then ends
+
+
+# ── Personalized providers (M4) ──────────────────────────────────────────────
+
+
+class FakeTaste:
+    """Same rail-facing surface as TasteService; the engine math is covered by
+    test_recommend_service.py — these tests cover the composer plumbing."""
+
+    def __init__(self) -> None:
+        self.my_list_items: list[MediaSummary] = []
+        self.recommended_items: list[MediaSummary] = []
+        self.more_like_result: tuple[str, list[MediaSummary]] | None = None
+        self.fail = False
+
+    def _maybe_fail(self) -> None:
+        if self.fail:
+            raise RuntimeError("engine storage on fire")
+
+    async def my_list(self, user_id: int) -> list[MediaSummary]:
+        self._maybe_fail()
+        return list(self.my_list_items)
+
+    async def recommended_for_you(self, user_id: int) -> list[MediaSummary]:
+        self._maybe_fail()
+        return list(self.recommended_items)
+
+    async def more_like(self, user_id: int) -> tuple[str, list[MediaSummary]] | None:
+        self._maybe_fail()
+        return self.more_like_result
+
+
+def _personal_ctx(fake: FakeCatalog, taste: FakeTaste) -> RailContext:
+    from tasterr.db.models import User
+    from tasterr.recommend.service import TasteService
+
+    user = User(id=1, seerr_user_id=1, display_name="member", auth_type="plex", is_admin=False)
+    return RailContext(cast("CatalogService", fake), user=user, taste=cast("TasteService", taste))
+
+
+async def test_personalized_home_orders_and_titles_rails() -> None:
+    taste = FakeTaste()
+    taste.my_list_items = [_summary(500)]  # a one-title list still renders
+    taste.recommended_items = [_summary(600 + i) for i in range(6)]
+    taste.more_like_result = ("Dune", [_summary(700 + i) for i in range(6)])
+
+    feed = await build_home(_personal_ctx(FakeCatalog(), taste))
+
+    ids = [rail.id for rail in feed.rails]
+    assert ids[:2] == ["my-list", "recommended-for-you"]
+    assert ids[2] == "trending"
+    assert ids[3] == "more-like"
+    more_like = feed.rails[3]
+    assert more_like.title == "More like Dune"  # resolved from the source title
+    my_list = feed.rails[0]
+    assert [item.id for item in my_list.items] == [500]
+
+
+async def test_signalless_user_gets_the_plain_home() -> None:
+    taste = FakeTaste()  # no signals → every personalized provider yields []
+
+    feed = await build_home(_personal_ctx(FakeCatalog(), taste))
+    plain = await build_home(_ctx(FakeCatalog()))
+
+    assert [rail.id for rail in feed.rails] == [rail.id for rail in plain.rails]
+    assert not any(
+        rail.id in ("my-list", "recommended-for-you", "more-like") for rail in feed.rails
+    )
+
+
+async def test_engine_failure_degrades_to_the_plain_home() -> None:
+    taste = FakeTaste()
+    taste.fail = True  # storage/engine errors, not upstream ones
+
+    feed = await build_home(_personal_ctx(FakeCatalog(), taste))
+
+    ids = [rail.id for rail in feed.rails]
+    assert "trending" in ids
+    assert not any(rail_id in ("my-list", "recommended-for-you", "more-like") for rail_id in ids)
+
+
+async def test_exclusive_providers_never_run_concurrently() -> None:
+    """Deterministic pin of the serialization invariant (round-2 blocker):
+    exclusive providers share the request's AsyncSession, so the composer must
+    run them one at a time. The probes raise on overlap — reverting
+    `_fetch_all` to a plain gather fails this test immediately."""
+    import asyncio
+
+    # Deliberate seam test of the composer's serialization guarantee.
+    from tasterr.rails.composer import _compose_rails  # pyright: ignore[reportPrivateUsage]
+    from tasterr.rails.registry import RailProvider
+
+    active = 0
+
+    def probe(provider_id: str, base: int) -> RailProvider:
+        async def fetch(_: RailContext) -> list[MediaSummary]:
+            nonlocal active
+            active += 1
+            overlap = active > 1
+            # Yield twice, like real DB I/O would, to give a concurrent
+            # sibling every chance to interleave.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            active -= 1
+            if overlap:
+                raise AssertionError("two exclusive providers ran concurrently")
+            return [_summary(base + i) for i in range(4)]
+
+        return RailProvider(provider_id, provider_id, "standard", fetch, exclusive=True)
+
+    providers = [probe("ex-a", 1000), probe("ex-b", 2000), probe("ex-c", 3000)]
+    rails = await _compose_rails(_ctx(FakeCatalog()), providers)
+
+    assert [rail.id for rail in rails] == ["ex-a", "ex-b", "ex-c"]

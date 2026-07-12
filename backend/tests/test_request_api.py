@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -19,7 +20,7 @@ from tasterr.auth.sessions import hash_token, mint_session
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User, UserSession
+from tasterr.db.models import Signal, User, UserSession
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -301,3 +302,59 @@ def test_seerr_down_is_failed_with_fallback_and_browsing_survives(tmp_path: Path
     assert body["seerr_url"] == "https://requests.example/movie/42"
     assert "down" not in response.text  # no upstream detail leaks
     assert health.status_code == 200  # browsing unaffected by a Seerr outage
+
+
+# ── The server-side taste signal (M4) ────────────────────────────────────────
+
+
+def _stored_taste_signals(db_path: Path) -> list[tuple[str, int, str]]:
+    async def _run() -> list[tuple[str, int, str]]:
+        engine = create_engine(db_path)
+        try:
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as db:
+                rows = (await db.execute(select(Signal))).scalars().all()
+                return [(r.media_type, r.tmdb_id, r.kind) for r in rows]
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def test_successful_request_records_a_taste_signal(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    _override_ctx(app, lambda _: httpx.Response(201, json={"media": {"status": 2}}))
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json=_body())
+
+    assert response.json()["status"] == "ok"
+    assert _stored_taste_signals(tmp_path / "tasterr.db") == [("movie", 42, "request")]
+
+
+def test_failed_request_records_no_signal(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    _override_ctx(app, lambda _: httpx.Response(500, text="down"))
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        client.post("/api/v1/request", json=_body())
+
+    assert _stored_taste_signals(tmp_path / "tasterr.db") == []
+
+
+def test_signal_write_failure_never_fails_the_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def boom(*_args: object, **_kwargs: object) -> bool:
+        raise RuntimeError("signals table on fire")
+
+    monkeypatch.setattr("tasterr.api.request.store.record_signal", boom)
+    app = _app(tmp_path)
+    _override_ctx(app, lambda _: httpx.Response(201, json={"media": {"status": 2}}))
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json=_body())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"  # Seerr accepted; the signal is best-effort
+    assert _stored_taste_signals(tmp_path / "tasterr.db") == []

@@ -94,6 +94,48 @@ async def test_detail_parses_appended_blocks() -> None:
     assert "US" in detail.watch_providers.results
 
 
+async def test_detail_requests_and_parses_movie_keywords() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "keywords" in request.url.params["append_to_response"]
+        payload = {
+            **DETAIL_JSON,
+            "keywords": {"keywords": [{"id": 4565, "name": "dystopia"}]},
+        }
+        return httpx.Response(200, json=payload)
+
+    detail = await _client(handler).detail("movie", 42, "US")
+
+    assert detail.keywords is not None
+    assert [k.name for k in detail.keywords.all] == ["dystopia"]
+
+
+async def test_detail_parses_tv_keywords_and_creator() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        payload = {
+            "id": 1399,
+            "name": "A Show",
+            "created_by": [{"id": 9813, "name": "Show Runner"}],
+            "keywords": {"results": [{"id": 6091, "name": "war"}]},
+        }
+        return httpx.Response(200, json=payload)
+
+    detail = await _client(handler).detail("tv", 1399, "US")
+
+    assert [c.name for c in detail.created_by] == ["Show Runner"]
+    assert detail.keywords is not None
+    assert [k.name for k in detail.keywords.all] == ["war"]
+
+
+async def test_detail_tolerates_absent_keywords() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=DETAIL_JSON)
+
+    detail = await _client(handler).detail("movie", 42, "US")
+
+    assert detail.keywords is None
+    assert detail.created_by == []
+
+
 async def test_genres_returns_list() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/3/genre/movie/list"

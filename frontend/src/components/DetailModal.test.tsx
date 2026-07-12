@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { DetailModal } from "./DetailModal";
@@ -78,4 +84,216 @@ test("renders the title detail sections", async () => {
 	expect(screen.getByText("Netflix")).toBeTruthy();
 	expect(screen.getByText("Actor One")).toBeTruthy();
 	expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+});
+
+// ── Taste affordances (M4) ───────────────────────────────────────────────────
+
+type RecordedCall = { url: string; body: unknown };
+
+/** Route by URL substring, record every call; a "reject" route throws. */
+function stubTasteFetch(routes: Record<string, unknown | "reject">) {
+	const calls: RecordedCall[] = [];
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			const body =
+				typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+			calls.push({ url, body });
+			for (const [path, result] of Object.entries(routes)) {
+				if (url.includes(path)) {
+					if (result === "reject") {
+						throw new TypeError("network down");
+					}
+					return {
+						ok: true,
+						status: 200,
+						json: async () => result,
+					} as Response;
+				}
+			}
+			return { ok: true, status: 200, json: async () => DETAIL } as Response;
+		}),
+	);
+	return calls;
+}
+
+function signalCalls(calls: RecordedCall[]): RecordedCall[] {
+	return calls.filter((call) => call.url.includes("/api/v1/signals"));
+}
+
+test("opening a detail fires a detail_open signal without blocking render", async () => {
+	const calls = stubTasteFetch({ "/api/v1/signals": { recorded: true } });
+	renderModal();
+
+	expect(
+		await screen.findByRole("heading", { name: "Deep Movie" }),
+	).toBeTruthy();
+	await waitFor(() => expect(signalCalls(calls).length).toBe(1));
+	expect(signalCalls(calls)[0].body).toEqual({
+		media_type: "movie",
+		tmdb_id: 42,
+		kind: "detail_open",
+		retract: false,
+	});
+});
+
+test("a failed detail_open leaves the view untouched", async () => {
+	stubTasteFetch({ "/api/v1/signals": "reject" });
+	renderModal();
+
+	expect(
+		await screen.findByRole("heading", { name: "Deep Movie" }),
+	).toBeTruthy();
+	expect(screen.queryByText("Could not load this title.")).toBeNull();
+});
+
+test("watchlist toggles optimistically and posts add then retract", async () => {
+	const calls = stubTasteFetch({ "/api/v1/signals": { recorded: true } });
+	renderModal();
+	const button = await screen.findByRole("button", { name: "＋ My List" });
+
+	fireEvent.click(button);
+	expect(screen.getByRole("button", { name: "✓ In My List" })).toBeTruthy();
+	await waitFor(() =>
+		expect(
+			signalCalls(calls).some(
+				(call) =>
+					(call.body as { kind?: string; retract?: boolean }).kind ===
+						"watchlist" &&
+					(call.body as { retract?: boolean }).retract === false,
+			),
+		).toBe(true),
+	);
+
+	fireEvent.click(screen.getByRole("button", { name: "✓ In My List" }));
+	expect(
+		await screen.findByRole("button", { name: "＋ My List" }),
+	).toBeTruthy();
+	await waitFor(() =>
+		expect(
+			signalCalls(calls).some(
+				(call) =>
+					(call.body as { kind?: string; retract?: boolean }).kind ===
+						"watchlist" &&
+					(call.body as { retract?: boolean }).retract === true,
+			),
+		).toBe(true),
+	);
+});
+
+test("not-interested offers an undo and a failed post reverts the flip", async () => {
+	stubTasteFetch({ "/api/v1/signals": "reject" });
+	renderModal();
+	const button = await screen.findByRole("button", { name: "Not interested" });
+
+	fireEvent.click(button);
+
+	// Optimistic flip to the undo affordance, then revert once the post fails.
+	expect(screen.getByRole("button", { name: "Hidden — undo" })).toBeTruthy();
+	expect(
+		await screen.findByRole("button", { name: "Not interested" }),
+	).toBeTruthy();
+});
+
+test("initial toggle state comes from the detail's taste flags", async () => {
+	stubTasteFetch({
+		"/api/v1/title/": {
+			...DETAIL,
+			taste: { watchlisted: true, hidden: false },
+		},
+		"/api/v1/signals": { recorded: true },
+	});
+	renderModal();
+
+	expect(
+		await screen.findByRole("button", { name: "✓ In My List" }),
+	).toBeTruthy();
+	expect(screen.getByRole("button", { name: "Not interested" })).toBeTruthy();
+});
+
+test("toggle state resets when navigating between cached titles in-modal", async () => {
+	// The stale-state hazard needs a *cached* target: uncached navigations
+	// unmount DetailBody while loading, which resets state by accident.
+	// Visit 42 → 43 → back to 42 (now cached, renders synchronously).
+	const summary = (id: number, title: string) => ({
+		id,
+		media_type: "movie",
+		title,
+		overview: "",
+		poster_path: null,
+		backdrop_path: null,
+		year: 2021,
+		vote_average: 6,
+	});
+	stubTasteFetch({
+		"/api/v1/title/movie/42": {
+			...DETAIL,
+			taste: { watchlisted: true, hidden: false },
+			recommendations: [summary(43, "Other Movie")],
+		},
+		"/api/v1/title/movie/43": {
+			...DETAIL,
+			id: 43,
+			title: "Other Movie",
+			taste: { watchlisted: false, hidden: false },
+			recommendations: [summary(42, "Deep Movie")],
+		},
+		"/api/v1/signals": { recorded: true },
+		"/api/v1/availability": {},
+	});
+	renderModal();
+	expect(
+		await screen.findByRole("button", { name: "✓ In My List" }),
+	).toBeTruthy();
+
+	fireEvent.click(screen.getByRole("link", { name: /Other Movie/ }));
+	expect(
+		await screen.findByRole("button", { name: "＋ My List" }),
+	).toBeTruthy();
+
+	fireEvent.click(screen.getByRole("link", { name: /Deep Movie/ }));
+
+	// Back on 42 (cached): its own watchlisted=true flags must win, not the
+	// carried-over state from 43.
+	expect(
+		await screen.findByRole("button", { name: "✓ In My List" }),
+	).toBeTruthy();
+});
+
+test("explain loads lazily and lists reasons as text", async () => {
+	const calls = stubTasteFetch({
+		"/api/v1/signals": { recorded: true },
+		"/api/v1/recommendations/explain": {
+			personalized: true,
+			reasons: ["Science Fiction", "time travel"],
+		},
+	});
+	renderModal();
+	const toggle = await screen.findByRole("button", {
+		name: "Why am I seeing this?",
+	});
+	expect(
+		calls.some((call) => call.url.includes("/recommendations/explain")),
+	).toBe(false); // nothing fetched before the user asks
+
+	fireEvent.click(toggle);
+
+	expect(
+		await screen.findByText("Because you like: Science Fiction, time travel"),
+	).toBeTruthy();
+});
+
+test("explain shows the honest empty state when not personalized", async () => {
+	stubTasteFetch({
+		"/api/v1/signals": { recorded: true },
+		"/api/v1/recommendations/explain": { personalized: false, reasons: [] },
+	});
+	renderModal();
+
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Why am I seeing this?" }),
+	);
+
+	expect(await screen.findByText(/Not personalized yet/)).toBeTruthy();
 });

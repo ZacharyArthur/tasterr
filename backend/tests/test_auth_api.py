@@ -614,3 +614,33 @@ def test_session_cookie_secure_follows_scheme(tmp_path: Path) -> None:
 
     assert "secure" not in plain.headers["set-cookie"].lower()
     assert "secure" in secure.headers["set-cookie"].lower()
+
+
+# --- Cold-start seed hook (M4) ---
+
+
+def test_logins_schedule_the_cold_start_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both login paths hand the user off to the seed scheduler after the
+    response is assembled — the login itself never waits on (or fails with)
+    the import, which is unit-tested in test_recommend_seed.py."""
+    scheduled: list[tuple[int, int]] = []
+
+    def recorder(request: object, settings: object, user_id: int, seerr_user_id: int) -> None:
+        scheduled.append((user_id, seerr_user_id))
+
+    monkeypatch.setattr("tasterr.api.auth.schedule_seed", recorder)
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        local = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        plex = client.get(f"/api/v1/auth/plex/pin/{handle}")
+
+    assert local.status_code == 200
+    assert plex.status_code == 200
+    assert scheduled == [(1, 7), (1, 7)]  # same Seerr user -> same Tasterr user row

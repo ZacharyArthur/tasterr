@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { MediaDetail, MediaType } from "../lib/api";
 import { useTitle } from "../lib/browse";
@@ -8,6 +8,7 @@ import {
 	profileUrl,
 	providerLogoUrl,
 } from "../lib/images";
+import { recordDetailOpen, useExplain, useTasteToggle } from "../lib/taste";
 import { AvailabilityBadge } from "./AvailabilityBadge";
 import { MediaCard } from "./MediaCard";
 import { RequestButton } from "./RequestButton";
@@ -39,6 +40,14 @@ export function DetailModal() {
 	const valid = isMediaType(type) && Number.isFinite(id) && id > 0;
 	const detail = useTitle(valid ? type : "movie", valid ? id : 0);
 	const dialogRef = useRef<HTMLDivElement>(null);
+
+	// Opening a detail is deliberate browse intent (SPEC §8) — recorded
+	// fire-and-forget so a failed signal never disturbs the view.
+	useEffect(() => {
+		if (valid) {
+			recordDetailOpen(type, id);
+		}
+	}, [valid, type, id]);
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -80,7 +89,15 @@ export function DetailModal() {
 				{detail.isError && (
 					<p className="p-8 text-red-400">Could not load this title.</p>
 				)}
-				{detail.data && <DetailBody detail={detail.data} />}
+				{detail.data && (
+					// Keyed by title identity: in-modal navigation ("More like this"
+					// cards) reuses this component, and the taste-toggle/explainer
+					// state must reset per title, never carry over.
+					<DetailBody
+						key={`${detail.data.media_type}-${detail.data.id}`}
+						detail={detail.data}
+					/>
+				)}
 			</div>
 		</div>
 	);
@@ -137,6 +154,8 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 					<p className="italic text-neutral-400">{detail.tagline}</p>
 				)}
 				<p className="text-neutral-300">{detail.overview}</p>
+
+				<TasteControls detail={detail} />
 
 				<section className="flex flex-col gap-3">
 					<h3 className="text-sm font-semibold text-neutral-200">
@@ -220,7 +239,83 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 						</div>
 					</section>
 				)}
+
+				<WhyThis type={detail.media_type} id={detail.id} />
 			</div>
 		</div>
+	);
+}
+
+function TasteControls({ detail }: { detail: MediaDetail }) {
+	const watchlist = useTasteToggle(
+		detail.media_type,
+		detail.id,
+		"watchlist",
+		detail.taste?.watchlisted ?? false,
+	);
+	const hide = useTasteToggle(
+		detail.media_type,
+		detail.id,
+		"not_interested",
+		detail.taste?.hidden ?? false,
+	);
+	return (
+		<div className="flex flex-wrap items-center gap-3">
+			<button
+				type="button"
+				onClick={watchlist.toggle}
+				disabled={watchlist.pending}
+				aria-pressed={watchlist.active}
+				className="rounded border border-neutral-700 px-3 py-1 text-sm text-neutral-200 transition-colors hover:bg-neutral-800 disabled:opacity-60"
+			>
+				{watchlist.active ? "✓ In My List" : "＋ My List"}
+			</button>
+			<button
+				type="button"
+				onClick={hide.toggle}
+				disabled={hide.pending}
+				aria-pressed={hide.active}
+				className="rounded border border-neutral-800 px-3 py-1 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 disabled:opacity-60"
+			>
+				{hide.active ? "Hidden — undo" : "Not interested"}
+			</button>
+		</div>
+	);
+}
+
+function WhyThis({ type, id }: { type: MediaType; id: number }) {
+	const [open, setOpen] = useState(false);
+	const explain = useExplain(type, id, open);
+	return (
+		<section className="flex flex-col gap-2">
+			<button
+				type="button"
+				onClick={() => setOpen((value) => !value)}
+				aria-expanded={open}
+				className="self-start text-sm text-neutral-400 underline-offset-2 transition-colors hover:text-neutral-200 hover:underline"
+			>
+				Why am I seeing this?
+			</button>
+			{open && explain.isPending && (
+				<p className="text-sm text-neutral-500">Thinking…</p>
+			)}
+			{open && explain.isError && (
+				<p className="text-sm text-neutral-500">
+					Could not load an explanation.
+				</p>
+			)}
+			{open &&
+				explain.data &&
+				(explain.data.personalized && explain.data.reasons.length > 0 ? (
+					<p className="text-sm text-neutral-300">
+						Because you like: {explain.data.reasons.join(", ")}
+					</p>
+				) : (
+					<p className="text-sm text-neutral-500">
+						Not personalized yet — open, request, and save titles you like and
+						Tasterr will learn your taste.
+					</p>
+				))}
+		</section>
 	);
 }

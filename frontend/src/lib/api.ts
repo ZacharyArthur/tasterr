@@ -21,6 +21,11 @@ export type AvailabilityStatus = Availability["status"];
 export type RequestResponse = components["schemas"]["RequestResponse"];
 /** Keyed by `"<media_type>:<id>"`, the shape `POST /availability` returns. */
 export type AvailabilityMap = Record<string, Availability>;
+export type SignalKind = components["schemas"]["SignalBody"]["kind"];
+export type SignalResponse = components["schemas"]["SignalResponse"];
+export type ExplainResponse = components["schemas"]["ExplainResponse"];
+export type ResetResponse = components["schemas"]["ResetResponse"];
+export type TasteFlags = components["schemas"]["TasteFlags"];
 
 export class ApiError extends Error {
 	readonly status: number;
@@ -136,4 +141,34 @@ export function createRequest(
 		media_type: mediaType,
 		tmdb_id: tmdbId,
 	});
+}
+
+/** Record (or retract, for the toggle kinds) an interaction signal (M4). */
+export function postSignal(
+	mediaType: MediaType,
+	tmdbId: number,
+	kind: SignalKind,
+	retract = false,
+): Promise<SignalResponse> {
+	return postJson<SignalResponse>("/api/v1/signals", {
+		media_type: mediaType,
+		tmdb_id: tmdbId,
+		kind,
+		retract,
+	});
+}
+
+/** "Why am I seeing this?" — reasons from the caller's own profile. */
+export function getExplain(
+	type: MediaType,
+	id: number,
+): Promise<ExplainResponse> {
+	return request<ExplainResponse>(
+		`/api/v1/recommendations/explain?type=${type}&id=${id}`,
+	);
+}
+
+/** Wipe the caller's signals + profile and re-seed from Seerr history. */
+export function resetRecommendations(): Promise<ResetResponse> {
+	return postJson<ResetResponse>("/api/v1/recommendations/reset");
 }

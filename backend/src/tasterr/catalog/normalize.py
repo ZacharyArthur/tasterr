@@ -35,7 +35,7 @@ _MAX_CAST = 12
 _MAX_CREW = 8
 
 
-def _parse_year(value: str | None) -> int | None:
+def parse_year(value: str | None) -> int | None:
     if not value or len(value) < 4:
         return None
     try:
@@ -72,7 +72,7 @@ def to_summary(raw: TmdbMediaResult, fallback: MediaType | None) -> MediaSummary
         overview=raw.overview or "",
         poster_path=raw.poster_path,
         backdrop_path=raw.backdrop_path,
-        year=_parse_year(raw.release_date or raw.first_air_date),
+        year=parse_year(raw.release_date or raw.first_air_date),
         vote_average=raw.vote_average,
     )
 
@@ -219,7 +219,7 @@ def to_detail(raw: TmdbDetail, media: MediaType, region: str) -> MediaDetail:
         overview=raw.overview or "",
         poster_path=raw.poster_path,
         backdrop_path=raw.backdrop_path,
-        year=_parse_year(raw.release_date or raw.first_air_date),
+        year=parse_year(raw.release_date or raw.first_air_date),
         vote_average=raw.vote_average,
         tagline=raw.tagline or "",
         genres=[Genre(id=g.id, name=g.name) for g in raw.genres],

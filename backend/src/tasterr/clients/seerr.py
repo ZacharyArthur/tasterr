@@ -1,13 +1,16 @@
 """Seerr endpoints (SPEC §4.1/§4.3/§6) — the only module that talks to Seerr.
 
-Login and request calls authenticate by credential/token/cookie only; the global
-SEERR_API_KEY is attached to *availability reads only* (not user-attributed) and
-never to a user flow (privilege confusion). Availability reads use the global key;
-requests use the per-user cookie — the two are never crossed. Contract validated
-against Seerr 3.3.0 (docs/SEERR-AUTH-SPIKE.md).
+Auth doctrine: the global SEERR_API_KEY authenticates **reads** (availability,
+request history — server-initiated, explicitly scoped by parameter), while
+user-attributed **mutations** (creating requests) ride only the member's own
+session cookie — the two are never crossed (privilege confusion: the key on a
+mutation would forge attribution and bypass quota; a cookie on a read would
+break when the member's Seerr session lapses). Contract validated against
+Seerr 3.3.0 (docs/SEERR-AUTH-SPIKE.md).
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 
 import httpx
@@ -108,6 +111,39 @@ class _SeerrRequestResult(BaseModel):
     media: SeerrMediaInfo | None = None
 
 
+class _SeerrHistoryMedia(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    tmdb_id: int | None = Field(default=None, alias="tmdbId")
+    media_type: str = Field(default="", alias="mediaType")
+
+
+class _SeerrHistoryRow(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    created_at: str = Field(default="", alias="createdAt")
+    media: _SeerrHistoryMedia | None = None
+
+
+class _SeerrHistoryPage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    results: list[_SeerrHistoryRow] = []
+
+
+@dataclass
+class SeerrHistoricalRequest:
+    """One of the member's past requests — the cold-start seed's input."""
+
+    media_type: MediaType
+    tmdb_id: int
+    created_at: datetime  # naive UTC, matching the DB convention
+
+
+HISTORY_PAGE_SIZE = 50
+HISTORY_MAX_ROWS = 200  # the seed only needs recent taste, not an archive
+
+
 class SeerrClient:
     """Availability reads (global API key) and request-as-user (per-user cookie).
 
@@ -141,6 +177,50 @@ class SeerrClient:
         except ValueError as error:
             raise UpstreamUnavailable("unexpected seerr response shape") from error
 
+    async def list_requests(self, requested_by: int) -> list[SeerrHistoricalRequest]:
+        """The member's request history, newest pages first, capped at
+        HISTORY_MAX_ROWS. A read scoped by the explicit `requestedBy` filter,
+        authenticated by the global key (module doctrine) — never a cookie.
+        Rows missing a TMDB id, a movie/tv type, or a parseable date are
+        skipped. The walk is bounded by *raw* pages requested, not parsed
+        rows, so a misbehaving upstream serving full pages of malformed rows
+        can never extend it past HISTORY_MAX_ROWS/HISTORY_PAGE_SIZE requests.
+        Raises UpstreamUnavailable/UpstreamRejected on failure."""
+        out: list[SeerrHistoricalRequest] = []
+        for skip in range(0, HISTORY_MAX_ROWS, HISTORY_PAGE_SIZE):
+            page = await self._request_page(requested_by, skip)
+            for row in page.results:
+                parsed = _historical_request(row)
+                if parsed is not None and len(out) < HISTORY_MAX_ROWS:
+                    out.append(parsed)
+            if len(page.results) < HISTORY_PAGE_SIZE:
+                break
+        return out
+
+    async def _request_page(self, requested_by: int, skip: int) -> _SeerrHistoryPage:
+        url = f"{self._base}/api/v1/request"
+        params: dict[str, str | int] = {
+            "take": HISTORY_PAGE_SIZE,
+            "skip": skip,
+            "requestedBy": requested_by,
+            "sort": "added",
+        }
+        headers = {"X-Api-Key": self._api_key, "Accept": "application/json"}
+        try:
+            response = await self._http.get(
+                url, params=params, headers=headers, timeout=SEERR_TIMEOUT_SECONDS
+            )
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
+        if response.status_code >= 500:
+            raise UpstreamUnavailable(f"seerr returned {response.status_code}")
+        if response.status_code >= 400:
+            raise UpstreamRejected(response.status_code)
+        try:
+            return _SeerrHistoryPage.model_validate(response.json())
+        except ValueError as error:
+            raise UpstreamUnavailable("unexpected seerr response shape") from error
+
     async def create_request(self, cookie: str, media_type: MediaType, tmdb_id: int) -> int:
         """Create a request attributed to the member (their cookie only — never the
         global key). A TV title requests the whole series at the default quality.
@@ -167,3 +247,19 @@ class SeerrClient:
         except ValueError:
             return MEDIA_STATUS_PENDING  # accepted; unparseable body → assume pending
         return result.media.status if result.media is not None else MEDIA_STATUS_PENDING
+
+
+def _historical_request(row: _SeerrHistoryRow) -> SeerrHistoricalRequest | None:
+    if row.media is None or row.media.tmdb_id is None:
+        return None
+    if row.media.media_type not in ("movie", "tv"):
+        return None
+    media_type: MediaType = "tv" if row.media.media_type == "tv" else "movie"
+    try:
+        parsed = datetime.fromisoformat(row.created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    created_at = parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+    return SeerrHistoricalRequest(
+        media_type=media_type, tmdb_id=row.media.tmdb_id, created_at=created_at
+    )

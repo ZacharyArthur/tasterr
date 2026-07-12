@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.taste import schedule_seed
 from tasterr.auth.cookies import clear_session_cookie, set_session_cookie
 from tasterr.auth.crypto import plex_client_identifier
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
@@ -125,6 +126,7 @@ async def poll_plex_pin(
     response: Response,
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> PinPollResponse:
     plex_pin_id = ctx.pins.get(pin_id)
     if plex_pin_id is None:
@@ -157,6 +159,7 @@ async def poll_plex_pin(
     user, token = await complete_login(db, ctx.secret_key, login, "plex", plex_token)
     _set_cookie(request, response, token)
     logger.info("auth: plex login succeeded user_id=%s", user.id)
+    schedule_seed(request, settings, user.id, user.seerr_user_id)
     return PinPollResponse(status="ok", user=UserResponse.from_user(user))
 
 
@@ -170,6 +173,7 @@ async def local_login(
     response: Response,
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
     try:
         login = await ctx.seerr.login_local(payload.email, payload.password)
@@ -183,6 +187,7 @@ async def local_login(
     user, token = await complete_login(db, ctx.secret_key, login, "local", None)
     _set_cookie(request, response, token)
     logger.info("auth: local login succeeded user_id=%s", user.id)
+    schedule_seed(request, settings, user.id, user.seerr_user_id)
     return UserResponse.from_user(user)
 
 

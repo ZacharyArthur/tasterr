@@ -4,7 +4,7 @@ This is the pure-ish layer between `api/`/`rails/` and `clients/` — it holds n
 HTTP itself, so rails and endpoints depend on domain shapes, not TMDB wire types.
 """
 
-from tasterr.catalog import normalize
+from tasterr.catalog import facts, normalize
 from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, MediaType
 from tasterr.clients.tmdb import TmdbClient
 
@@ -58,6 +58,12 @@ class CatalogService:
     async def detail(self, media: MediaType, tmdb_id: int) -> MediaDetail:
         raw = await self._client.detail(media, tmdb_id, self._region)
         return normalize.to_detail(raw, media, self._region)
+
+    async def title_facts(self, media: MediaType, tmdb_id: int) -> facts.TitleFacts:
+        """Feature-oriented facts for the taste engine — same cached fetch as
+        `detail()`, so a warm detail cache serves facts with no TMDB call."""
+        raw = await self._client.detail(media, tmdb_id, self._region)
+        return facts.to_facts(raw, media)
 
     async def genre_map(self, media: MediaType) -> dict[str, int]:
         genres = await self._client.genres(media)

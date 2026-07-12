@@ -12,7 +12,9 @@ and approval rules. The request body SHALL be validated (`media_type` constraine
 to `movie` or `tv`, a positive integer `tmdb_id`); a TV request SHALL request the
 whole series at the default quality. The global Seerr API key SHALL NOT be used for
 requests. On success the response SHALL carry the title's resulting library status
-so the SPA can update its badge.
+so the SPA can update its badge, and the backend SHALL record a `request` taste
+signal for the member server-side — a failure to record the signal SHALL NOT fail
+the request response.
 
 #### Scenario: Request lands attributed to the member
 
@@ -29,6 +31,16 @@ so the SPA can update its badge.
 
 - **WHEN** Seerr accepts the request
 - **THEN** the response includes the title's resulting library status
+
+#### Scenario: Successful request records a taste signal
+
+- **WHEN** Seerr accepts a member's request
+- **THEN** a `request` signal for that title is recorded server-side for the member
+
+#### Scenario: Signal failure never fails the request
+
+- **WHEN** the taste-signal write errors after Seerr accepted the request
+- **THEN** the request response still reports success
 
 ### Requirement: Invalid-session re-auth ladder
 

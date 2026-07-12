@@ -274,3 +274,95 @@ async def test_create_request_unparseable_body_defaults_pending() -> None:
     code = await _media_client(handler).create_request("connect.sid=abc", "movie", 42)
 
     assert code == 2  # MEDIA_STATUS_PENDING
+
+
+# ── SeerrClient: request history (global API key, cold-start seed) ───────────
+
+
+def _history_row(
+    tmdb_id: int, media_type: str = "movie", created: str = "2026-01-01"
+) -> dict[str, object]:
+    return {
+        "id": tmdb_id,
+        "createdAt": f"{created}T12:00:00.000Z",
+        "media": {"tmdbId": tmdb_id, "mediaType": media_type},
+        "requestedBy": {"id": 7},
+    }
+
+
+async def test_list_requests_walks_pages_with_the_filter() -> None:
+    pages: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/request"
+        assert request.headers["x-api-key"] == "seerr-api-key"
+        assert "cookie" not in request.headers  # a read never carries a user cookie
+        params = dict(request.url.params)
+        pages.append(params)
+        assert params["requestedBy"] == "7"
+        skip = int(params["skip"])
+        if skip == 0:
+            rows = [_history_row(i) for i in range(50)]
+        else:
+            rows = [_history_row(100), _history_row(200, "tv")]
+        return httpx.Response(200, json={"results": rows})
+
+    history = await _media_client(handler).list_requests(7)
+
+    assert len(pages) == 2  # a short second page ends the walk
+    assert len(history) == 52
+    assert history[-1].media_type == "tv"
+    assert history[-1].tmdb_id == 200
+    assert history[0].created_at.year == 2026
+
+
+async def test_list_requests_is_capped() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        rows = [_history_row(int(dict(request.url.params)["skip"]) + i) for i in range(50)]
+        return httpx.Response(200, json={"results": rows})
+
+    history = await _media_client(handler).list_requests(7)
+
+    assert len(history) == 200  # HISTORY_MAX_ROWS
+
+
+async def test_list_requests_skips_malformed_rows() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        rows: list[dict[str, object]] = [
+            _history_row(1),
+            {"createdAt": "2026-01-01T12:00:00.000Z", "media": None},  # no media block
+            {"createdAt": "2026-01-01T12:00:00.000Z", "media": {"mediaType": "movie"}},  # no id
+            _history_row(2, media_type="music"),  # unknown type
+            {"createdAt": "not a date", "media": {"tmdbId": 3, "mediaType": "movie"}},
+            _history_row(4, media_type="tv"),
+        ]
+        return httpx.Response(200, json={"results": rows})
+
+    history = await _media_client(handler).list_requests(7)
+
+    assert [(h.media_type, h.tmdb_id) for h in history] == [("movie", 1), ("tv", 4)]
+
+
+async def test_list_requests_bounded_by_raw_pages_not_parsed_rows() -> None:
+    """A misbehaving upstream serving full pages of malformed rows must not
+    extend the walk — the bound counts requests, not parseable rows."""
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        rows = [{"createdAt": "not a date", "media": {"mediaType": "book"}}] * 50
+        return httpx.Response(200, json={"results": rows})
+
+    history = await _media_client(handler).list_requests(7)
+
+    assert history == []
+    assert calls == 4  # HISTORY_MAX_ROWS / HISTORY_PAGE_SIZE, no further requests
+
+
+async def test_list_requests_5xx_is_unavailable() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    with pytest.raises(UpstreamUnavailable):
+        await _media_client(handler).list_requests(7)

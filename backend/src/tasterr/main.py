@@ -15,8 +15,10 @@ from tasterr.api.auth import router as auth_router
 from tasterr.api.availability import router as availability_router
 from tasterr.api.home import router as home_router
 from tasterr.api.meta import router as meta_router
+from tasterr.api.recommendations import router as recommendations_router
 from tasterr.api.request import router as request_router
 from tasterr.api.search import router as search_router
+from tasterr.api.signals import router as signals_router
 from tasterr.api.title import router as title_router
 from tasterr.auth.cookies import COOKIE_NAME, session_cookie_header
 from tasterr.auth.pins import PinStore
@@ -69,6 +71,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(search_router, prefix="/api/v1")
     app.include_router(availability_router, prefix="/api/v1")
     app.include_router(request_router, prefix="/api/v1")
+    app.include_router(signals_router, prefix="/api/v1")
+    app.include_router(recommendations_router, prefix="/api/v1")
     app.state.pin_store = PinStore()
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
@@ -76,6 +80,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # A separate bounded cache for short-TTL Seerr availability reads, so they
     # never evict the longer-lived TMDB entries (and vice versa).
     app.state.seerr_cache = Cache()
+    # Cold-start seed bookkeeping (M4): per-user single-flight + strong refs
+    # so fire-and-forget seed tasks aren't garbage-collected mid-import.
+    app.state.seeding = set()
+    app.state.seed_tasks = set()
     # Catalog failures map to generic browser errors (no upstream detail leaks).
     # UpstreamRejected (TMDB 4xx) that an endpoint doesn't handle itself (title/
     # detail maps its own 404) also degrades to a generic 502.

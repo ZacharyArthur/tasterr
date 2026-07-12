@@ -3,11 +3,12 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import Connection, delete, select, text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import ALEMBIC_DIR, upgrade_to_head
+from tasterr.db.models import Profile, Signal, User
 
 
 async def _stored_version(engine: AsyncEngine) -> str:
@@ -76,5 +77,55 @@ async def test_downgrade_drops_auth_tables(tmp_path: Path) -> None:
         tables = await _table_names(engine)
         assert "users" not in tables
         assert "sessions" not in tables
+    finally:
+        await engine.dispose()
+
+
+async def test_migration_0003_creates_taste_tables(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+
+        tables = await _table_names(engine)
+        assert {"signals", "title_features", "profiles"} <= tables
+    finally:
+        await engine.dispose()
+
+
+async def test_downgrade_drops_taste_tables(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+
+        async with engine.begin() as connection:
+            await connection.run_sync(_downgrade, "0002")
+
+        tables = await _table_names(engine)
+        assert tables.isdisjoint({"signals", "title_features", "profiles"})
+        assert {"users", "sessions"} <= tables
+    finally:
+        await engine.dispose()
+
+
+async def test_deleting_a_user_sweeps_taste_rows(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with maker() as db:
+            user = User(seerr_user_id=7, display_name="member", auth_type="plex")
+            db.add(user)
+            await db.flush()
+            db.add(
+                Signal(user_id=user.id, tmdb_id=550, media_type="movie", kind="request", weight=3.0)
+            )
+            db.add(Profile(user_id=user.id, vector="{}"))
+            await db.commit()
+
+            await db.execute(delete(User).where(User.id == user.id))
+            await db.commit()
+
+            assert (await db.execute(select(Signal))).scalars().all() == []
+            assert (await db.execute(select(Profile))).scalars().all() == []
     finally:
         await engine.dispose()

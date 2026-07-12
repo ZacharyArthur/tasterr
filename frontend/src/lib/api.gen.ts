@@ -225,6 +225,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Signal */
+        post: operations["post_signal_api_v1_signals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recommendations/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Explain Title */
+        get: operations["explain_title_api_v1_recommendations_explain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recommendations/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Profile */
+        post: operations["reset_profile_api_v1_recommendations_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -260,6 +311,16 @@ export interface components {
              * @default []
              */
             items: components["schemas"]["AvailabilityItem"][];
+        };
+        /** ExplainResponse */
+        ExplainResponse: {
+            /** Personalized */
+            personalized: boolean;
+            /**
+             * Reasons
+             * @default []
+             */
+            reasons: string[];
         };
         /** Genre */
         Genre: {
@@ -387,6 +448,7 @@ export interface components {
             /** Number Of Seasons */
             number_of_seasons: number | null;
             availability?: components["schemas"]["Availability"] | null;
+            taste?: components["schemas"]["TasteFlags"] | null;
         };
         /** MediaSummary */
         MediaSummary: {
@@ -513,6 +575,15 @@ export interface components {
             /** Seerr Url */
             seerr_url?: string | null;
         };
+        /**
+         * ResetResponse
+         * @description `seeded_signals` is how many request-history signals the re-seed
+         *     imported — 0 when the user has no history or Seerr was unreachable.
+         */
+        ResetResponse: {
+            /** Seeded Signals */
+            seeded_signals: number;
+        };
         /** SearchResponse */
         SearchResponse: {
             /**
@@ -531,6 +602,52 @@ export interface components {
             episode_count: number;
             /** Air Date */
             air_date: string | null;
+        };
+        /** SignalBody */
+        SignalBody: {
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "tv";
+            /** Tmdb Id */
+            tmdb_id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "detail_open" | "watchlist" | "not_interested";
+            /**
+             * Retract
+             * @default false
+             */
+            retract: boolean;
+        };
+        /**
+         * SignalResponse
+         * @description `recorded` is whether a new row was written — idempotent toggle re-adds
+         *     and same-day detail reopens succeed with `recorded: false`.
+         */
+        SignalResponse: {
+            /** Recorded */
+            recorded: boolean;
+        };
+        /**
+         * TasteFlags
+         * @description The caller's own toggle state for a title — resolved from their signals
+         *     at read time so the detail modal renders current watchlist/hidden state.
+         */
+        TasteFlags: {
+            /**
+             * Watchlisted
+             * @default false
+             */
+            watchlisted: boolean;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
         };
         /** UserResponse */
         UserResponse: {
@@ -941,6 +1058,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_signal_api_v1_signals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignalBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    explain_title_api_v1_recommendations_explain_get: {
+        parameters: {
+            query: {
+                type: "movie" | "tv";
+                id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplainResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_profile_api_v1_recommendations_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResetResponse"];
                 };
             };
         };

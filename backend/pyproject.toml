@@ -104,5 +104,6 @@ type = "forbidden"
 source_modules = [
     "tasterr.catalog",
     "tasterr.rails",
+    "tasterr.recommend",
 ]
 forbidden_modules = ["tasterr.settings"]

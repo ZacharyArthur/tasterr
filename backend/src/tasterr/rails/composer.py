@@ -18,12 +18,12 @@ from tasterr.rails.registry import (
     HERO_GENRE_LABELS,
     HERO_SIZE,
     HOME_GENRE_COUNT,
-    MIN_RAIL_ITEMS,
     RailContext,
     RailProvider,
     decade_provider,
     genre_provider,
     home_providers,
+    personalized_home_providers,
     top_rated_providers,
 )
 
@@ -32,7 +32,18 @@ TitleKey = tuple[MediaType, int]
 
 async def build_home(ctx: RailContext) -> HomeFeed:
     genre_map = await _safe_genre_map(ctx.catalog, "movie")
-    providers = home_providers() + _home_genre_providers(genre_map)
+    # Order (design decision 7): My List, Recommended for You, trending,
+    # More like X, then the M2 rails. Personalized providers yield nothing
+    # for a signal-less user, so the feed degrades to the non-personalized set.
+    before_trending, after_trending = personalized_home_providers(ctx)
+    trending, *rest = home_providers()
+    providers = [
+        *before_trending,
+        trending,
+        *after_trending,
+        *rest,
+        *_home_genre_providers(genre_map),
+    ]
     rails = await _compose_rails(ctx, providers)
     if not rails:
         raise UpstreamUnavailable("home feed unavailable")
@@ -50,17 +61,36 @@ async def build_extra_rails(ctx: RailContext, cursor: int) -> RailsPage:
 
 
 async def _compose_rails(ctx: RailContext, providers: list[RailProvider]) -> list[Rail]:
-    fetched = await asyncio.gather(*(_safe_fetch(provider, ctx) for provider in providers))
+    fetched = await _fetch_all(ctx, providers)
     seen: set[TitleKey] = set()
     rails: list[Rail] = []
     for provider, items in zip(providers, fetched, strict=True):
         picked = _dedupe(items, seen)
-        if len(picked) >= MIN_RAIL_ITEMS:
+        if len(picked) >= provider.min_items:
             seen.update((item.media_type, item.id) for item in picked)
             rails.append(
                 Rail(id=provider.id, title=provider.title, kind=provider.kind, items=picked)
             )
     return rails
+
+
+async def _fetch_all(ctx: RailContext, providers: list[RailProvider]) -> list[list[MediaSummary]]:
+    """Fetch every provider, preserving provider order in the result.
+
+    Exclusive providers share the request's AsyncSession (not safe for
+    concurrent tasks — concurrent vector/profile writes collided and silently
+    dropped the personalized rails), so they run one at a time; everything
+    else fans out concurrently as before.
+    """
+    fetched: list[list[MediaSummary]] = [[] for _ in providers]
+    for index, provider in enumerate(providers):
+        if provider.exclusive:
+            fetched[index] = await _safe_fetch(provider, ctx)
+    concurrent = [(i, p) for i, p in enumerate(providers) if not p.exclusive]
+    results = await asyncio.gather(*(_safe_fetch(provider, ctx) for _, provider in concurrent))
+    for (index, _), items in zip(concurrent, results, strict=True):
+        fetched[index] = items
+    return fetched
 
 
 def _dedupe(items: list[MediaSummary], seen: set[TitleKey]) -> list[MediaSummary]:

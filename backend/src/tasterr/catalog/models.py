@@ -65,6 +65,14 @@ class WatchProviders(BaseModel):
     free: list[ProviderInfo] = []
 
 
+class TasteFlags(BaseModel):
+    """The caller's own toggle state for a title — resolved from their signals
+    at read time so the detail modal renders current watchlist/hidden state."""
+
+    watchlisted: bool = False
+    hidden: bool = False
+
+
 class MediaDetail(MediaSummary):
     tagline: str
     genres: list[Genre] = []
@@ -83,6 +91,9 @@ class MediaDetail(MediaSummary):
     # Populated by the title endpoint (M3); None until then and on the normalizer's
     # own output, which is TMDB-only. Seerr-down leaves it Unknown, never absent.
     availability: Availability | None = None
+    # Populated by the title endpoint (M4) from the caller's own signals;
+    # None on the normalizer's TMDB-only output.
+    taste: TasteFlags | None = None
 
 
 class HeroSlide(BaseModel):

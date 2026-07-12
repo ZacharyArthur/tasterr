@@ -7,11 +7,15 @@ TBD - created by archiving change m2-browse. Update Purpose after archive.
 
 `GET /api/v1/home` SHALL return a hero — a small set of featured titles with
 backdrop, logo, and trailer metadata — and an ordered list of rails, each a titled
-list of media summaries. Rails SHALL be composed from the enabled non-personalized
-providers (trending, popular, recently-added, and genre). A provider failure
-SHALL degrade the feed to fewer rails rather than fail the request, and rails with
-fewer than a minimum number of items SHALL be omitted. Titles SHALL be de-duplicated
-across the returned rails so a title does not repeat in a later rail.
+list of media summaries. Rails SHALL be composed from the enabled providers:
+the non-personalized set (trending, popular, recently-added, and genre) and, for
+the authenticated user, the personalized set (recommended-for-you,
+because-you-watched, and my-list) supplied by the taste-recommendations
+capability. A provider failure SHALL degrade the feed to fewer rails rather than
+fail the request, and rails with fewer than a minimum number of items SHALL be
+omitted — which is also how a signal-less user degrades to the non-personalized
+feed. Titles SHALL be de-duplicated across the returned rails so a title does not
+repeat in a later rail.
 
 #### Scenario: Authenticated home returns hero and rails
 - **WHEN** an authenticated client requests `GET /api/v1/home`
@@ -28,6 +32,15 @@ across the returned rails so a title does not repeat in a later rail.
 #### Scenario: Titles de-duplicated across rails
 - **WHEN** a title qualifies for more than one rail in a single response
 - **THEN** it appears in only one of the returned rails
+
+#### Scenario: Home is personalized per user
+- **WHEN** two users with different taste profiles request `GET /api/v1/home`
+- **THEN** each receives personalized rails reflecting their own profile
+
+#### Scenario: Signal-less user sees the non-personalized home
+- **WHEN** a user with no signals requests the home feed
+- **THEN** the response contains the non-personalized rails and no personalized
+  rail placeholders
 
 ### Requirement: Infinite-scroll additional rails
 
@@ -139,6 +152,13 @@ title is already available/requested, shows an optimistic pending state on submi
 prompts re-login when the backend signals `re_auth_required`, and offers a
 server-provided "Request in Seerr" link on failure. Seerr/library text SHALL be
 rendered as text, and any Seerr external link SHALL come only from the backend.
+The detail modal SHALL additionally carry the **taste affordances**: opening a
+detail posts a `detail_open` signal (fire-and-forget — a failed signal never
+disturbs browsing), a watchlist toggle adds or retracts a `watchlist` signal, a
+"Not interested" control adds or retracts a `not_interested` signal, and a
+"Why am I seeing this?" element reveals the backend's explanation for the title.
+The navbar user menu SHALL offer **Reset recommendations**, invoking the reset
+endpoint only after an explicit confirmation.
 
 #### Scenario: Home renders hero and rails
 
@@ -181,4 +201,33 @@ rendered as text, and any Seerr external link SHALL come only from the backend.
 
 - **WHEN** a request returns `re_auth_required`
 - **THEN** the SPA prompts the user to re-login rather than showing a generic error
+
+#### Scenario: Opening a detail records a signal quietly
+
+- **WHEN** the user opens a title's detail modal
+- **THEN** a `detail_open` signal is posted without blocking or disturbing the
+  view, even if the post fails
+
+#### Scenario: Watchlist toggles from the detail modal
+
+- **WHEN** the user toggles the watchlist control on a title
+- **THEN** the SPA posts the `watchlist` signal (or its retraction) and reflects
+  the new state
+
+#### Scenario: Not interested hides and can be undone
+
+- **WHEN** the user marks a title "Not interested"
+- **THEN** the SPA posts the `not_interested` signal and offers an undo that
+  retracts it
+
+#### Scenario: Explainer reveals the why
+
+- **WHEN** the user asks "Why am I seeing this?" on a title
+- **THEN** the SPA shows the reasons returned by the explain endpoint, rendered
+  as text
+
+#### Scenario: Reset requires confirmation
+
+- **WHEN** the user picks Reset recommendations from the navbar menu
+- **THEN** the reset endpoint is called only after the user explicitly confirms
 

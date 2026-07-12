@@ -100,12 +100,12 @@ def test_exemption_is_top_level_only(tmp_path: Path) -> None:
 
 
 def test_domain_models_do_not_import_settings() -> None:
-    """Response/domain layers (catalog/, rails/) never import secret settings
-    (SPEC §11); the api layer injects region/keys instead."""
+    """Response/domain layers (catalog/, rails/, recommend/) never import
+    secret settings (SPEC §11); the api layer injects region/keys instead."""
     offenders = [
         f
         for f in _offenders("tasterr.settings", exempt=set())
-        if f.startswith(("catalog", "rails"))
+        if f.startswith(("catalog", "rails", "recommend"))
     ]
     assert offenders == [], f"settings imported by a domain/response-model module: {offenders}"
 

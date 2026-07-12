@@ -21,10 +21,11 @@ are never committed; see SECURITY.md working notes):
                                  real request in Seerr and best-effort deletes it
 
 Validates the contract the recorded fixtures in tests/test_clients_seerr.py
-assume — auth (local login, the 403-not-401 deviation), M3 availability reads, and
-request-as-user attribution — and prints the Seerr version tested. The interactive
-PIN half of the Plex flow still needs a human at plex.tv; supply a token obtained
-from any signed-in Plex client to cover the Seerr side. Known-good version: 3.3.0.
+assume — auth (local login, the 403-not-401 deviation), M3 availability reads,
+request-as-user attribution, and the M4 request-history read the cold-start seed
+consumes — and prints the Seerr version tested. The interactive PIN half of the
+Plex flow still needs a human at plex.tv; supply a token obtained from any
+signed-in Plex client to cover the Seerr side. Known-good version: 3.3.0.
 
 The M3 403 silent re-auth ladder is validated by its *primitives* here — a stored
 token minting a fresh cookie (test_plex_stored_token_login_contract), an invalid
@@ -81,6 +82,11 @@ requires_request = pytest.mark.skipif(
 requires_plex_token = pytest.mark.skipif(
     not (URL and PLEX_TOKEN),
     reason="TASTERR_LIVE_SEERR_URL/TASTERR_LIVE_PLEX_TOKEN not set",
+)
+
+requires_history = pytest.mark.skipif(
+    not (URL and EMAIL and PASSWORD and API_KEY),
+    reason="TASTERR_LIVE_SEERR_URL/EMAIL/PASSWORD/TASTERR_LIVE_SEERR_API_KEY not set",
 )
 
 
@@ -162,6 +168,35 @@ async def test_available_title_has_a_media_record() -> None:
 
         assert info is not None, "expected a media record for the supplied available id"
         assert info.status in range(1, 6)  # Seerr MediaStatus is 1-5
+
+
+@requires_history
+async def test_request_history_read_contract() -> None:
+    """The M4 cold-start seed's read: the global key + explicit `requestedBy`
+    filter returns only the member's requests, paginated, with the fields the
+    seed consumes (tmdb id, movie/tv type, created-at). Read-only."""
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
+
+        # Raw shape first: the filter is honored — every row is the member's —
+        # and pagination params are accepted.
+        raw = await http.get(
+            f"{URL}/api/v1/request",
+            params={"take": 20, "skip": 0, "requestedBy": login.user.id, "sort": "added"},
+            headers={"X-Api-Key": API_KEY, "Accept": "application/json"},
+        )
+        assert raw.status_code == 200
+        body = raw.json()
+        assert "results" in body
+        for row in body["results"]:
+            assert row["requestedBy"]["id"] == login.user.id
+
+        # Then the typed client parse the seed depends on.
+        history = await SeerrClient(http, URL, API_KEY).list_requests(login.user.id)
+        for item in history:
+            assert item.media_type in ("movie", "tv")
+            assert item.tmdb_id > 0
+            assert item.created_at.tzinfo is None  # naive UTC, the DB convention
 
 
 @requires_url

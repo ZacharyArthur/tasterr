@@ -8,12 +8,14 @@ import asyncio
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.api.availability import AvailabilityDep
 from tasterr.api.catalog import CatalogDep
-from tasterr.auth.deps import AuthedSession, require_session
-from tasterr.catalog.models import MediaDetail
+from tasterr.auth.deps import AuthedSession, get_db, require_session
+from tasterr.catalog.models import MediaDetail, TasteFlags
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.recommend import store
 
 router = APIRouter()
 
@@ -24,7 +26,8 @@ async def get_title(
     tmdb_id: Annotated[int, Path(ge=1)],
     catalog: CatalogDep,
     availability: AvailabilityDep,
-    _authed: Annotated[AuthedSession, Depends(require_session)],
+    authed: Annotated[AuthedSession, Depends(require_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MediaDetail:
     # Start the availability read first so it overlaps the TMDB detail fetch; it
     # never raises (degrades to Unknown internally), so only detail's errors branch.
@@ -39,4 +42,12 @@ async def get_title(
     except UpstreamUnavailable:
         availability_task.cancel()
         raise
-    return detail.model_copy(update={"availability": await availability_task})
+    # The caller's own toggle state (M4) — one indexed query, keyed by the
+    # session user; never another user's signals.
+    watchlisted, hidden = await store.title_toggles(db, authed.user.id, media_type, tmdb_id)
+    return detail.model_copy(
+        update={
+            "availability": await availability_task,
+            "taste": TasteFlags(watchlisted=watchlisted, hidden=hidden),
+        }
+    )

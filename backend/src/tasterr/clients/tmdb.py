@@ -23,9 +23,10 @@ BACKOFF_BASE_SECONDS = 0.25
 
 MediaType = Literal["movie", "tv"]
 # release_dates (movie) / content_ratings (tv) carry the region certification;
-# keywords are an M4 signal source and are not fetched until then.
+# keywords feed the taste engine's feature vectors (M4).
 DETAIL_APPEND = (
-    "videos,images,credits,recommendations,similar,watch/providers,release_dates,content_ratings"
+    "videos,images,credits,recommendations,similar,watch/providers,"
+    "release_dates,content_ratings,keywords"
 )
 
 TTL_GENRES = CacheOpts(ttl=7 * 24 * 3600, stale=30 * 24 * 3600)
@@ -205,6 +206,33 @@ class TmdbContentRatings(BaseModel):
     results: list[TmdbContentRatingEntry] = []
 
 
+class TmdbKeyword(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str = ""
+
+
+class TmdbKeywords(BaseModel):
+    """Movie keywords arrive under `keywords`, TV keywords under `results`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    keywords: list[TmdbKeyword] = []
+    results: list[TmdbKeyword] = []
+
+    @property
+    def all(self) -> list[TmdbKeyword]:
+        return self.keywords or self.results
+
+
+class TmdbCreator(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str = ""
+
+
 class TmdbDetail(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -219,6 +247,7 @@ class TmdbDetail(BaseModel):
     release_date: str | None = None
     first_air_date: str | None = None
     vote_average: float = 0.0
+    vote_count: int = 0
     popularity: float = 0.0
     original_language: str = ""
     tagline: str | None = None
@@ -227,6 +256,8 @@ class TmdbDetail(BaseModel):
     number_of_seasons: int | None = None
     genres: list[TmdbGenre] = []
     seasons: list[TmdbSeason] = []
+    created_by: list[TmdbCreator] = []
+    keywords: TmdbKeywords | None = None
     videos: TmdbVideos | None = None
     images: TmdbImages | None = None
     credits: TmdbCredits | None = None
