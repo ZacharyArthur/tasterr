@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.auth.deps import AuthedSession, require_session
 from tasterr.settings import PublicConfig, Settings, get_settings
 
@@ -31,6 +32,7 @@ def get_health(settings: Annotated[Settings, Depends(get_settings)]) -> HealthRe
 @router.get("/config")
 def get_config(
     settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
     _authed: Annotated[AuthedSession, Depends(require_session)],
 ) -> PublicConfig:
-    return PublicConfig.from_settings(settings)
+    return PublicConfig.from_settings(settings, runtime)

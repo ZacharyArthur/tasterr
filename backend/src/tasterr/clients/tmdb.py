@@ -30,6 +30,8 @@ DETAIL_APPEND = (
 )
 
 TTL_GENRES = CacheOpts(ttl=7 * 24 * 3600, stale=30 * 24 * 3600)
+TTL_REGIONS = CacheOpts(ttl=7 * 24 * 3600, stale=30 * 24 * 3600)
+TTL_PROVIDERS = CacheOpts(ttl=12 * 3600, stale=3 * 24 * 3600)
 TTL_DISCOVER = CacheOpts(ttl=45 * 60, stale=12 * 3600)
 TTL_TRENDING = CacheOpts(ttl=30 * 60, stale=6 * 3600)
 TTL_DETAIL = CacheOpts(ttl=6 * 3600, stale=2 * 24 * 3600)
@@ -82,6 +84,45 @@ class TmdbGenreList(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     genres: list[TmdbGenre] = []
+
+
+class TmdbRegion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    iso_3166_1: str
+    english_name: str = ""
+    native_name: str = ""
+
+
+class TmdbRegionList(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    results: list[TmdbRegion] = []
+
+
+class TmdbProvider(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    provider_id: int
+    provider_name: str = ""
+    logo_path: str | None = None
+    display_priority: int = 9999
+    display_priorities: dict[str, int] = {}
+
+    def priority_for(self, region: str) -> int:
+        return self.display_priorities.get(region, self.display_priority)
+
+
+class TmdbProviderList(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    results: list[TmdbProvider] = []
+
+
+class TmdbConfiguration(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    images: dict[str, object]
 
 
 class TmdbVideo(BaseModel):
@@ -305,6 +346,7 @@ class TmdbClient:
         min_votes: int | None = None,
         release_gte: str | None = None,
         release_lte: str | None = None,
+        providers: list[int] | None = None,
     ) -> TmdbMediaPage:
         params: dict[str, str | int] = {
             "language": LANGUAGE,
@@ -317,6 +359,9 @@ class TmdbClient:
             params["vote_count.gte"] = min_votes
         if genres:
             params["with_genres"] = ",".join(str(g) for g in genres)
+        if providers:
+            params["with_watch_providers"] = "|".join(str(provider) for provider in providers)
+            params["with_watch_monetization_types"] = "flatrate"
         date_field = "primary_release_date" if media == "movie" else "first_air_date"
         if release_gte is not None:
             params[f"{date_field}.gte"] = release_gte
@@ -358,6 +403,33 @@ class TmdbClient:
             f"/genre/{media}/list", {"language": LANGUAGE}, TTL_GENRES, TmdbGenreList
         )
         return result.genres
+
+    async def regions(self) -> list[TmdbRegion]:
+        result = await self._cached(
+            "/watch/providers/regions",
+            {"language": LANGUAGE},
+            TTL_REGIONS,
+            TmdbRegionList,
+        )
+        return result.results
+
+    async def providers(self, media: MediaType, region: str) -> list[TmdbProvider]:
+        result = await self._cached(
+            f"/watch/providers/{media}",
+            {"language": LANGUAGE, "watch_region": region},
+            TTL_PROVIDERS,
+            TmdbProviderList,
+        )
+        return result.results
+
+    async def probe(self) -> None:
+        if self._api_key is None:
+            raise CatalogNotConfigured
+        data = await self._request("/configuration", {})
+        try:
+            TmdbConfiguration.model_validate(data)
+        except ValidationError as error:
+            raise UpstreamUnavailable("unexpected tmdb response shape") from error
 
     async def _cached(
         self, path: str, params: dict[str, str | int], opts: CacheOpts, model: type[M]

@@ -123,6 +123,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Settings */
+        get: operations["get_admin_settings_api_v1_settings_get"];
+        /** Put Admin Settings */
+        put: operations["put_admin_settings_api_v1_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Regions */
+        get: operations["get_regions_api_v1_regions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Services */
+        get: operations["get_services_api_v1_services_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connection-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Connection */
+        post: operations["test_connection_api_v1_connection_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/home": {
         parameters: {
             query?: never;
@@ -281,6 +350,18 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * Accent
+         * @enum {string}
+         */
+        Accent: "crimson" | "azure" | "violet" | "emerald" | "amber";
+        /** Appearance */
+        Appearance: {
+            /** @default dark */
+            theme: components["schemas"]["Theme"];
+            /** @default crimson */
+            accent: components["schemas"]["Accent"];
+        };
+        /**
          * Availability
          * @description A title's library status. `known` is false only when Seerr was unreachable —
          *     distinguishing "Seerr says not-in-library" from "we couldn't reach Seerr".
@@ -311,6 +392,23 @@ export interface components {
              * @default []
              */
             items: components["schemas"]["AvailabilityItem"][];
+        };
+        /**
+         * ConnectionTarget
+         * @enum {string}
+         */
+        ConnectionTarget: "tmdb" | "seerr";
+        /** ConnectionTestRequest */
+        ConnectionTestRequest: {
+            target: components["schemas"]["ConnectionTarget"];
+        };
+        /** ConnectionTestResponse */
+        ConnectionTestResponse: {
+            target: components["schemas"]["ConnectionTarget"];
+            /** Ok */
+            ok: boolean;
+            /** Detail */
+            detail: string;
         };
         /** ExplainResponse */
         ExplainResponse: {
@@ -520,6 +618,7 @@ export interface components {
             tmdb_configured: boolean;
             /** Seerr Configured */
             seerr_configured: boolean;
+            appearance: components["schemas"]["Appearance"];
         };
         /** Rail */
         Rail: {
@@ -539,6 +638,17 @@ export interface components {
              */
             items: components["schemas"]["MediaSummary"][];
         };
+        /**
+         * RailType
+         * @enum {string}
+         */
+        RailType: "hero" | "my-list" | "trending" | "more-like" | "popular" | "recommended" | "services" | "genres" | "recent" | "top-rated" | "decades";
+        /** RailTypeDescriptor */
+        RailTypeDescriptor: {
+            id: components["schemas"]["RailType"];
+            /** Label */
+            label: string;
+        };
         /** RailsPage */
         RailsPage: {
             /**
@@ -548,6 +658,18 @@ export interface components {
             rails: components["schemas"]["Rail"][];
             /** Next Cursor */
             next_cursor?: number | null;
+        };
+        /** RegionOption */
+        RegionOption: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+        };
+        /** RegionsResponse */
+        RegionsResponse: {
+            /** Regions */
+            regions: components["schemas"]["RegionOption"][];
         };
         /** RequestBody */
         RequestBody: {
@@ -584,6 +706,25 @@ export interface components {
             /** Seeded Signals */
             seeded_signals: number;
         };
+        /** RuntimeSettings */
+        RuntimeSettings: {
+            /**
+             * Region
+             * @default US
+             */
+            region: string;
+            /**
+             * Service Ids
+             * @default []
+             */
+            service_ids: number[];
+            /**
+             * Disabled Rail Types
+             * @default []
+             */
+            disabled_rail_types: components["schemas"]["RailType"][];
+            appearance?: components["schemas"]["Appearance"];
+        };
         /** SearchResponse */
         SearchResponse: {
             /**
@@ -602,6 +743,30 @@ export interface components {
             episode_count: number;
             /** Air Date */
             air_date: string | null;
+        };
+        /** ServiceOption */
+        ServiceOption: {
+            /** Provider Id */
+            provider_id: number;
+            /** Name */
+            name: string;
+            /** Logo Path */
+            logo_path: string | null;
+            /** Display Priority */
+            display_priority: number;
+        };
+        /** ServicesResponse */
+        ServicesResponse: {
+            /** Region */
+            region: string;
+            /** Services */
+            services: components["schemas"]["ServiceOption"][];
+        };
+        /** SettingsResponse */
+        SettingsResponse: {
+            settings: components["schemas"]["RuntimeSettings"];
+            /** Rail Types */
+            rail_types: components["schemas"]["RailTypeDescriptor"][];
         };
         /** SignalBody */
         SignalBody: {
@@ -649,6 +814,11 @@ export interface components {
              */
             hidden: boolean;
         };
+        /**
+         * Theme
+         * @enum {string}
+         */
+        Theme: "dark" | "light";
         /** UserResponse */
         UserResponse: {
             /** Id */
@@ -877,6 +1047,143 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_admin_settings_api_v1_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+        };
+    };
+    put_admin_settings_api_v1_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_regions_api_v1_regions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegionsResponse"];
+                };
+            };
+        };
+    };
+    get_services_api_v1_services_get: {
+        parameters: {
+            query: {
+                region: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServicesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_api_v1_connection_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

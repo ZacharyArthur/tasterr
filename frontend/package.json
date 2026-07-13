@@ -9,7 +9,7 @@
 		"typecheck": "tsc -b",
 		"lint": "biome check .",
 		"format": "biome check --write .",
-		"test": "vitest run",
+		"test": "vitest run --no-file-parallelism",
 		"preview": "vite preview"
 	},
 	"dependencies": {

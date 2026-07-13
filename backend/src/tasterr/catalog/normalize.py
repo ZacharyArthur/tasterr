@@ -14,7 +14,9 @@ from tasterr.catalog.models import (
     MediaType,
     Person,
     ProviderInfo,
+    RegionOption,
     SeasonSummary,
+    ServiceOption,
     Video,
     WatchProviders,
 )
@@ -24,6 +26,8 @@ from tasterr.clients.tmdb import (
     TmdbDetail,
     TmdbImage,
     TmdbMediaResult,
+    TmdbProvider,
+    TmdbRegion,
     TmdbVideo,
     TmdbWatchEntry,
     TmdbWatchProvider,
@@ -236,3 +240,33 @@ def to_detail(raw: TmdbDetail, media: MediaType, region: str) -> MediaDetail:
         seasons=_seasons(raw),
         number_of_seasons=raw.number_of_seasons,
     )
+
+
+def to_regions(items: list[TmdbRegion]) -> list[RegionOption]:
+    return sorted(
+        [
+            RegionOption(
+                code=item.iso_3166_1,
+                name=item.english_name or item.native_name or item.iso_3166_1,
+            )
+            for item in items
+        ],
+        key=lambda item: (item.name.casefold(), item.code),
+    )
+
+
+def to_services(
+    movie: list[TmdbProvider], tv: list[TmdbProvider], region: str
+) -> list[ServiceOption]:
+    by_id: dict[int, ServiceOption] = {}
+    for item in [*movie, *tv]:
+        priority = item.priority_for(region)
+        existing = by_id.get(item.provider_id)
+        if existing is None or priority < existing.display_priority:
+            by_id[item.provider_id] = ServiceOption(
+                provider_id=item.provider_id,
+                name=item.provider_name or f"Provider {item.provider_id}",
+                logo_path=item.logo_path,
+                display_priority=priority,
+            )
+    return sorted(by_id.values(), key=lambda item: (item.display_priority, item.name.casefold()))

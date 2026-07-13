@@ -25,17 +25,17 @@ export function Search() {
 				value={text}
 				placeholder="Search movies and shows"
 				onChange={(event) => setText(event.target.value)}
-				className="w-full max-w-xl rounded border border-neutral-700 bg-neutral-900 px-4 py-2 text-neutral-100 placeholder:text-neutral-500"
+				className="min-h-11 w-full max-w-xl rounded border border-app-border bg-app-surface px-4 py-2 text-app-text placeholder:text-app-muted-text focus-visible:outline-2 focus-visible:outline-app-accent"
 			/>
 
 			{results.isPending && query.trim() && (
-				<p className="text-neutral-400">Searching…</p>
+				<p className="text-app-subtle">Searching…</p>
 			)}
 			{results.isError && (
-				<p className="text-red-400">Search failed — try again.</p>
+				<p className="text-status-error">Search failed — try again.</p>
 			)}
 			{results.data && results.data.results.length === 0 && (
-				<p className="text-neutral-400">No results for “{query}”.</p>
+				<p className="text-app-subtle">No results for “{query}”.</p>
 			)}
 			{results.data && results.data.results.length > 0 && (
 				<AvailabilityContext.Provider value={availability.data ?? {}}>

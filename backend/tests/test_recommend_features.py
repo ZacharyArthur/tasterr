@@ -29,6 +29,8 @@ def _facts(**overrides: object) -> TitleFacts:
         "runtime": 100,
         "vote_average": 8.4,
         "vote_count": 33000,
+        "watch_region": "US",
+        "flatrate_provider_ids": [8, 337],
     }
     return TitleFacts.model_validate({**base, **overrides})
 
@@ -47,6 +49,8 @@ def test_vector_carries_every_dimension_class_with_normalized_labels() -> None:
     }
     assert record.vote_average == 8.4
     assert record.vote_count == 33000
+    assert record.watch_region == "US"
+    assert record.flatrate_provider_ids == [8, 337]
 
 
 def test_class_weight_ratios_survive_normalization() -> None:

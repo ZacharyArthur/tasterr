@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from tasterr.runtime_settings import Appearance, RuntimeSettings
+
 
 class Settings(BaseSettings):
     """Env-driven configuration. Never stored in the DB, never editable via any API.
@@ -68,12 +70,17 @@ class PublicConfig(BaseModel):
 
     tmdb_configured: bool
     seerr_configured: bool
+    appearance: Appearance
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "PublicConfig":
+    def from_settings(
+        cls, settings: Settings, runtime: RuntimeSettings | None = None
+    ) -> "PublicConfig":
+        resolved = runtime if runtime is not None else RuntimeSettings()
         return cls(
             tmdb_configured=settings.tmdb_configured,
             seerr_configured=settings.seerr_configured,
+            appearance=resolved.appearance,
         )
 
 

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import refresh_profile
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
 from tasterr.recommend import store
@@ -43,6 +44,7 @@ async def post_signal(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
 ) -> SignalResponse:
     if payload.retract:
         if payload.kind not in TOGGLE_KINDS:
@@ -56,5 +58,5 @@ async def post_signal(
             db, authed.user.id, payload.media_type, payload.tmdb_id, payload.kind
         )
     await db.commit()
-    await refresh_profile(request, settings, db, authed.user.id)
+    await refresh_profile(request, settings, db, authed.user.id, runtime)
     return SignalResponse(recorded=recorded)

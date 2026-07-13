@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import build_seerr, build_taste
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
 from tasterr.recommend import store
@@ -42,10 +43,11 @@ async def explain_title(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
     media_type: Annotated[MediaType, Query(alias="type")],
     tmdb_id: Annotated[int, Query(alias="id", ge=1)],
 ) -> ExplainResponse:
-    taste = build_taste(request, settings, db)
+    taste = build_taste(request, settings, db, runtime)
     if taste is None:
         return ExplainResponse(personalized=False)  # no catalog, no vectors to overlap
     explanation = await taste.explain_title(authed.user.id, media_type, tmdb_id)
@@ -63,10 +65,11 @@ async def reset_profile(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
 ) -> ResetResponse:
     await store.delete_user_taste(db, authed.user.id)
     await db.commit()  # the wipe holds even if the re-seed below fails
-    taste = build_taste(request, settings, db)
+    taste = build_taste(request, settings, db, runtime)
     seerr = build_seerr(request, settings)
     if taste is None or seerr is None:
         return ResetResponse(seeded_signals=0)

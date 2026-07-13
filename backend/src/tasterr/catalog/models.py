@@ -58,6 +58,18 @@ class ProviderInfo(BaseModel):
     logo_path: str | None
 
 
+class RegionOption(BaseModel):
+    code: str
+    name: str
+
+
+class ServiceOption(BaseModel):
+    provider_id: int
+    name: str
+    logo_path: str | None
+    display_priority: int
+
+
 class WatchProviders(BaseModel):
     flatrate: list[ProviderInfo] = []
     rent: list[ProviderInfo] = []

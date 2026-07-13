@@ -96,3 +96,18 @@ class Profile(Base):
     )
     vector: Mapped[str]
     computed_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+
+class Setting(Base):
+    """One typed, non-secret runtime-settings document (M5).
+
+    The generic-looking table shape mirrors the founding data model, but M5 owns
+    exactly one key (``global``); validation and serialization live in
+    ``runtime_settings.py``/``db.runtime_settings`` rather than in callers.
+    """
+
+    __tablename__ = "settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str]
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)

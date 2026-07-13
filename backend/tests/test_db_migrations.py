@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import ALEMBIC_DIR, upgrade_to_head
-from tasterr.db.models import Profile, Signal, User
+from tasterr.db.models import Profile, Setting, Signal, User
 
 
 async def _stored_version(engine: AsyncEngine) -> str:
@@ -103,6 +103,42 @@ async def test_downgrade_drops_taste_tables(tmp_path: Path) -> None:
         tables = await _table_names(engine)
         assert tables.isdisjoint({"signals", "title_features", "profiles"})
         assert {"users", "sessions"} <= tables
+    finally:
+        await engine.dispose()
+
+
+async def test_migration_0004_creates_empty_settings_table(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+        assert "settings" in await _table_names(engine)
+
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with maker() as db:
+            assert (await db.execute(select(Setting))).scalars().all() == []
+    finally:
+        await engine.dispose()
+
+
+async def test_downgrade_drops_only_settings_table(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with maker() as db:
+            user = User(seerr_user_id=8, display_name="member", auth_type="local")
+            db.add(user)
+            db.add(Setting(key="global", value="{}"))
+            await db.commit()
+
+        async with engine.begin() as connection:
+            await connection.run_sync(_downgrade, "0003")
+
+        tables = await _table_names(engine)
+        assert "settings" not in tables
+        assert {"users", "signals", "title_features", "profiles"} <= tables
+        async with maker() as db:
+            assert (await db.execute(select(User))).scalars().one().seerr_user_id == 8
     finally:
         await engine.dispose()
 

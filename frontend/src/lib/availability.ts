@@ -25,8 +25,8 @@ export function availabilityKey(mediaType: MediaType, id: number): string {
 export const AvailabilityContext = createContext<AvailabilityMap>({});
 
 export function useConfig() {
-	// seerr_configured drives whether request affordances appear at all. Immutable
-	// for the life of the process, so it never needs refetching.
+	// Runtime appearance shares this key; a successful admin save explicitly
+	// invalidates it while ordinary browsing treats it as stable.
 	return useQuery({
 		queryKey: ["config"],
 		queryFn: getConfig,

@@ -58,10 +58,16 @@ class FiringIntersectionObserver {
 	}
 }
 
-function renderHome() {
+function renderHome(user?: {
+	id: number;
+	display_name: string;
+	avatar_url: null;
+	is_admin: boolean;
+}) {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
+	if (user) queryClient.setQueryData(["auth", "me"], user);
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
@@ -110,4 +116,33 @@ test("renders the hero and rails, then loads more via the sentinel", async () =>
 	expect(await screen.findByText("Trending Now")).toBeTruthy();
 	expect(await screen.findByText("Top Rated Movies")).toBeTruthy(); // auto-loaded first page
 	expect(await screen.findByText("2020s")).toBeTruthy(); // sentinel-triggered next page
+});
+
+test("all-disabled empty state gives only admins a Settings recovery link", async () => {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input) === "/api/v1/home")
+				return jsonResponse({ hero: [], rails: [] });
+			return jsonResponse({ rails: [], next_cursor: null });
+		}),
+	);
+	renderHome({
+		id: 1,
+		display_name: "Admin",
+		avatar_url: null,
+		is_admin: true,
+	});
+	expect(await screen.findByText("Your home feed is empty")).toBeTruthy();
+	expect(screen.getByRole("link", { name: "Open Settings" })).toBeTruthy();
+
+	cleanup();
+	renderHome({
+		id: 2,
+		display_name: "Viewer",
+		avatar_url: null,
+		is_admin: false,
+	});
+	expect(await screen.findByText("Your home feed is empty")).toBeTruthy();
+	expect(screen.queryByRole("link", { name: "Open Settings" })).toBeNull();
 });

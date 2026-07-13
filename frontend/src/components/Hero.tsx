@@ -43,7 +43,7 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
 					className="absolute inset-0 h-full w-full object-cover"
 				/>
 			)}
-			<div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/50 to-transparent" />
+			<div className="absolute inset-0 bg-gradient-to-t from-app-bg via-app-bg/50 to-transparent" />
 			<div className="absolute bottom-0 left-0 flex max-w-2xl flex-col gap-4 p-4 sm:p-8">
 				{logo ? (
 					<img
@@ -52,27 +52,27 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
 						className="max-h-24 w-auto max-w-xs object-contain object-left"
 					/>
 				) : (
-					<h1 className="text-4xl font-bold text-neutral-50">
+					<h1 className="text-4xl font-bold text-app-text">
 						{slide.item.title}
 					</h1>
 				)}
-				<div className="flex flex-wrap items-center gap-3 text-sm text-neutral-300">
+				<div className="flex flex-wrap items-center gap-3 text-sm text-app-text">
 					<AvailabilityBadge availability={availability} />
 					{slide.item.year !== null && <span>{slide.item.year}</span>}
 					{slide.certification && (
-						<span className="rounded border border-neutral-500 px-1.5 text-xs">
+						<span className="rounded border border-app-border px-1.5 text-xs">
 							{slide.certification}
 						</span>
 					)}
 					{slide.genres.length > 0 && <span>{slide.genres.join(" · ")}</span>}
 				</div>
-				<p className="line-clamp-3 text-sm text-neutral-300">
+				<p className="line-clamp-3 text-sm text-app-text">
 					{slide.item.overview}
 				</p>
 				<Link
 					to={`/title/${slide.item.media_type}/${slide.item.id}`}
 					state={{ backgroundLocation: location }}
-					className="w-fit rounded bg-neutral-100 px-5 py-2 font-medium text-neutral-950 transition-colors hover:bg-white"
+					className="inline-flex min-h-11 w-fit items-center rounded bg-app-accent px-5 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text"
 				>
 					View details
 				</Link>

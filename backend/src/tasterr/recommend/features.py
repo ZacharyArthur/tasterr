@@ -38,6 +38,8 @@ class FeatureRecord(BaseModel):
     vector: dict[str, float]
     vote_average: float = 0.0
     vote_count: int = 0
+    watch_region: str = ""
+    flatrate_provider_ids: list[int] = []
 
 
 def build_record(facts: TitleFacts) -> FeatureRecord:
@@ -61,6 +63,8 @@ def build_record(facts: TitleFacts) -> FeatureRecord:
         vector=l2_normalize(dims),
         vote_average=facts.vote_average,
         vote_count=facts.vote_count,
+        watch_region=facts.watch_region,
+        flatrate_provider_ids=facts.flatrate_provider_ids,
     )
 
 

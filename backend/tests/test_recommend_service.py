@@ -57,12 +57,15 @@ def _detail(tmdb_id: int, recommendations: list[MediaSummary]) -> MediaDetail:
 
 class FakeCatalog:
     def __init__(self) -> None:
+        self.region = "US"
+        self.selected_service_ids: tuple[int, ...] = ()
         self.facts_calls: list[TitleKey] = []
         self.failing_facts: set[TitleKey] = set()
         self.details: dict[TitleKey, MediaDetail] = {}
         self.trending_items: list[MediaSummary] = []
         self.discover_items: list[MediaSummary] = []
         self.genres_by_title: dict[TitleKey, list[str]] = {}
+        self.providers_by_title: dict[TitleKey, list[int]] = {}
 
     async def title_facts(self, media: MediaType, tmdb_id: int) -> TitleFacts:
         self.facts_calls.append((media, tmdb_id))
@@ -75,6 +78,8 @@ class FakeCatalog:
             genres=self.genres_by_title.get((media, tmdb_id), ["Drama"]),
             vote_average=7.0,
             vote_count=1000,
+            watch_region=self.region,
+            flatrate_provider_ids=self.providers_by_title.get((media, tmdb_id), []),
         )
 
     async def detail(self, media: MediaType, tmdb_id: int) -> MediaDetail:
@@ -133,7 +138,12 @@ async def _user(db: AsyncSession) -> int:
 
 async def test_warm_vectors_skip_facts_fetches(db: AsyncSession) -> None:
     catalog = FakeCatalog()
-    record = FeatureRecord(vector={"genre:drama": 1.0}, vote_average=7.0, vote_count=100)
+    record = FeatureRecord(
+        vector={"genre:drama": 1.0},
+        vote_average=7.0,
+        vote_count=100,
+        watch_region="US",
+    )
     await store.save_features(db, ("movie", 1), record)
 
     records = await _service(db, catalog).ensure_vectors([("movie", 1)])
@@ -153,6 +163,18 @@ async def test_stale_vector_is_rebuilt_and_persisted(db: AsyncSession) -> None:
     assert "genre:drama" in records[("movie", 1)].vector
     fresh = await store.load_features(db, [("movie", 1)], utcnow() - timedelta(minutes=1))
     assert ("movie", 1) in fresh
+
+
+async def test_wrong_region_vector_is_rebuilt_lazily(db: AsyncSession) -> None:
+    catalog = FakeCatalog()
+    catalog.region = "GB"
+    old = FeatureRecord(vector={"genre:drama": 1.0}, watch_region="US")
+    await store.save_features(db, ("movie", 1), old)
+
+    records = await _service(db, catalog).ensure_vectors([("movie", 1)])
+
+    assert catalog.facts_calls == [("movie", 1)]
+    assert records[("movie", 1)].watch_region == "GB"
 
 
 async def test_failing_title_is_skipped_not_fatal(db: AsyncSession) -> None:
@@ -235,6 +257,23 @@ async def test_in_library_candidate_outranks_its_equal(db: AsyncSession) -> None
     items = await _service(db, catalog, availability).recommended_for_you(user_id)
 
     assert next(item.id for item in items) == 3
+
+
+async def test_selected_service_candidate_gets_the_same_single_boost(db: AsyncSession) -> None:
+    user_id = await _user(db)
+    await store.record_signal(db, user_id, "movie", 1, "request")
+    catalog = FakeCatalog()
+    catalog.selected_service_ids = (8,)
+    catalog.details[("movie", 1)] = _detail(1, [_summary(2), _summary(3)])
+    catalog.providers_by_title[("movie", 3)] = [8]
+
+    service_only = await _service(db, catalog).recommended_for_you(user_id)
+
+    assert next(item.id for item in service_only) == 3
+
+    availability = FakeAvailability(available={("movie", 3)})
+    both = await _service(db, catalog, availability).recommended_for_you(user_id)
+    assert next(item.id for item in both) == 3
 
 
 async def test_two_users_with_different_taste_get_different_recommendations(

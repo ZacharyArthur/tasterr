@@ -62,6 +62,11 @@ class TasteService:
         it scores next time."""
         unique = list(dict.fromkeys(keys))
         records = await store.load_features(self._db, unique, utcnow() - VECTOR_MAX_AGE)
+        records = {
+            key: record
+            for key, record in records.items()
+            if record.watch_region == self._catalog.region
+        }
         missing = [key for key in unique if key not in records]
         if not missing:
             return records
@@ -255,8 +260,17 @@ class TasteService:
     async def _to_candidates(self, keys: list[TitleKey]) -> list[Candidate]:
         records = await self.ensure_vectors(keys)
         available = await self._in_library(list(records))
+        selected = set(self._catalog.selected_service_ids)
         return [
-            Candidate(key=key, record=record, available=key in available)
+            Candidate(
+                key=key,
+                record=record,
+                available=key in available
+                or (
+                    record.watch_region == self._catalog.region
+                    and bool(selected.intersection(record.flatrate_provider_ids))
+                ),
+            )
             for key, record in records.items()
         ]
 

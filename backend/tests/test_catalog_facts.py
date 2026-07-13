@@ -48,7 +48,7 @@ TV_JSON = {
 
 
 def test_movie_facts_carry_keywords_cast_and_director() -> None:
-    facts = to_facts(TmdbDetail.model_validate(MOVIE_JSON), "movie")
+    facts = to_facts(TmdbDetail.model_validate(MOVIE_JSON), "movie", "US")
 
     assert facts.tmdb_id == 42
     assert facts.title == "Deep"
@@ -64,7 +64,7 @@ def test_movie_facts_carry_keywords_cast_and_director() -> None:
 
 
 def test_tv_facts_use_created_by_and_episode_runtime() -> None:
-    facts = to_facts(TmdbDetail.model_validate(TV_JSON), "tv")
+    facts = to_facts(TmdbDetail.model_validate(TV_JSON), "tv", "US")
 
     assert facts.creators == ["Show Runner"]
     assert facts.keywords == ["war"]
@@ -73,7 +73,7 @@ def test_tv_facts_use_created_by_and_episode_runtime() -> None:
 
 
 def test_bare_detail_yields_empty_facts() -> None:
-    facts = to_facts(TmdbDetail(id=1), "movie")
+    facts = to_facts(TmdbDetail(id=1), "movie", "US")
 
     assert facts.title == "Untitled"
     assert facts.genres == []

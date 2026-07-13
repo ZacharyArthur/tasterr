@@ -29,9 +29,11 @@ class TitleFacts(BaseModel):
     runtime: int | None = None
     vote_average: float = 0.0
     vote_count: int = 0
+    watch_region: str = ""
+    flatrate_provider_ids: list[int] = []
 
 
-def to_facts(raw: TmdbDetail, media: MediaType) -> TitleFacts:
+def to_facts(raw: TmdbDetail, media: MediaType, region: str = "US") -> TitleFacts:
     title = raw.title or raw.name or raw.original_title or raw.original_name or "Untitled"
     keywords = [k.name for k in raw.keywords.all if k.name] if raw.keywords else []
     cast_members = raw.credits.cast if raw.credits else []
@@ -46,6 +48,7 @@ def to_facts(raw: TmdbDetail, media: MediaType) -> TitleFacts:
         if media == "movie"
         else (raw.episode_run_time[0] if raw.episode_run_time else None)
     )
+    watch = raw.watch_providers.results.get(region) if raw.watch_providers else None
     return TitleFacts(
         tmdb_id=raw.id,
         media_type=media,
@@ -59,4 +62,6 @@ def to_facts(raw: TmdbDetail, media: MediaType) -> TitleFacts:
         runtime=runtime,
         vote_average=raw.vote_average,
         vote_count=raw.vote_count,
+        watch_region=region,
+        flatrate_provider_ids=[item.provider_id for item in watch.flatrate] if watch else [],
     )

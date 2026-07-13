@@ -27,18 +27,63 @@ function jsonResponse(body: unknown, status = 200): Response {
 	return { ok: status < 400, status, json: async () => body } as Response;
 }
 
-function renderApp() {
+function renderApp(initialEntry = "/") {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
+			<MemoryRouter initialEntries={[initialEntry]}>
 				<App />
 			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 }
+
+test("a non-admin direct settings URL redirects before protected data is fetched", async () => {
+	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "/api/v1/auth/me") return jsonResponse(USER);
+		if (url === "/api/v1/home") return jsonResponse(HOME);
+		if (url === "/api/v1/config")
+			return jsonResponse({
+				seerr_configured: false,
+				plex_login_enabled: false,
+				local_login_enabled: false,
+				appearance: { theme: "dark", accent: "crimson" },
+			});
+		return jsonResponse(RAILS);
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	renderApp("/settings");
+	expect(await screen.findByText("Trending Now")).toBeTruthy();
+	expect(
+		fetchMock.mock.calls.some(([url]) => String(url) === "/api/v1/settings"),
+	).toBe(false);
+});
+
+test("authenticated shell applies only bounded appearance attributes", async () => {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "/api/v1/auth/me") return jsonResponse(USER);
+			if (url === "/api/v1/home") return jsonResponse(HOME);
+			if (url === "/api/v1/config")
+				return jsonResponse({
+					appearance: { theme: "light", accent: "azure" },
+				});
+			return jsonResponse(RAILS);
+		}),
+	);
+	renderApp();
+	const shell = (await screen.findByText("Trending Now")).closest(
+		"[data-theme]",
+	);
+	expect(shell?.getAttribute("data-theme")).toBe("light");
+	expect(shell?.getAttribute("data-accent")).toBe("azure");
+	expect(localStorage.length).toBe(0);
+});
 
 test("unauthenticated visitors see the login screen only", async () => {
 	vi.stubGlobal(

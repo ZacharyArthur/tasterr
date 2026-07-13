@@ -1,6 +1,14 @@
 """Pure normalization: summaries, trailer/logo picks, detail mapping (task 2.2)."""
 
-from tasterr.catalog.normalize import pick_logo, pick_trailer, to_detail, to_summaries, to_summary
+from tasterr.catalog.normalize import (
+    pick_logo,
+    pick_trailer,
+    to_detail,
+    to_regions,
+    to_services,
+    to_summaries,
+    to_summary,
+)
 from tasterr.clients.tmdb import (
     TmdbCastMember,
     TmdbContentRatingEntry,
@@ -12,6 +20,8 @@ from tasterr.clients.tmdb import (
     TmdbImage,
     TmdbImages,
     TmdbMediaResult,
+    TmdbProvider,
+    TmdbRegion,
     TmdbReleaseDateItem,
     TmdbReleaseDates,
     TmdbReleaseDatesEntry,
@@ -168,3 +178,45 @@ def test_to_detail_watch_empty_when_region_absent() -> None:
         ),
     )
     assert to_detail(raw, "movie", "US").watch.flatrate == []
+
+
+def test_region_options_are_named_and_sorted() -> None:
+    options = to_regions(
+        [
+            TmdbRegion(iso_3166_1="US", english_name="United States"),
+            TmdbRegion(iso_3166_1="GB", english_name="United Kingdom"),
+        ]
+    )
+    assert [(item.code, item.name) for item in options] == [
+        ("GB", "United Kingdom"),
+        ("US", "United States"),
+    ]
+
+
+def test_services_union_movie_and_tv_using_best_priority() -> None:
+    movie = [
+        TmdbProvider(
+            provider_id=8,
+            provider_name="Netflix",
+            logo_path="/movie.png",
+            display_priorities={"US": 4},
+        )
+    ]
+    tv = [
+        TmdbProvider(
+            provider_id=8,
+            provider_name="Netflix",
+            logo_path="/tv.png",
+            display_priorities={"US": 1},
+        ),
+        TmdbProvider(
+            provider_id=337,
+            provider_name="Disney Plus",
+            display_priorities={"US": 2},
+        ),
+    ]
+
+    services = to_services(movie, tv, "US")
+
+    assert [(item.provider_id, item.display_priority) for item in services] == [(8, 1), (337, 2)]
+    assert services[0].logo_path == "/tv.png"

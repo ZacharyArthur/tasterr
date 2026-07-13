@@ -4,7 +4,13 @@ from typing import cast
 
 import pytest
 
-from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, WatchProviders
+from tasterr.catalog.models import (
+    Genre,
+    MediaDetail,
+    MediaSummary,
+    ServiceOption,
+    WatchProviders,
+)
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.rails.composer import build_extra_rails, build_home
@@ -17,6 +23,7 @@ from tasterr.rails.registry import (
     home_providers,
     top_rated_providers,
 )
+from tasterr.runtime_settings import RailType
 
 
 def _summary(i: int) -> MediaSummary:
@@ -62,6 +69,8 @@ def _detail(i: int) -> MediaDetail:
 class FakeCatalog:
     def __init__(self) -> None:
         self.region = "US"
+        self.selected_service_ids: tuple[int, ...] = ()
+        self.available_services: list[ServiceOption] = []
         self.trending_items = [_summary(i) for i in range(1, 7)]
         self.fixed_discover: list[MediaSummary] | None = None
         self.genre_map_result = {"Action": 28, "Comedy": 35, "Drama": 18, "Thriller": 53}
@@ -69,6 +78,9 @@ class FakeCatalog:
         self.fail_trending = False
         self.fail_discover = False
         self.fail_genre_map = False
+        self.fail_services = False
+        self.failing_service_ids: set[int] = set()
+        self.genre_map_calls: list[str] = []
         self._block = 100
 
     async def trending(self) -> list[MediaSummary]:
@@ -86,6 +98,7 @@ class FakeCatalog:
         min_votes: int | None = None,
         release_gte: str | None = None,
         release_lte: str | None = None,
+        service_ids: list[int] | None = None,
     ) -> list[MediaSummary]:
         self.discover_calls.append(
             {
@@ -95,9 +108,12 @@ class FakeCatalog:
                 "min_votes": min_votes,
                 "release_gte": release_gte,
                 "release_lte": release_lte,
+                "service_ids": service_ids,
             }
         )
-        if self.fail_discover:
+        if self.fail_discover or (
+            service_ids is not None and bool(self.failing_service_ids.intersection(service_ids))
+        ):
             raise UpstreamUnavailable("discover down")
         if self.fixed_discover is not None:
             return list(self.fixed_discover)
@@ -106,12 +122,18 @@ class FakeCatalog:
         return [_summary(block + i) for i in range(10)]
 
     async def genre_map(self, media: str) -> dict[str, int]:
+        self.genre_map_calls.append(media)
         if self.fail_genre_map:
             raise UpstreamUnavailable("genres down")
         return dict(self.genre_map_result)
 
     async def detail(self, media: str, tmdb_id: int) -> MediaDetail:
         return _detail(tmdb_id)
+
+    async def services(self, region: str | None = None) -> list[ServiceOption]:
+        if self.fail_services:
+            raise UpstreamUnavailable("services down")
+        return list(self.available_services)
 
 
 def _ctx(fake: FakeCatalog) -> RailContext:
@@ -137,6 +159,7 @@ async def test_top_region_provider_queries_popular_movies() -> None:
         "min_votes": 50,
         "release_gte": None,
         "release_lte": None,
+        "service_ids": None,
     }
 
 
@@ -163,6 +186,92 @@ async def test_decade_provider_bounds_release_window() -> None:
 
 def test_top_rated_provider_ids() -> None:
     assert [p.id for p in top_rated_providers()] == ["top-rated-movie", "top-rated-tv"]
+
+
+async def test_disabled_provider_is_not_fetched() -> None:
+    fake = FakeCatalog()
+    ctx = RailContext(
+        cast("CatalogService", fake),
+        disabled_rail_types=frozenset({RailType.TRENDING}),
+    )
+
+    feed = await build_home(ctx)
+
+    assert "trending" not in {rail.id for rail in feed.rails}
+
+
+async def test_all_disabled_returns_a_valid_empty_feed() -> None:
+    fake = FakeCatalog()
+    ctx = RailContext(
+        cast("CatalogService", fake),
+        disabled_rail_types=frozenset(RailType),
+    )
+
+    feed = await build_home(ctx)
+
+    assert feed.hero == []
+    assert feed.rails == []
+    assert fake.discover_calls == []
+
+
+async def test_selected_services_add_four_ordered_independent_rails() -> None:
+    fake = FakeCatalog()
+    fake.selected_service_ids = (8, 337, 9, 15, 350)
+    fake.available_services = [
+        ServiceOption(
+            provider_id=provider_id,
+            name=f"Service {provider_id}",
+            logo_path=None,
+            display_priority=index,
+        )
+        for index, provider_id in enumerate((350, 8, 337, 9, 15))
+    ]
+
+    feed = await build_home(_ctx(fake))
+
+    service_rails = [rail for rail in feed.rails if rail.id.startswith("service-")]
+    assert [rail.id for rail in service_rails] == [
+        "service-8",
+        "service-337",
+        "service-9",
+        "service-15",
+    ]
+    service_calls = [call for call in fake.discover_calls if call["service_ids"] is not None]
+    assert [call["service_ids"] for call in service_calls] == [[8], [337], [9], [15]]
+
+
+async def test_service_metadata_failure_omits_only_service_rails() -> None:
+    fake = FakeCatalog()
+    fake.selected_service_ids = (8, 9)
+    fake.fail_services = True
+
+    feed = await build_home(_ctx(fake))
+
+    ids = {rail.id for rail in feed.rails}
+    assert not any(rail_id.startswith("service-") for rail_id in ids)
+    assert {"trending", "popular"} <= ids
+
+
+async def test_one_failing_service_rail_does_not_drop_siblings() -> None:
+    fake = FakeCatalog()
+    fake.selected_service_ids = (8, 9)
+    fake.available_services = [
+        ServiceOption(
+            provider_id=provider_id,
+            name=f"Service {provider_id}",
+            logo_path=None,
+            display_priority=index,
+        )
+        for index, provider_id in enumerate((8, 9))
+    ]
+    fake.failing_service_ids = {8}
+
+    feed = await build_home(_ctx(fake))
+
+    ids = {rail.id for rail in feed.rails}
+    assert "service-8" not in ids
+    assert "service-9" in ids
+    assert {"trending", "popular"} <= ids
 
 
 # ── Composer: home (3.3) ─────────────────────────────────────────────────────
@@ -233,6 +342,21 @@ async def test_extra_rails_paginate_then_complete() -> None:
         pages += 1
         assert pages < 20  # guard against a runaway cursor
     assert pages >= 2  # catalogue spans multiple pages then ends
+
+
+async def test_all_disabled_extra_rails_are_terminal_without_catalog_work() -> None:
+    fake = FakeCatalog()
+    ctx = RailContext(
+        cast("CatalogService", fake),
+        disabled_rail_types=frozenset(RailType),
+    )
+
+    page = await build_extra_rails(ctx, 0)
+
+    assert page.rails == []
+    assert page.next_cursor is None
+    assert fake.discover_calls == []
+    assert fake.genre_map_calls == []
 
 
 # ── Personalized providers (M4) ──────────────────────────────────────────────
@@ -341,7 +465,14 @@ async def test_exclusive_providers_never_run_concurrently() -> None:
                 raise AssertionError("two exclusive providers ran concurrently")
             return [_summary(base + i) for i in range(4)]
 
-        return RailProvider(provider_id, provider_id, "standard", fetch, exclusive=True)
+        return RailProvider(
+            provider_id,
+            provider_id,
+            "standard",
+            fetch,
+            RailType.RECOMMENDED,
+            exclusive=True,
+        )
 
     providers = [probe("ex-a", 1000), probe("ex-b", 2000), probe("ex-c", 3000)]
     rails = await _compose_rails(_ctx(FakeCatalog()), providers)

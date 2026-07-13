@@ -36,7 +36,7 @@ function stubFetch() {
 	return mock;
 }
 
-function renderNavbar() {
+function renderNavbar(user = USER) {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
@@ -44,7 +44,7 @@ function renderNavbar() {
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
-				<Navbar user={USER} />
+				<Navbar user={user} />
 			</MemoryRouter>
 		</QueryClientProvider>,
 	);
@@ -69,6 +69,38 @@ test("reset stays put until the user confirms", () => {
 	openMenuAndReset();
 
 	expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("only admins receive the Settings menu entry", () => {
+	stubFetch();
+	renderNavbar();
+	fireEvent.click(screen.getByRole("button", { name: "Viewer" }));
+	expect(screen.queryByRole("menuitem", { name: "Settings" })).toBeNull();
+
+	cleanup();
+	renderNavbar({ ...USER, is_admin: true });
+	fireEvent.click(screen.getByRole("button", { name: "Viewer" }));
+	expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy();
+});
+
+test("Escape dismisses the menu and restores focus to its trigger", () => {
+	stubFetch();
+	renderNavbar();
+	const trigger = screen.getByRole("button", { name: "Viewer" });
+	fireEvent.click(trigger);
+	expect(trigger.getAttribute("aria-expanded")).toBe("true");
+	fireEvent.keyDown(document, { key: "Escape" });
+	expect(screen.queryByRole("menu")).toBeNull();
+	expect(trigger.getAttribute("aria-expanded")).toBe("false");
+	expect(document.activeElement).toBe(trigger);
+});
+
+test("outside activation dismisses the user menu", () => {
+	stubFetch();
+	renderNavbar();
+	fireEvent.click(screen.getByRole("button", { name: "Viewer" }));
+	fireEvent.pointerDown(document.body);
+	expect(screen.queryByRole("menu")).toBeNull();
 });
 
 test("confirmed reset calls the endpoint and refetches home", async () => {

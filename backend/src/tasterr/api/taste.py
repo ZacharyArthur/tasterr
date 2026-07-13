@@ -17,8 +17,10 @@ from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.seerr import SeerrClient
 from tasterr.clients.tmdb import TmdbClient
+from tasterr.db.runtime_settings import load_runtime_settings
 from tasterr.recommend.seed import seed_in_background
 from tasterr.recommend.service import TasteService
+from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
 
 logger = logging.getLogger("tasterr.taste")
@@ -28,6 +30,7 @@ def build_taste(
     request: Request,
     settings: Settings,
     db: AsyncSession,
+    runtime: RuntimeSettings | None = None,
     availability: AvailabilityService | None = None,
 ) -> TasteService | None:
     """None when TMDB is unconfigured (the engine has no feature source)."""
@@ -38,15 +41,24 @@ def build_taste(
         settings.tmdb_api_key.get_secret_value(),
         request.app.state.catalog_cache,
     )
-    return TasteService(db, CatalogService(client), availability)
+    resolved = runtime if runtime is not None else RuntimeSettings()
+    return TasteService(
+        db,
+        CatalogService(client, resolved.region, resolved.service_ids),
+        availability,
+    )
 
 
 async def refresh_profile(
-    request: Request, settings: Settings, db: AsyncSession, user_id: int
+    request: Request,
+    settings: Settings,
+    db: AsyncSession,
+    user_id: int,
+    runtime: RuntimeSettings | None = None,
 ) -> None:
     """Best-effort recompute after a signal write. The profile is a cache that
     self-heals on read staleness, so a failed refresh never fails the write."""
-    taste = build_taste(request, settings, db)
+    taste = build_taste(request, settings, db, runtime)
     if taste is None:
         return
     try:
@@ -90,15 +102,23 @@ def schedule_seed(request: Request, settings: Settings, user_id: int, seerr_user
         return
     tmdb_key = settings.tmdb_api_key.get_secret_value()
 
-    def taste_factory(db: AsyncSession) -> TasteService:
+    def taste_factory(db: AsyncSession, runtime: RuntimeSettings) -> TasteService:
         client = TmdbClient(state.http, tmdb_key, state.catalog_cache)
-        return TasteService(db, CatalogService(client))
+        return TasteService(db, CatalogService(client, runtime.region, runtime.service_ids))
 
     maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
     seeding = cast("set[int]", state.seeding)
-    task = asyncio.create_task(
-        seed_in_background(maker, taste_factory, seerr, seeding, user_id, seerr_user_id)
-    )
+
+    async def run_seed() -> None:
+        async with maker() as db:
+            runtime = await load_runtime_settings(db)
+
+        def factory(seed_db: AsyncSession) -> TasteService:
+            return taste_factory(seed_db, runtime)
+
+        await seed_in_background(maker, factory, seerr, seeding, user_id, seerr_user_id)
+
+    task = asyncio.create_task(run_seed())
     tasks = cast("set[asyncio.Task[None]]", state.seed_tasks)
     tasks.add(task)
     task.add_done_callback(tasks.discard)

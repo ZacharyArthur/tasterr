@@ -559,7 +559,11 @@ def test_config_serves_public_projection_without_secrets(tmp_path: Path) -> None
         response = client.get("/api/v1/config")
 
     assert response.status_code == 200
-    assert response.json() == {"tmdb_configured": False, "seerr_configured": True}
+    assert response.json() == {
+        "tmdb_configured": False,
+        "seerr_configured": True,
+        "appearance": {"theme": "dark", "accent": "crimson"},
+    }
     assert SECRET not in response.text
     assert "seerr:5055" not in response.text
 

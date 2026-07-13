@@ -74,7 +74,11 @@ export function Login() {
 				: null;
 
 	return (
-		<main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-neutral-950 px-4 text-neutral-100">
+		<main
+			data-theme="dark"
+			data-accent="crimson"
+			className="flex min-h-screen flex-col items-center justify-center gap-8 bg-app-bg px-4 text-app-text"
+		>
 			<h1 className="text-4xl font-bold tracking-tight">Tasterr</h1>
 			<div className="flex w-full max-w-sm flex-col gap-6">
 				<div className="flex flex-col gap-2">
@@ -82,12 +86,12 @@ export function Login() {
 						type="button"
 						onClick={() => startPlex.mutate()}
 						disabled={startPlex.isPending || pin !== null}
-						className="rounded bg-amber-500 px-4 py-2 font-medium text-neutral-950 transition-colors hover:bg-amber-400 disabled:opacity-60"
+						className="min-h-11 rounded bg-app-accent px-4 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text disabled:opacity-60"
 					>
 						{pin !== null ? "Waiting for Plex approval…" : "Sign in with Plex"}
 					</button>
 					{pin !== null && (
-						<p className="text-sm text-neutral-400">
+						<p className="text-sm text-app-subtle">
 							Approve the sign-in in the Plex window, then come back here.{" "}
 							<a
 								href={pin.authUrl}
@@ -100,18 +104,18 @@ export function Login() {
 						</p>
 					)}
 					{plexError !== null && (
-						<p className="text-sm text-red-400">{plexError}</p>
+						<p className="text-sm text-status-error">{plexError}</p>
 					)}
 				</div>
 
-				<div className="flex items-center gap-3 text-xs uppercase text-neutral-500">
-					<span className="h-px flex-1 bg-neutral-800" />
+				<div className="flex items-center gap-3 text-xs uppercase text-app-muted-text">
+					<span className="h-px flex-1 bg-app-border" />
 					or
-					<span className="h-px flex-1 bg-neutral-800" />
+					<span className="h-px flex-1 bg-app-border" />
 				</div>
 
 				<form onSubmit={submitLocal} className="flex flex-col gap-3">
-					<label className="flex flex-col gap-1 text-sm text-neutral-400">
+					<label className="flex flex-col gap-1 text-sm text-app-subtle">
 						Email
 						<input
 							type="email"
@@ -119,10 +123,10 @@ export function Login() {
 							autoComplete="email"
 							value={email}
 							onChange={(event) => setEmail(event.target.value)}
-							className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100"
+							className="min-h-11 rounded border border-app-border bg-app-surface px-3 py-2 text-app-text focus-visible:outline-2 focus-visible:outline-app-accent"
 						/>
 					</label>
-					<label className="flex flex-col gap-1 text-sm text-neutral-400">
+					<label className="flex flex-col gap-1 text-sm text-app-subtle">
 						Password
 						<input
 							type="password"
@@ -130,18 +134,18 @@ export function Login() {
 							autoComplete="current-password"
 							value={password}
 							onChange={(event) => setPassword(event.target.value)}
-							className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100"
+							className="min-h-11 rounded border border-app-border bg-app-surface px-3 py-2 text-app-text focus-visible:outline-2 focus-visible:outline-app-accent"
 						/>
 					</label>
 					<button
 						type="submit"
 						disabled={localLogin.isPending}
-						className="rounded bg-neutral-100 px-4 py-2 font-medium text-neutral-950 transition-colors hover:bg-white disabled:opacity-60"
+						className="min-h-11 rounded bg-app-accent px-4 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text disabled:opacity-60"
 					>
 						Sign in
 					</button>
 					{localError !== null && (
-						<p className="text-sm text-red-400">{localError}</p>
+						<p className="text-sm text-status-error">{localError}</p>
 					)}
 				</form>
 			</div>

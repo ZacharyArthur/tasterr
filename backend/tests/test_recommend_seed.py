@@ -28,6 +28,9 @@ HISTORY = [
 
 
 class FakeCatalog:
+    region = "US"
+    selected_service_ids: tuple[int, ...] = ()
+
     async def title_facts(self, media: MediaType, tmdb_id: int) -> TitleFacts:
         return TitleFacts(
             tmdb_id=tmdb_id,
@@ -36,6 +39,7 @@ class FakeCatalog:
             genres=["Drama"],
             vote_average=7.0,
             vote_count=1000,
+            watch_region="US",
         )
 
 

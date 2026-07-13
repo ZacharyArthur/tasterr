@@ -5,6 +5,7 @@ from typing import cast
 
 from pydantic import SecretStr
 
+from tasterr.runtime_settings import Accent, Appearance, RuntimeSettings, Theme
 from tasterr.settings import PublicConfig, Settings
 
 SECRET_MARKERS = (
@@ -71,9 +72,17 @@ def _sentineled_settings() -> Settings:
 
 
 def test_serialized_output_contains_no_secret_values() -> None:
-    dumped = PublicConfig.from_settings(_sentineled_settings()).model_dump_json()
+    runtime = RuntimeSettings(
+        region="GB",
+        service_ids=[8],
+        appearance=Appearance(theme=Theme.LIGHT, accent=Accent.AZURE),
+    )
+    dumped = PublicConfig.from_settings(_sentineled_settings(), runtime).model_dump_json()
 
     assert SENTINEL not in dumped
+    assert '"theme":"light"' in dumped
+    assert '"accent":"azure"' in dumped
+    assert "service_ids" not in dumped
 
 
 def test_public_config_has_no_secretstr_fields() -> None:

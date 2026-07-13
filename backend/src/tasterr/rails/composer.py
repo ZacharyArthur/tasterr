@@ -8,7 +8,15 @@ catalog is effectively down — surfaced as an upstream failure (→ 502).
 
 import asyncio
 
-from tasterr.catalog.models import HeroSlide, HomeFeed, MediaSummary, MediaType, Rail, RailsPage
+from tasterr.catalog.models import (
+    HeroSlide,
+    HomeFeed,
+    MediaSummary,
+    MediaType,
+    Rail,
+    RailsPage,
+    ServiceOption,
+)
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamError, UpstreamUnavailable
 from tasterr.rails.registry import (
@@ -18,46 +26,72 @@ from tasterr.rails.registry import (
     HERO_GENRE_LABELS,
     HERO_SIZE,
     HOME_GENRE_COUNT,
+    SERVICE_RAIL_LIMIT,
     RailContext,
     RailProvider,
     decade_provider,
     genre_provider,
     home_providers,
     personalized_home_providers,
+    service_provider,
     top_rated_providers,
 )
+from tasterr.runtime_settings import RailType
 
 TitleKey = tuple[MediaType, int]
 
 
 async def build_home(ctx: RailContext) -> HomeFeed:
-    genre_map = await _safe_genre_map(ctx.catalog, "movie")
+    genre_map = await _safe_genre_map(ctx.catalog, "movie") if ctx.enabled(RailType.GENRES) else {}
     # Order (design decision 7): My List, Recommended for You, trending,
     # More like X, then the M2 rails. Personalized providers yield nothing
     # for a signal-less user, so the feed degrades to the non-personalized set.
     before_trending, after_trending = personalized_home_providers(ctx)
     trending, *rest = home_providers()
+    services = await _selected_services(ctx) if ctx.enabled(RailType.SERVICES) else []
     providers = [
         *before_trending,
         trending,
         *after_trending,
         *rest,
+        *(service_provider(service) for service in services),
         *_home_genre_providers(genre_map),
     ]
+    providers = _enabled_providers(ctx, providers)
     rails = await _compose_rails(ctx, providers)
     if not rails:
+        if not providers:
+            return HomeFeed()
         raise UpstreamUnavailable("home feed unavailable")
-    hero = await _build_hero(ctx, _hero_pool(rails))
+    hero = await _build_hero(ctx, _hero_pool(rails)) if ctx.enabled(RailType.HERO) else []
     return HomeFeed(hero=hero, rails=rails)
 
 
 async def build_extra_rails(ctx: RailContext, cursor: int) -> RailsPage:
-    providers = await _extended_providers(ctx.catalog)
+    providers = await _extended_providers(ctx)
     start = max(cursor, 0)
     page = providers[start : start + EXTRA_PAGE_SIZE]
     rails = await _compose_rails(ctx, page)
     end = start + EXTRA_PAGE_SIZE
     return RailsPage(rails=rails, next_cursor=end if end < len(providers) else None)
+
+
+def _enabled_providers(ctx: RailContext, providers: list[RailProvider]) -> list[RailProvider]:
+    return [provider for provider in providers if ctx.enabled(provider.rail_type)]
+
+
+async def _selected_services(ctx: RailContext) -> list[ServiceOption]:
+    selected = ctx.catalog.selected_service_ids
+    if not selected:
+        return []
+    try:
+        available = await ctx.catalog.services()
+    except UpstreamError:
+        return []
+    by_id = {service.provider_id: service for service in available}
+    return [by_id[service_id] for service_id in selected if service_id in by_id][
+        :SERVICE_RAIL_LIMIT
+    ]
 
 
 async def _compose_rails(ctx: RailContext, providers: list[RailProvider]) -> list[Rail]:
@@ -152,12 +186,17 @@ def _home_genre_providers(genre_map: dict[str, int]) -> list[RailProvider]:
     return providers
 
 
-async def _extended_providers(catalog: CatalogService) -> list[RailProvider]:
+async def _extended_providers(ctx: RailContext) -> list[RailProvider]:
+    providers: list[RailProvider] = []
+    if ctx.enabled(RailType.TOP_RATED):
+        providers += top_rated_providers()
+    if ctx.enabled(RailType.DECADES):
+        providers += [decade_provider(decade) for decade in DECADES]
+    if not ctx.enabled(RailType.GENRES):
+        return providers
     movie_map, tv_map = await asyncio.gather(
-        _safe_genre_map(catalog, "movie"), _safe_genre_map(catalog, "tv")
+        _safe_genre_map(ctx.catalog, "movie"), _safe_genre_map(ctx.catalog, "tv")
     )
-    providers: list[RailProvider] = list(top_rated_providers())
-    providers += [decade_provider(decade) for decade in DECADES]
     featured = set(GENRE_PICKS)
     providers += [
         genre_provider(gid, name, "movie")

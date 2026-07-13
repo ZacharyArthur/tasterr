@@ -140,7 +140,10 @@ def test_explain_returns_reasons_for_a_profiled_user(tmp_path: Path) -> None:
         # no TMDB call needed.
         await store.save_profile(db, user_id, {"genre:drama": 0.9, "kw:heist": 0.4})
         record = FeatureRecord(
-            vector={"genre:drama": 0.8, "kw:heist": 0.6}, vote_average=8.0, vote_count=5000
+            vector={"genre:drama": 0.8, "kw:heist": 0.6},
+            vote_average=8.0,
+            vote_count=5000,
+            watch_region="US",
         )
         await store.save_features(db, ("movie", 42), record)
 

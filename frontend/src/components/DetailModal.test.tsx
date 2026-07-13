@@ -60,6 +60,7 @@ function renderModal() {
 			<MemoryRouter initialEntries={["/title/movie/42"]}>
 				<Routes>
 					<Route path="/title/:type/:id" element={<DetailModal />} />
+					<Route path="/" element={null} />
 				</Routes>
 			</MemoryRouter>
 		</QueryClientProvider>,
@@ -84,6 +85,41 @@ test("renders the title detail sections", async () => {
 	expect(screen.getByText("Netflix")).toBeTruthy();
 	expect(screen.getByText("Actor One")).toBeTruthy();
 	expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+});
+
+test("traps focus, marks the browse shell inert, and cleans up on Escape", async () => {
+	const background = document.createElement("div");
+	background.id = "shell-background";
+	document.body.append(background);
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(
+			async () =>
+				({ ok: true, status: 200, json: async () => DETAIL }) as Response,
+		),
+	);
+	renderModal();
+	const close = screen.getByRole("button", { name: "Close" });
+	expect(document.activeElement).toBe(close);
+	expect(background.inert).toBe(true);
+	await screen.findByRole("heading", { name: "Deep Movie" });
+	const dialog = screen.getByRole("dialog");
+	const focusable = Array.from(
+		dialog.querySelectorAll<HTMLElement>(
+			"a[href],button:not([disabled]),iframe",
+		),
+	);
+	const last = focusable.at(-1) as HTMLElement;
+	last.focus();
+	fireEvent.keyDown(document, { key: "Tab" });
+	expect(document.activeElement).toBe(close);
+	close.focus();
+	fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+	expect(document.activeElement).toBe(last);
+	fireEvent.keyDown(document, { key: "Escape" });
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(background.inert).toBe(false);
+	background.remove();
 });
 
 // ── Taste affordances (M4) ───────────────────────────────────────────────────

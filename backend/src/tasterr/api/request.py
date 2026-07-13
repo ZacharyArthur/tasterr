@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import refresh_profile
 from tasterr.auth.crypto import decrypt_token
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
@@ -24,6 +25,7 @@ from tasterr.catalog.availability import Availability, availability_from_code
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.seerr import MediaType, SeerrAuthClient, SeerrClient
 from tasterr.recommend import store
+from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings, get_settings
 
 logger = logging.getLogger("tasterr.request")
@@ -96,6 +98,7 @@ async def create_request(
     ctx: SeerrRequestDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
     request: Request,
 ) -> RequestResponse:
     seerr_url = _external_url(settings.seerr_external_url, payload.media_type, payload.tmdb_id)
@@ -104,7 +107,13 @@ async def create_request(
     outcome = await _request_with_reauth(ctx, db, authed, payload.media_type, payload.tmdb_id)
     if outcome.status == "ok":
         await _record_request_signal(
-            request, settings, db, authed.user.id, payload.media_type, payload.tmdb_id
+            request,
+            settings,
+            runtime,
+            db,
+            authed.user.id,
+            payload.media_type,
+            payload.tmdb_id,
         )
     return RequestResponse(
         status=outcome.status, availability=outcome.availability, seerr_url=seerr_url
@@ -114,6 +123,7 @@ async def create_request(
 async def _record_request_signal(
     request: Request,
     settings: Settings,
+    runtime: RuntimeSettings,
     db: AsyncSession,
     user_id: int,
     media_type: MediaType,
@@ -128,7 +138,7 @@ async def _record_request_signal(
         logger.exception("request: taste signal write failed user_id=%s", user_id)
         await db.rollback()
         return
-    await refresh_profile(request, settings, db, user_id)
+    await refresh_profile(request, settings, db, user_id, runtime)
 
 
 def _external_url(external: str | None, media_type: MediaType, tmdb_id: int) -> str | None:

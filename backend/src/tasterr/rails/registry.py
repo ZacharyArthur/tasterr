@@ -11,12 +11,13 @@ rail — personalization degrades, it never blocks browsing.
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
-from tasterr.catalog.models import MediaSummary, MediaType, RailKind
+from tasterr.catalog.models import MediaSummary, MediaType, RailKind, ServiceOption
 from tasterr.catalog.service import CatalogService
 from tasterr.db.models import User
 from tasterr.recommend.service import TasteService
+from tasterr.runtime_settings import RailType
 
 logger = logging.getLogger("tasterr.rails")
 
@@ -27,6 +28,7 @@ HERO_SIZE = 5
 HOME_GENRE_COUNT = 4
 EXTRA_PAGE_SIZE = 4
 HERO_GENRE_LABELS = 3
+SERVICE_RAIL_LIMIT = 4
 
 # Curated, ordered genre labels surfaced first (rest flow into infinite scroll).
 GENRE_PICKS = (
@@ -52,6 +54,10 @@ class RailContext:
     catalog: CatalogService
     user: User | None = None  # None → non-personalized compose (extra pages, tests)
     taste: TasteService | None = None
+    disabled_rail_types: frozenset[RailType] = frozenset()
+
+    def enabled(self, rail_type: RailType) -> bool:
+        return rail_type not in self.disabled_rail_types
 
 
 @dataclass
@@ -60,6 +66,7 @@ class RailProvider:
     title: str
     kind: RailKind
     fetch: Callable[[RailContext], Awaitable[list[MediaSummary]]]
+    rail_type: RailType
     min_items: int = field(default=MIN_RAIL_ITEMS)
     # Exclusive providers share the request's AsyncSession, which is not safe
     # for concurrent tasks — the composer runs them one at a time instead of
@@ -70,6 +77,10 @@ class RailProvider:
 
 def _today() -> str:
     return date.today().isoformat()
+
+
+def _days_ago(days: int) -> str:
+    return (date.today() - timedelta(days=days)).isoformat()
 
 
 def personalized_home_providers(
@@ -109,13 +120,26 @@ def personalized_home_providers(
         "My List",
         "standard",
         fetch_my_list,
+        RailType.MY_LIST,
         min_items=MY_LIST_MIN_ITEMS,
         exclusive=True,
     )
     recommended = RailProvider(
-        "recommended-for-you", "Recommended for You", "standard", fetch_recommended, exclusive=True
+        "recommended-for-you",
+        "Recommended for You",
+        "standard",
+        fetch_recommended,
+        RailType.RECOMMENDED,
+        exclusive=True,
     )
-    more_like = RailProvider("more-like", "More like", "standard", fetch_more_like, exclusive=True)
+    more_like = RailProvider(
+        "more-like",
+        "More like",
+        "standard",
+        fetch_more_like,
+        RailType.MORE_LIKE,
+        exclusive=True,
+    )
     return [my_list, recommended], [more_like]
 
 
@@ -141,7 +165,13 @@ async def _quiet_rollback(taste: TasteService) -> None:
 
 def home_providers() -> list[RailProvider]:
     return [
-        RailProvider("trending", "Trending Now", "standard", lambda ctx: ctx.catalog.trending()),
+        RailProvider(
+            "trending",
+            "Trending Now",
+            "standard",
+            lambda ctx: ctx.catalog.trending(),
+            RailType.TRENDING,
+        ),
         # Not region-scoped in M2: TMDB watch_region is inert without a provider
         # filter, which needs admin service selection (M5). Labelled honestly until
         # then; true "top in region" lands with M5.
@@ -150,6 +180,7 @@ def home_providers() -> list[RailProvider]:
             "Popular Movies",
             "standard",
             lambda ctx: ctx.catalog.discover("movie", sort_by="popularity.desc", min_votes=50),
+            RailType.POPULAR,
         ),
         RailProvider(
             "recently-added",
@@ -161,6 +192,7 @@ def home_providers() -> list[RailProvider]:
                 release_lte=_today(),
                 min_votes=5,
             ),
+            RailType.RECENT,
         ),
     ]
 
@@ -172,12 +204,14 @@ def top_rated_providers() -> list[RailProvider]:
             "Top Rated Movies",
             "standard",
             lambda ctx: ctx.catalog.discover("movie", sort_by="vote_average.desc", min_votes=500),
+            RailType.TOP_RATED,
         ),
         RailProvider(
             "top-rated-tv",
             "Top Rated Shows",
             "standard",
             lambda ctx: ctx.catalog.discover("tv", sort_by="vote_average.desc", min_votes=300),
+            RailType.TOP_RATED,
         ),
     ]
 
@@ -189,7 +223,7 @@ def genre_provider(genre_id: int, name: str, media: MediaType) -> RailProvider:
         )
 
     label = name if media == "movie" else f"{name} · TV"
-    return RailProvider(f"genre-{media}-{genre_id}", label, "genre", fetch)
+    return RailProvider(f"genre-{media}-{genre_id}", label, "genre", fetch, RailType.GENRES)
 
 
 def decade_provider(decade: int) -> RailProvider:
@@ -202,4 +236,24 @@ def decade_provider(decade: int) -> RailProvider:
             min_votes=100,
         )
 
-    return RailProvider(f"decade-{decade}", f"{decade}s", "standard", fetch)
+    return RailProvider(f"decade-{decade}", f"{decade}s", "standard", fetch, RailType.DECADES)
+
+
+def service_provider(service: ServiceOption) -> RailProvider:
+    async def fetch(ctx: RailContext) -> list[MediaSummary]:
+        return await ctx.catalog.discover(
+            "movie",
+            sort_by="primary_release_date.desc",
+            release_gte=_days_ago(150),
+            release_lte=_today(),
+            min_votes=3,
+            service_ids=[service.provider_id],
+        )
+
+    return RailProvider(
+        f"service-{service.provider_id}",
+        f"New on {service.name}",
+        "standard",
+        fetch,
+        RailType.SERVICES,
+    )

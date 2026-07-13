@@ -26,6 +26,16 @@ export type SignalResponse = components["schemas"]["SignalResponse"];
 export type ExplainResponse = components["schemas"]["ExplainResponse"];
 export type ResetResponse = components["schemas"]["ResetResponse"];
 export type TasteFlags = components["schemas"]["TasteFlags"];
+export type Appearance = components["schemas"]["Appearance"];
+export type RuntimeSettings = components["schemas"]["RuntimeSettings"];
+export type SettingsResponse = components["schemas"]["SettingsResponse"];
+export type RegionOption = components["schemas"]["RegionOption"];
+export type RegionsResponse = components["schemas"]["RegionsResponse"];
+export type ServiceOption = components["schemas"]["ServiceOption"];
+export type ServicesResponse = components["schemas"]["ServicesResponse"];
+export type ConnectionTarget = components["schemas"]["ConnectionTarget"];
+export type ConnectionTestResponse =
+	components["schemas"]["ConnectionTestResponse"];
 
 export class ApiError extends Error {
 	readonly status: number;
@@ -66,6 +76,15 @@ function postJson<T>(path: string, body?: unknown): Promise<T> {
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify(body),
 				}),
+	});
+}
+
+function putJson<T>(path: string, body: unknown): Promise<T> {
+	return request<T>(path, {
+		method: "PUT",
+		credentials: "same-origin",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(body),
 	});
 }
 
@@ -123,6 +142,37 @@ export function searchTitles(query: string): Promise<SearchResponse> {
 
 export function getConfig(): Promise<PublicConfig> {
 	return request<PublicConfig>("/api/v1/config");
+}
+
+export function getSettings(): Promise<SettingsResponse> {
+	return request<SettingsResponse>("/api/v1/settings");
+}
+
+export function saveSettings(
+	settings: RuntimeSettings,
+): Promise<SettingsResponse> {
+	return putJson<SettingsResponse>("/api/v1/settings", settings);
+}
+
+export function getRegions(): Promise<RegionsResponse> {
+	return request<RegionsResponse>("/api/v1/regions");
+}
+
+export function getServices(region: string): Promise<ServicesResponse> {
+	return request<ServicesResponse>(
+		`/api/v1/services?region=${encodeURIComponent(region.toUpperCase())}`,
+	);
+}
+
+export function testConnection(
+	target: ConnectionTarget,
+): Promise<ConnectionTestResponse> {
+	return request<ConnectionTestResponse>("/api/v1/connection-test", {
+		method: "POST",
+		credentials: "same-origin",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ target }),
+	});
 }
 
 /** Batch-hydrate library status for the given titles (SPEC §6). */

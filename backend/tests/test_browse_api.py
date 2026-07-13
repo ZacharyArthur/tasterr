@@ -79,6 +79,7 @@ def _detail(i: int) -> MediaDetail:
 
 class FakeCatalog:
     region = "US"
+    selected_service_ids: tuple[int, ...] = ()
 
     def __init__(self) -> None:
         self.fail = False

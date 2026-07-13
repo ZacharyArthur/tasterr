@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from tasterr.api.admin import router as admin_router
 from tasterr.api.auth import router as auth_router
 from tasterr.api.availability import router as availability_router
 from tasterr.api.home import router as home_router
@@ -66,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(meta_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(admin_router, prefix="/api/v1")
     app.include_router(home_router, prefix="/api/v1")
     app.include_router(title_router, prefix="/api/v1")
     app.include_router(search_router, prefix="/api/v1")
@@ -76,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.pin_store = PinStore()
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
+    app.state.admin_bucket = TokenBucket(capacity=30, refill_per_second=30 / 60)
     app.state.catalog_cache = Cache()
     # A separate bounded cache for short-TTL Seerr availability reads, so they
     # never evict the longer-lived TMDB entries (and vice versa).

@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
+from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.auth.deps import AuthedSession, require_session
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.tmdb import TmdbClient
@@ -19,6 +20,7 @@ def get_catalog(
     _authed: Annotated[AuthedSession, Depends(require_session)],
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
 ) -> CatalogService:
     # Session is required *before* the config check, so an unauthenticated
     # caller gets 401 (default-deny), never a 503 that leaks configuration state.
@@ -29,7 +31,7 @@ def get_catalog(
         settings.tmdb_api_key.get_secret_value(),
         request.app.state.catalog_cache,
     )
-    return CatalogService(client)
+    return CatalogService(client, runtime.region, runtime.service_ids)
 
 
 CatalogDep = Annotated[CatalogService, Depends(get_catalog)]

@@ -1,1 +1,73 @@
 @import "tailwindcss";
+
+:root,
+[data-theme="dark"] {
+	--app-bg: #0a0a0a;
+	--app-panel: #111111;
+	--app-surface: #1c1c1c;
+	--app-muted: #292929;
+	--app-border: #404040;
+	--app-text: #fafafa;
+	--app-subtle: #b8b8b8;
+	--app-muted-text: #8a8a8a;
+	--status-success: #4ade80;
+	--status-warning: #fbbf24;
+	--status-error: #f87171;
+}
+
+[data-theme="light"] {
+	--app-bg: #f6f5f2;
+	--app-panel: #ffffff;
+	--app-surface: #eeece8;
+	--app-muted: #dfdcd6;
+	--app-border: #b7b1a8;
+	--app-text: #171717;
+	--app-subtle: #4b4b4b;
+	--app-muted-text: #666666;
+	--status-success: #157f3b;
+	--status-warning: #8a5a00;
+	--status-error: #b42318;
+}
+
+:root,
+[data-accent="crimson"] {
+	--app-accent: #dc2626;
+}
+[data-accent="azure"] {
+	--app-accent: #1677d2;
+}
+[data-accent="violet"] {
+	--app-accent: #7c3aed;
+}
+[data-accent="emerald"] {
+	--app-accent: #15803d;
+}
+[data-accent="amber"] {
+	--app-accent: #b45309;
+}
+
+@theme inline {
+	--color-app-bg: var(--app-bg);
+	--color-app-panel: var(--app-panel);
+	--color-app-surface: var(--app-surface);
+	--color-app-muted: var(--app-muted);
+	--color-app-border: var(--app-border);
+	--color-app-text: var(--app-text);
+	--color-app-subtle: var(--app-subtle);
+	--color-app-muted-text: var(--app-muted-text);
+	--color-app-accent: var(--app-accent);
+	--color-status-success: var(--status-success);
+	--color-status-warning: var(--status-warning);
+	--color-status-error: var(--status-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	[data-theme] *,
+	[data-theme] *::before,
+	[data-theme] *::after {
+		scroll-behavior: auto;
+		transition-duration: 0.01ms;
+		animation-duration: 0.01ms;
+		animation-iteration-count: 1;
+	}
+}

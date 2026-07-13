@@ -75,6 +75,24 @@ async def test_discover_parses_results_and_sends_key() -> None:
     assert page.total_pages == 5
 
 
+async def test_discover_serializes_selected_services_as_flate_rate_or() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["with_watch_providers"] == "8|337"
+        assert request.url.params["with_watch_monetization_types"] == "flatrate"
+        return httpx.Response(200, json=DISCOVER_JSON)
+
+    await _client(handler).discover("movie", region="GB", providers=[8, 337])
+
+
+async def test_discover_omits_provider_parameters_for_empty_selection() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "with_watch_providers" not in request.url.params
+        assert "with_watch_monetization_types" not in request.url.params
+        return httpx.Response(200, json=DISCOVER_JSON)
+
+    await _client(handler).discover("movie", region="US", providers=[])
+
+
 async def test_detail_parses_appended_blocks() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/3/movie/42"
@@ -144,6 +162,60 @@ async def test_genres_returns_list() -> None:
     genres = await _client(handler).genres("movie")
 
     assert [g.name for g in genres] == ["Action"]
+
+
+async def test_regions_and_providers_are_typed_and_cached_by_region() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if request.url.path.endswith("/regions"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"iso_3166_1": "GB", "english_name": "United Kingdom", "ignored": 1}
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "provider_id": 8,
+                        "provider_name": "Netflix",
+                        "logo_path": "/n.png",
+                        "display_priorities": {"GB": 2, "US": 5},
+                    }
+                ]
+            },
+        )
+
+    client = _client(handler)
+    assert (await client.regions())[0].english_name == "United Kingdom"
+    assert (await client.regions())[0].iso_3166_1 == "GB"
+    gb = await client.providers("movie", "GB")
+    us = await client.providers("movie", "US")
+    assert gb[0].priority_for("GB") == 2
+    assert us[0].priority_for("US") == 5
+    assert len(calls) == 3
+
+
+async def test_probe_requires_typed_configuration() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/3/configuration"
+        return httpx.Response(200, json={"images": {"secure_base_url": "https://image/"}})
+
+    await _client(handler).probe()
+
+
+async def test_probe_rejects_malformed_configuration() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"not_images": {}})
+
+    with pytest.raises(UpstreamUnavailable):
+        await _client(handler).probe()
 
 
 async def test_second_identical_call_is_cached() -> None:

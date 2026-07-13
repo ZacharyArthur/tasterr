@@ -21,7 +21,7 @@ export function RequestButton({
 	const result = request.data;
 	if (result?.status === "re_auth_required") {
 		return (
-			<p role="alert" className="text-sm text-amber-400">
+			<p role="alert" className="text-sm text-status-warning">
 				Your Seerr session expired — sign in again to request.
 			</p>
 		);
@@ -33,12 +33,12 @@ export function RequestButton({
 				href={result.seerr_url}
 				target="_blank"
 				rel="noreferrer"
-				className="inline-flex w-fit items-center gap-1 rounded bg-neutral-700 px-3 py-1.5 text-sm font-medium text-neutral-100 hover:bg-neutral-600"
+				className="inline-flex min-h-11 w-fit items-center gap-1 rounded bg-app-accent px-3 py-1.5 text-sm font-medium text-white hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text"
 			>
 				Request in Seerr ↗
 			</a>
 		) : (
-			<p className="text-sm text-red-400">
+			<p className="text-sm text-status-error">
 				Couldn’t send the request. Try again later.
 			</p>
 		);

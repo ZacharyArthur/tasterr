@@ -139,6 +139,26 @@ def _media_client(handler: Callable[[httpx.Request], httpx.Response]) -> SeerrCl
     return SeerrClient(http, BASE_URL, "seerr-api-key")
 
 
+async def test_probe_uses_global_key_and_parses_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/status"
+        assert request.headers["x-api-key"] == "seerr-api-key"
+        return httpx.Response(200, json={"version": "3.3.0", "ignored": "x"})
+
+    await _media_client(handler).probe()
+
+
+async def test_probe_failure_is_generic() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("http://internal-secret", request=request)
+
+    with pytest.raises(UpstreamUnavailable) as excinfo:
+        await _media_client(handler).probe()
+
+    assert "internal-secret" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
+
+
 async def test_media_status_parses_movie_mediainfo() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v1/movie/42"

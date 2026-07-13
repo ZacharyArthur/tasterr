@@ -1,5 +1,13 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { ApiError, getMe, loginLocal, logout } from "./api";
+import {
+	ApiError,
+	getMe,
+	getServices,
+	loginLocal,
+	logout,
+	saveSettings,
+	testConnection,
+} from "./api";
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -83,4 +91,54 @@ test("logout tolerates the empty 204 body", async () => {
 
 	await expect(logout()).resolves.toBeUndefined();
 	expect(mock).toHaveBeenCalledWith("/api/v1/auth/logout", { method: "POST" });
+});
+
+test("admin settings replacement uses a typed JSON PUT with same-origin credentials", async () => {
+	const body = {
+		region: "US",
+		service_ids: [8],
+		disabled_rail_types: ["genres" as const],
+		appearance: { theme: "light" as const, accent: "azure" as const },
+	};
+	const mock = stubFetch(200, { settings: body, rail_types: [] });
+
+	await saveSettings(body);
+
+	expect(mock).toHaveBeenCalledWith("/api/v1/settings", {
+		method: "PUT",
+		credentials: "same-origin",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(body),
+	});
+});
+
+test("service region is normalized and query encoded", async () => {
+	const mock = stubFetch(200, { region: "US", services: [] });
+	await getServices("us");
+	expect(mock).toHaveBeenCalledWith("/api/v1/services?region=US", undefined);
+});
+
+test("connection probes send only the allowlisted target", async () => {
+	const mock = stubFetch(200, {
+		target: "seerr",
+		ok: true,
+		detail: "Connection successful",
+	});
+	await testConnection("seerr");
+	expect(mock).toHaveBeenCalledWith("/api/v1/connection-test", {
+		method: "POST",
+		credentials: "same-origin",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ target: "seerr" }),
+	});
+});
+
+test.each([
+	401, 403, 422, 429, 500,
+])("admin failures preserve status %i", async (status) => {
+	stubFetch(status, { detail: "generic failure" });
+	const error = await getServices("US").catch((caught: unknown) => caught);
+	expect(error).toBeInstanceOf(ApiError);
+	expect((error as ApiError).status).toBe(status);
+	expect((error as ApiError).message).toBe("generic failure");
 });

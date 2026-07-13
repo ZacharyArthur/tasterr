@@ -105,6 +105,12 @@ class _SeerrTitle(BaseModel):
     media_info: SeerrMediaInfo | None = Field(default=None, alias="mediaInfo")
 
 
+class _SeerrStatus(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    version: str
+
+
 class _SeerrRequestResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -155,6 +161,22 @@ class SeerrClient:
         self._http = http
         self._base = base_url.rstrip("/")
         self._api_key = api_key
+
+    async def probe(self) -> None:
+        url = f"{self._base}/api/v1/status"
+        headers = {"X-Api-Key": self._api_key, "Accept": "application/json"}
+        try:
+            response = await self._http.get(url, headers=headers, timeout=SEERR_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
+        if response.status_code >= 500:
+            raise UpstreamUnavailable(f"seerr returned {response.status_code}")
+        if response.status_code >= 400:
+            raise UpstreamRejected(response.status_code)
+        try:
+            _SeerrStatus.model_validate(response.json())
+        except ValueError as error:
+            raise UpstreamUnavailable("unexpected seerr response shape") from error
 
     async def media_status(self, media_type: MediaType, tmdb_id: int) -> SeerrMediaInfo | None:
         """The title's `mediaInfo`, or None when Seerr holds no record (a `404` or

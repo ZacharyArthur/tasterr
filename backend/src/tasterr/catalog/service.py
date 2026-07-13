@@ -5,7 +5,14 @@ HTTP itself, so rails and endpoints depend on domain shapes, not TMDB wire types
 """
 
 from tasterr.catalog import facts, normalize
-from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, MediaType
+from tasterr.catalog.models import (
+    Genre,
+    MediaDetail,
+    MediaSummary,
+    MediaType,
+    RegionOption,
+    ServiceOption,
+)
 from tasterr.clients.tmdb import TmdbClient
 
 DEFAULT_REGION = "US"  # M5's settings GUI will make this admin-configurable.
@@ -13,13 +20,23 @@ MAX_QUERY_LENGTH = 100
 
 
 class CatalogService:
-    def __init__(self, client: TmdbClient, region: str = DEFAULT_REGION) -> None:
+    def __init__(
+        self,
+        client: TmdbClient,
+        region: str = DEFAULT_REGION,
+        service_ids: list[int] | None = None,
+    ) -> None:
         self._client = client
         self._region = region
+        self._service_ids = tuple(service_ids or [])
 
     @property
     def region(self) -> str:
         return self._region
+
+    @property
+    def selected_service_ids(self) -> tuple[int, ...]:
+        return self._service_ids
 
     async def trending(self) -> list[MediaSummary]:
         page = await self._client.trending("all", "day")
@@ -35,6 +52,7 @@ class CatalogService:
         min_votes: int | None = None,
         release_gte: str | None = None,
         release_lte: str | None = None,
+        service_ids: list[int] | None = None,
     ) -> list[MediaSummary]:
         result = await self._client.discover(
             media,
@@ -45,6 +63,7 @@ class CatalogService:
             min_votes=min_votes,
             release_gte=release_gte,
             release_lte=release_lte,
+            providers=service_ids if service_ids is not None else list(self._service_ids) or None,
         )
         return normalize.to_summaries(result.results, media)
 
@@ -63,7 +82,7 @@ class CatalogService:
         """Feature-oriented facts for the taste engine — same cached fetch as
         `detail()`, so a warm detail cache serves facts with no TMDB call."""
         raw = await self._client.detail(media, tmdb_id, self._region)
-        return facts.to_facts(raw, media)
+        return facts.to_facts(raw, media, self._region)
 
     async def genre_map(self, media: MediaType) -> dict[str, int]:
         genres = await self._client.genres(media)
@@ -72,3 +91,17 @@ class CatalogService:
     async def genres(self, media: MediaType) -> list[Genre]:
         genres = await self._client.genres(media)
         return [Genre(id=g.id, name=g.name) for g in genres]
+
+    async def regions(self) -> list[RegionOption]:
+        return normalize.to_regions(await self._client.regions())
+
+    async def services(self, region: str | None = None) -> list[ServiceOption]:
+        active = region or self._region
+        movie, tv = (
+            await self._client.providers("movie", active),
+            await self._client.providers("tv", active),
+        )
+        return normalize.to_services(movie, tv, active)
+
+    async def probe(self) -> None:
+        await self._client.probe()
