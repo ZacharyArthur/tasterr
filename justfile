@@ -17,6 +17,21 @@ check-frontend:
     cd frontend && npm test
     cd frontend && npm run build
 
+# Hermetic browser journey: compiled SPA + normal FastAPI app + local upstream fixtures.
+e2e:
+    cd frontend && npm run build
+    cd frontend && npm run e2e
+
+# Native production-image and named-volume contract; owns all disposable resources.
+container-smoke:
+    bash scripts/container-smoke.sh
+
+# Deterministic pre-release checks. Audits and live contracts stay explicit.
+release-check:
+    just check
+    just e2e
+    just container-smoke
+
 # Regenerate frontend API types from the backend OpenAPI schema.
 types:
     cd backend && uv run python scripts/dump_openapi.py ../frontend/openapi.json

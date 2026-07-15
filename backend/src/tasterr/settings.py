@@ -1,6 +1,7 @@
 """Application settings. Secrets and connections are env-only (SPEC §9)."""
 
 from functools import lru_cache
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
     static_dir: Path = Path("static")
     tasterr_host: str = "0.0.0.0"
     tasterr_port: int = 8000
+    tasterr_forwarded_allow_ips: str = "127.0.0.1"
 
     @field_validator("seerr_internal_url", "seerr_external_url")
     @classmethod
@@ -51,6 +53,25 @@ class Settings(BaseSettings):
         if info.field_name == "seerr_external_url" and (parsed.username or parsed.password):
             return None
         return value
+
+    @field_validator("tasterr_forwarded_allow_ips")
+    @classmethod
+    def _trusted_proxy_allowlist(cls, value: str) -> str:
+        """Normalize explicit proxy-peer addresses for Uvicorn.
+
+        Invalid security configuration fails boot rather than broadening trust.
+        """
+        normalized: list[str] = []
+        for raw_item in value.split(","):
+            item = raw_item.strip()
+            if not item:
+                raise ValueError("trusted proxy entries must not be empty")
+            try:
+                parsed = ip_network(item, strict=False) if "/" in item else ip_address(item)
+            except ValueError as error:
+                raise ValueError("trusted proxies must be literal IP addresses or CIDRs") from error
+            normalized.append(str(parsed))
+        return ",".join(normalized)
 
     @property
     def tmdb_configured(self) -> bool:

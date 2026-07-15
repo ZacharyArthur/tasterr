@@ -1,0 +1,176 @@
+# Configuration and operations
+
+Tasterr reads deployment connections and secrets from environment variables. The
+admin UI stores only non-secret household preferences in SQLite. Compose reads the
+same `.env` file for both interpolation and the container environment; never commit
+that file.
+
+## Application environment variables
+
+| Variable | Required | Default | Purpose |
+|---|---:|---|---|
+| `TMDB_API_KEY` | For browsing | unset | TMDB v3 key used server-side for catalog reads. |
+| `SEERR_INTERNAL_URL` | For Seerr integration | unset | Server-only HTTP(S) base URL used for identity, availability, history, and requests. |
+| `SEERR_EXTERNAL_URL` | No | unset | Browser-visible HTTP(S) base URL for fallback “Request in Seerr” links. Embedded credentials are rejected. |
+| `SEERR_API_KEY` | For Seerr reads | unset | Server-only Seerr API key. User-attributed request writes use the member's Seerr session instead. |
+| `TASTERR_SECRET_KEY` | For sign-in/requests | unset | Random secret used to encrypt stored Plex tokens. Keep it stable across upgrades. |
+| `DATABASE_PATH` | No | `data/tasterr.db` | SQLite path. The image sets `/data/tasterr.db` on its named volume. |
+| `STATIC_DIR` | No | `static` | Compiled SPA directory. The image sets `/app/static`. |
+| `TASTERR_HOST` | No | `0.0.0.0` | Uvicorn bind address. |
+| `TASTERR_PORT` | No | `8000` | Uvicorn container port and healthcheck target. |
+| `TASTERR_FORWARDED_ALLOW_IPS` | No | `127.0.0.1` | Comma-separated direct proxy-peer IP addresses or CIDRs allowed to supply forwarded client/scheme headers. |
+
+Empty or missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
+The proxy allowlist accepts literal IP addresses and CIDRs only; empty entries,
+hostnames, URLs, malformed networks, and wildcard trust fail boot.
+
+## Compose-only variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TASTERR_MEDIA_NETWORK` | unset | Existing external Docker network used only with `docker-compose.seerr-network.yml` when Seerr runs on this same Docker host in another Compose project. |
+| `TASTERR_IMAGE` | `tasterr:latest` | Local or GHCR image name/tag used by Compose. |
+| `TASTERR_HTTP_PORT` | `8000` | Host-side port or bind expression. Use `127.0.0.1:8000` to expose only on loopback. |
+| `TASTERR_ENV_FILE` | `.env` | Service environment file path. With an alternate file, pass the same file to Compose via `--env-file`. |
+
+The base Compose file leaves an optional Seerr service commented out and uses its
+normal project-managed network. It does not require a pre-created network or silently
+start a second Seerr.
+
+## Secrets and first boot
+
+Generate the application secret without relying on a host Python installation:
+
+```console
+docker run --rm python:3.13-slim python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Store the result only in `.env` or your secret manager. Rotating it makes previously
+stored Plex tokens unreadable, so affected users must sign in again before silent
+Seerr re-authentication can work. Obtain the TMDB and Seerr API keys from their
+respective settings pages; do not place either in browser code, Compose build args,
+or image layers.
+
+Choose `SEERR_INTERNAL_URL` according to where Seerr runs:
+
+- **Another host:** use a routable LAN URL such as
+  `http://seerr.home.arpa:5055`. No Docker network setting or change to Seerr's stack
+  is needed. Docker networks do not span hosts.
+- **This same Compose project:** if the commented Seerr service is enabled, use
+  `http://seerr:5055`; both services automatically share the project network.
+- **This Docker host, another Compose project:** set `TASTERR_MEDIA_NETWORK` to an
+  existing network already joined by Seerr, then opt into the override:
+
+  ```console
+  docker compose -f docker-compose.yml -f docker-compose.seerr-network.yml up -d --build
+  ```
+
+  Inspect the Seerr container with `docker inspect <seerr-container>` if its network
+  name is unknown. The Seerr service name or network alias used by
+  `SEERR_INTERNAL_URL` must resolve on that network.
+
+For the normal LAN/default-network path, start with `docker compose up -d --build`.
+Boot upgrades SQLite to the current
+Alembic revision, expires stale sessions, and then reports health at
+`/api/v1/health`. Sign in with an existing Seerr account. Seerr's admin permission is
+re-derived on each login and controls access to Tasterr's Settings screen.
+
+## Runtime household settings
+
+Administrators manage these non-secret values in the Settings screen:
+
+- two-letter TMDB region (default `US`);
+- up to eight streaming service identifiers;
+- enabled/disabled rail types;
+- dark/light theme and crimson, azure, violet, emerald, or amber accent.
+
+They are stored in SQLite, returned through an explicit public response model, and
+never accept URLs, keys, tokens, cookies, or credentials.
+
+## HTTPS and trusted proxies
+
+Terminate TLS at a reverse proxy and prevent direct internet access to port 8000.
+The proxy must replace `X-Forwarded-For` and `X-Forwarded-Proto`, set the latter to
+`https`, and connect from a peer covered by `TASTERR_FORWARDED_ALLOW_IPS`. Configure
+the direct proxy peer—not an arbitrary browser address. Prefer one static IP; use the
+narrowest container subnet only when a fixed address is impractical. Never use `*`.
+
+For a proxy on the host, loopback trust may be sufficient. For a proxy container,
+use its fixed network IP or narrow network CIDR. Bind Tasterr to loopback with
+`TASTERR_HTTP_PORT=127.0.0.1:8000` when the proxy reaches it through the host. A
+correct trusted `X-Forwarded-Proto: https` makes session cookies `Secure`; forwarding
+headers from any untrusted peer are ignored.
+
+## Degraded modes
+
+- TMDB unset or unavailable: health still responds, but catalog browsing reports a
+  generic unavailable state until TMDB recovers or is configured.
+- Seerr unset: TMDB browsing remains available; availability is Unknown and request
+  controls are disabled.
+- Seerr temporarily down: browsing and learned recommendations continue; badges
+  degrade to Unknown and request attempts fail generically or offer the validated
+  external Seerr link.
+- A local user's Seerr session expires: a request asks them to sign in again. A Plex
+  user's request performs one silent re-authentication attempt with the encrypted
+  stored token.
+
+## Backup and restore
+
+The default volume is normally named `tasterr_tasterr-data`; confirm with
+`docker volume ls` if a Compose project name was supplied. Stop the only writer before
+copying the database. The following streams the database without exposing it in a
+temporary helper volume:
+
+```console
+VOLUME=tasterr_tasterr-data
+IMAGE=tasterr:latest
+docker compose stop tasterr
+docker run --rm --entrypoint python -v "$VOLUME:/data:ro" "$IMAGE" -c "import sys; sys.stdout.buffer.write(open('/data/tasterr.db','rb').read())" > tasterr.db.backup
+docker compose start tasterr
+```
+
+Validate the copy before relying on it:
+
+```console
+docker run --rm -i --entrypoint python "$IMAGE" -c "import sqlite3,sys,tempfile; f=tempfile.NamedTemporaryFile(); f.write(sys.stdin.buffer.read()); f.flush(); db=sqlite3.connect(f.name); assert db.execute('PRAGMA integrity_check').fetchone()==('ok',); db.close()" < tasterr.db.backup
+```
+
+To restore, stop Tasterr, validate the backup, then stream it back as the image's
+non-root application user:
+
+```console
+docker compose stop tasterr
+docker run --rm -i --entrypoint python -v "$VOLUME:/data" "$IMAGE" -c "import pathlib,sys; pathlib.Path('/data/tasterr.db').write_bytes(sys.stdin.buffer.read())" < tasterr.db.backup
+docker compose up -d --no-build
+```
+
+Keep backups encrypted and access-controlled: they contain identities, taste
+signals, session material, and household viewing behavior.
+
+## Upgrade and rollback
+
+Before upgrading, take and validate a backup, record the current immutable image
+digest, then set `TASTERR_IMAGE` to the new stable tag or digest. Run
+`docker compose pull` and `docker compose up -d --no-build`; verify health, login,
+home, detail, and one non-destructive request state check.
+
+For an image-only rollback, restore the prior digest and recreate the service while
+keeping the named volume. If a release introduced a migration that is not backward
+compatible, stop the writer and restore the matching pre-upgrade database before
+starting the old digest. Version 1.0's hardening release adds no migration.
+
+## Troubleshooting
+
+- `network ... declared as external, but could not be found`: this applies only to
+  the optional same-host override; correct `TASTERR_MEDIA_NETWORK` or use the base
+  Compose command for a LAN-reachable Seerr.
+- Seerr connection test fails: run `docker compose exec tasterr getent hosts
+  <seerr-host>` using the hostname from `SEERR_INTERNAL_URL`, then verify its port,
+  routing, and API key. For the optional override, also verify both containers join
+  the named network. Never paste keys into logs or issues.
+- Login loops behind HTTPS: verify the proxy's direct peer is trusted and it replaces
+  `X-Forwarded-Proto` with `https`.
+- Health is good but the UI is unavailable: inspect `docker compose logs tasterr`
+  for generic startup errors and confirm the image contains `/app/static/index.html`.
+- Database write errors: confirm the named volume is mounted at `/data` and was not
+  restored as root-owned content.

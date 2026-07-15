@@ -1,6 +1,6 @@
 [project]
 name = "tasterr"
-version = "0.1.0"
+version = "1.0.0"
 description = "Self-hosted, Netflix-style discovery front-end for a household media stack"
 requires-python = ">=3.13"
 dependencies = [
@@ -49,6 +49,7 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 # `just check` stays hermetic and offline; run the live suite via `just test-live`.

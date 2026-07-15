@@ -1,9 +1,9 @@
 """Admin-only runtime settings, catalog choices, and configured probes (M5)."""
 
 from enum import StrEnum
-from typing import Annotated, cast
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ from tasterr.auth.deps import (
     require_admin,
     require_same_origin,
 )
-from tasterr.auth.ratelimit import TokenBucket
+from tasterr.auth.ratelimit import admin_rate_limit
 from tasterr.catalog.models import RegionOption, ServiceOption
 from tasterr.clients.errors import UpstreamError
 from tasterr.clients.seerr import SeerrClient
@@ -58,17 +58,6 @@ class ConnectionTestResponse(BaseModel):
     target: ConnectionTarget
     ok: bool
     detail: str
-
-
-def admin_rate_limit(
-    request: Request,
-    _admin: Annotated[AuthedSession, Depends(require_admin)],
-) -> None:
-    """Spend mutation capacity only after the caller proves admin authority."""
-    bucket = cast("TokenBucket", request.app.state.admin_bucket)
-    key = request.client.host if request.client else "unknown"
-    if not bucket.allow(key):
-        raise HTTPException(status_code=429, detail="Too many admin actions")
 
 
 @router.get("/settings", response_model=SettingsResponse)

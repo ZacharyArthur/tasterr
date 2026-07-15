@@ -177,6 +177,20 @@ def test_rejected_non_admin_does_not_spend_admin_mutation_capacity(
     assert accepted.status_code == 200
 
 
+def test_admin_mutation_uses_only_the_admin_user_bucket(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    db_path = tmp_path / "tasterr.db"
+    app.state.admin_bucket = TokenBucket(capacity=1, refill_per_second=0)
+    app.state.mutation_bucket = TokenBucket(capacity=0, refill_per_second=0)
+
+    with _client(app, db_path) as client:
+        accepted = client.put("/api/v1/settings", json={})
+
+    assert accepted.status_code == 200
+    assert set(app.state.admin_bucket._buckets) == {"1"}  # pyright: ignore[reportPrivateUsage]
+    assert app.state.mutation_bucket._buckets == {}  # pyright: ignore[reportPrivateUsage]
+
+
 def test_regions_and_services_are_admin_only_and_validated(tmp_path: Path) -> None:
     fake = FakeAdminCatalog()
     app = _app(tmp_path)

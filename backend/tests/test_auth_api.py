@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from tasterr.api.auth import AuthContext, get_auth_context
 from tasterr.auth.pins import PinStore
+from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import mint_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.plex import PlexAuthClient, PlexPin
@@ -443,6 +444,28 @@ def test_logout_revokes_server_side(tmp_path: Path) -> None:
         # Replaying the revoked cookie must fail server-side.
         client.cookies.set("tasterr_session", session_cookie)
         assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_rate_limited_logout_preserves_session_and_cookie(tmp_path: Path) -> None:
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        login = client.post(
+            "/api/v1/auth/local",
+            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+        )
+        assert login.status_code == 200
+        session_cookie = client.cookies.get("tasterr_session")
+        assert session_cookie is not None
+        harness.app.state.mutation_bucket = TokenBucket(capacity=0, refill_per_second=0)
+
+        rejected = client.post("/api/v1/auth/logout")
+        still_authed = client.get("/api/v1/auth/me")
+
+    assert rejected.status_code == 429
+    assert rejected.json() == {"detail": "Too many actions"}
+    assert "max-age=0" not in rejected.headers.get("set-cookie", "").lower()
+    assert client.cookies.get("tasterr_session") == session_cookie
+    assert still_authed.status_code == 200
 
 
 # --- Unconfigured / degraded (4.6) ---

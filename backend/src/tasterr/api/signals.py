@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import refresh_profile
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
+from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.recommend import store
 from tasterr.recommend.signals import TOGGLE_KINDS, ClientSignalKind, MediaType
 from tasterr.settings import Settings, get_settings
@@ -37,7 +38,11 @@ class SignalResponse(BaseModel):
     recorded: bool
 
 
-@router.post("/signals", dependencies=[Depends(require_same_origin)])
+@router.post(
+    "/signals",
+    response_model=SignalResponse,
+    dependencies=[Depends(require_same_origin), Depends(mutation_rate_limit)],
+)
 async def post_signal(
     payload: SignalBody,
     authed: Annotated[AuthedSession, Depends(require_session)],

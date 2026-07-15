@@ -19,3 +19,10 @@ def test_env_example_documents_every_setting() -> None:
 
     missing = expected - documented
     assert not missing, f".env.example is missing: {sorted(missing)}"
+
+
+def test_env_example_keeps_proxy_trust_narrow() -> None:
+    text = ENV_EXAMPLE.read_text(encoding="utf-8")
+
+    assert "#TASTERR_FORWARDED_ALLOW_IPS=127.0.0.1" in text
+    assert "TASTERR_FORWARDED_ALLOW_IPS=*" not in text

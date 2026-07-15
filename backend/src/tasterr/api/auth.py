@@ -19,7 +19,7 @@ from tasterr.auth.crypto import plex_client_identifier
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
 from tasterr.auth.login import complete_login
 from tasterr.auth.pins import PinStore
-from tasterr.auth.ratelimit import TokenBucket
+from tasterr.auth.ratelimit import TokenBucket, mutation_rate_limit
 from tasterr.auth.sessions import revoke_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.plex import PlexAuthClient
@@ -200,7 +200,7 @@ def get_me(authed: Annotated[AuthedSession, Depends(require_session)]) -> UserRe
 @router.post(
     "/auth/logout",
     status_code=204,
-    dependencies=[Depends(require_same_origin)],
+    dependencies=[Depends(require_same_origin), Depends(mutation_rate_limit)],
 )
 async def logout(
     request: Request,

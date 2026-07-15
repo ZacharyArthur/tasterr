@@ -1,31 +1,24 @@
-# Example wiring: Tasterr beside Seerr on a shared network. Tasterr reaches
-# Seerr via the service name (SEERR_INTERNAL_URL=http://seerr:5055 in .env);
-# that URL never leaves the server.
+# Tasterr reaches an existing Seerr through SEERR_INTERNAL_URL. A routable LAN
+# hostname or address needs no shared Docker network; the URL never leaves the
+# server. See docker-compose.seerr-network.yml for optional same-host wiring.
 services:
   tasterr:
     build: .
-    image: tasterr:latest
+    image: ${TASTERR_IMAGE:-tasterr:latest}
     restart: unless-stopped
     ports:
-      - "8000:8000"
-    env_file: .env
+      - "${TASTERR_HTTP_PORT:-8000}:8000"
+    env_file: ${TASTERR_ENV_FILE:-.env}
     volumes:
       - tasterr-data:/data
-    networks:
-      - media
 
-  # Uncomment (or point SEERR_INTERNAL_URL at your existing instance).
+  # Uncomment only if Tasterr should own Seerr in this same Compose project.
   # seerr:
-  #   image: fallenbagel/jellyseerr:latest
+  #   image: ghcr.io/seerr-team/seerr:latest
   #   restart: unless-stopped
   #   volumes:
   #     - seerr-config:/app/config
-  #   networks:
-  #     - media
 
 volumes:
   tasterr-data:
   # seerr-config:
-
-networks:
-  media:

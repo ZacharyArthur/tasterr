@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import mint_session
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
@@ -86,6 +87,23 @@ def test_cross_origin_signal_is_rejected(tmp_path: Path) -> None:
 
     assert response.status_code == 403
     assert _stored_signals(tmp_path / "tasterr.db") == []
+
+
+def test_rate_limited_signal_record_and_retract_have_no_side_effect(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path)
+    with _client(app, token) as client:
+        added = client.post("/api/v1/signals", json=_body("watchlist"))
+        assert added.status_code == 200
+        app.state.mutation_bucket = TokenBucket(capacity=0, refill_per_second=0)
+
+        rejected_retract = client.post("/api/v1/signals", json=_body("watchlist", retract=True))
+        rejected_record = client.post("/api/v1/signals", json=_body("detail_open"))
+
+    assert rejected_retract.status_code == 429
+    assert rejected_record.status_code == 429
+    assert _stored_signals(db_path) == [("movie", 42, "watchlist")]
 
 
 def test_server_recorded_kinds_are_unrepresentable(tmp_path: Path) -> None:

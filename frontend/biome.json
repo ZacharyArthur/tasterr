@@ -7,7 +7,13 @@
 	},
 	"files": {
 		"ignoreUnknown": true,
-		"includes": ["**", "!src/lib/api.gen.ts", "!openapi.json"]
+		"includes": [
+			"**",
+			"!src/lib/api.gen.ts",
+			"!openapi.json",
+			"!playwright-report",
+			"!test-results"
+		]
 	},
 	"formatter": {
 		"enabled": true,

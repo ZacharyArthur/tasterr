@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import mint_session
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
@@ -251,3 +252,29 @@ def test_reset_with_seerr_down_still_clears(tmp_path: Path) -> None:
         assert await store.has_signals(db, user_id) is False
 
     _run_db(tmp_path / "tasterr.db", verify)
+
+
+def test_rate_limited_reset_preserves_signals_and_profile(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    db_path = tmp_path / "tasterr.db"
+    token, user_id = _seed_session(db_path)
+
+    async def prepare(db: AsyncSession) -> None:
+        await store.record_signal(db, user_id, "movie", 99, "watchlist")
+        await store.save_profile(db, user_id, {"genre:sentinel": 1.0})
+
+    _run_db(db_path, prepare)
+    app.state.mutation_bucket = TokenBucket(capacity=0, refill_per_second=0)
+    with _client(app, token) as client:
+        response = client.post("/api/v1/recommendations/reset")
+
+    assert response.status_code == 429
+
+    async def verify(db: AsyncSession) -> None:
+        signals = await store.load_signals(db, user_id)
+        assert [(signal.tmdb_id, signal.kind) for signal in signals] == [(99, "watchlist")]
+        profile = await store.load_profile(db, user_id)
+        assert profile is not None
+        assert profile.vector == {"genre:sentinel": 1.0}
+
+    _run_db(db_path, verify)

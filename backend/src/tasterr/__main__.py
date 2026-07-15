@@ -15,6 +15,7 @@ def main() -> None:
         # Honor X-Forwarded-Proto so session cookies are Secure behind the
         # tunnel; which proxy IPs to trust is M6 deployment hardening.
         proxy_headers=True,
+        forwarded_allow_ips=settings.tasterr_forwarded_allow_ips,
     )
 
 

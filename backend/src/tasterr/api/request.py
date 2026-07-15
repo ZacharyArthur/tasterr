@@ -21,6 +21,7 @@ from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import refresh_profile
 from tasterr.auth.crypto import decrypt_token
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
+from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.catalog.availability import Availability, availability_from_code
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.seerr import MediaType, SeerrAuthClient, SeerrClient
@@ -91,7 +92,11 @@ class _Outcome:
     availability: Availability | None = None
 
 
-@router.post("/request", dependencies=[Depends(require_same_origin)])
+@router.post(
+    "/request",
+    response_model=RequestResponse,
+    dependencies=[Depends(require_same_origin), Depends(mutation_rate_limit)],
+)
 async def create_request(
     payload: RequestBody,
     authed: Annotated[AuthedSession, Depends(require_session)],

@@ -1,0 +1,12 @@
+# Optional override for Seerr on this Docker host in a different Compose project.
+# The existing network must already contain Seerr. It is unnecessary when
+# SEERR_INTERNAL_URL is a routable LAN hostname or address.
+services:
+  tasterr:
+    networks:
+      - seerr
+
+networks:
+  seerr:
+    name: ${TASTERR_MEDIA_NETWORK:?set TASTERR_MEDIA_NETWORK to Seerr's Docker network}
+    external: true

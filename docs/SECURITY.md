@@ -4,8 +4,8 @@
 [AGENTS.md](../AGENTS.md) points here; every OpenSpec change's `design.md` must answer the
 relevant checklists below (enforced via `openspec/config.yaml` rules).
 
-> Scope: how we write secure code day-to-day. A vulnerability *reporting* policy
-> (root `SECURITY.md`, GitHub convention) is a separate file added when the repo goes public.
+> Scope: how we write secure code day-to-day. The public vulnerability-reporting
+> and supported-version policy is the separate root [SECURITY.md](../SECURITY.md).
 
 ## Threat model in 30 seconds
 
@@ -25,6 +25,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 2. Only `clients/` performs outbound HTTP — import-linter contract.
 3. Session tokens stored **hashed**; Plex tokens **encrypted** at rest.
 4. Lockfiles committed; `just audit` before releases.
+5. Forwarded client/scheme headers are accepted only from an explicit literal-IP/CIDR
+   proxy allowlist; wildcard trust is rejected.
 
 ## Checklists by area
 
@@ -37,6 +39,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Explicit `response_model` — never return ORM objects or upstream JSON unfiltered.
 - [ ] Errors to the client carry no stack traces, internal URLs, or upstream error bodies.
 - [ ] Logs carry no tokens, cookies, credentials, or PII.
+- [ ] A new state-changing route is added to the mutation-inventory regression, or
+      its read-only/capability-based exemption is explicit and tested.
 
 ### Auth & session code
 
@@ -45,6 +49,10 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Fresh session token on every login (no fixation); logout deletes the row.
 - [ ] Cookie flags: `HttpOnly`, `SameSite=Lax`, `Secure` behind HTTPS.
 - [ ] Auth endpoints rate-limited tightly; failures are generic (no user enumeration).
+- [ ] Forwarded IP/scheme is used only after direct proxy-peer allowlist validation;
+      trusted and untrusted peer behavior is covered by regression tests.
+- [ ] Authenticated/admin mutation buckets key only by server-derived user id and
+      reject before upstream or database side effects.
 
 ### Outbound HTTP (`clients/`)
 
@@ -60,12 +68,16 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       client-side from data.
 - [ ] No tokens or secrets in `localStorage`/`sessionStorage`; the session lives in the
       HttpOnly cookie the JS can't read.
+- [ ] Browser tests use invented local fixtures, make no live request, and retain no
+      trace containing placeholder credentials; failure artifacts are reviewed before publish.
 
 ### Database & migrations
 
 - [ ] SQLAlchemy expressions only — no string-built SQL, ever.
 - [ ] New columns holding tokens/secrets: encrypted (Fernet) and justified in design.md.
 - [ ] Migrations never copy secret material into new plaintext columns or logs.
+- [ ] Backup/restore instructions stop the writer or use SQLite's backup API, run an
+      integrity check, preserve runtime ownership, and treat backups as sensitive.
 
 ### Dependencies & build
 
@@ -73,6 +85,29 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       maintenance status and provenance before adding.
 - [ ] `uv.lock` / `package-lock.json` updated and committed together with the change.
 - [ ] Dockerfile: non-root user, minimal base image, no secrets in layers or build args.
+- [ ] Native container smoke proves health, SPA, non-root uid, named-volume
+      persistence, isolated placeholder configuration, and unconditional cleanup.
+- [ ] Every third-party workflow action is pinned to a reviewed full commit SHA;
+      permissions default read-only and package write exists only on the publish job.
+
+### Logging and release evidence
+
+- [ ] Logs and checked-in evidence contain generic outcomes only: no live/internal
+      URLs, household identities, title/viewing data, credentials, session material,
+      upstream bodies, or environment dumps.
+- [ ] Failure artifacts and generated reports are ignored by git and manually
+      reviewed before any intentional publication.
+- [ ] Release evidence identifies versions, checks, advisory dispositions, and
+      generic exercised/skipped cases without reproducing sensitive command output.
+
+### Public repository and package release
+
+- [ ] Root `SECURITY.md` names the supported line and GitHub private reporting path.
+- [ ] GitHub private vulnerability reporting is enabled.
+- [ ] Secret scanning and push protection (where available) are enabled.
+- [ ] Dependabot alerts are enabled and triaged.
+- [ ] `.env.example`, fixtures, history, staged files, and release notes are reviewed
+      for live secrets, URLs, identities, and household data.
 
 ## Release checklist (before every tag)
 
@@ -81,9 +116,14 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Live contract tests against the home Seerr instance pass; tested Seerr version recorded.
 - [ ] `.env.example` contains placeholders only — no real values, no real hostnames.
 
+- [ ] `just release-check` passes in the devcontainer (ordinary gate + browser +
+      native container smoke).
+- [ ] GHCR workflow permissions/tags are reviewed; stable manifests and a fresh
+      registry-image deployment are verified before announcement.
+
 ## Working notes
 
 - Spike/debug scripts that touch real tokens live outside the repo (scratch space); findings
   recorded in docs are **redacted** — names, shapes, status codes; never values.
-- When the repo goes public: enable GitHub secret scanning + Dependabot alerts on day one,
-  and add the root `SECURITY.md` reporting policy.
+- Public releases follow [RELEASING.md](RELEASING.md); policy, repository security
+  features, audits, live contracts, and redacted evidence are pre-tag requirements.

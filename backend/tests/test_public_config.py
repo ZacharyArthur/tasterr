@@ -53,6 +53,7 @@ CLIENT_SAFE_FIELDS = {
     "tasterr_host",
     "tasterr_port",
     "static_dir",
+    "tasterr_forwarded_allow_ips",
 }
 
 
@@ -94,3 +95,8 @@ def test_public_config_has_no_secretstr_fields() -> None:
         assert "SecretStr" not in str(field.annotation), (
             f"SecretStr-typed field {name!r} in PublicConfig"
         )
+
+
+def test_forwarded_allowlist_has_no_client_or_runtime_projection() -> None:
+    assert "tasterr_forwarded_allow_ips" not in PublicConfig.model_fields
+    assert "tasterr_forwarded_allow_ips" not in RuntimeSettings.model_fields

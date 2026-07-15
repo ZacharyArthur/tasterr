@@ -10,7 +10,11 @@ from sqlalchemy.pool import ConnectionPoolEntry
 
 def create_engine(database_path: Path) -> AsyncEngine:
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_async_engine(f"sqlite+aiosqlite:///{database_path.as_posix()}")
+    # SQLAlchemy exceptions may be logged by degradation paths. Hide bound values so
+    # a DB failure cannot print session material or household viewing data.
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{database_path.as_posix()}", hide_parameters=True
+    )
 
     # SQLite leaves foreign-key enforcement OFF per connection by default;
     # without this pragma the sessions→users ON DELETE CASCADE is a no-op.

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from tasterr.db.engine import create_engine
@@ -22,6 +22,23 @@ async def test_engine_creates_file_on_first_connect(tmp_path: Path) -> None:
         await engine.dispose()
 
     assert db_path.exists()
+
+
+async def test_database_errors_hide_bound_values(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    sentinel = "private-viewing-sentinel"
+    try:
+        assert engine.sync_engine.hide_parameters is True
+        async with engine.connect() as connection:
+            with pytest.raises(DBAPIError) as excinfo:
+                await connection.execute(
+                    text("SELECT :value FROM a_table_that_does_not_exist"),
+                    {"value": sentinel},
+                )
+        assert sentinel not in str(excinfo.value)
+        assert "SQL parameters hidden" in str(excinfo.value)
+    finally:
+        await engine.dispose()
 
 
 def _session_row(user_id: int) -> UserSession:

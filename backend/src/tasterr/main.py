@@ -78,6 +78,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.pin_store = PinStore()
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
+    # Loose authenticated mutation bucket: per-user, shared across ordinary writes.
+    app.state.mutation_bucket = TokenBucket(capacity=60, refill_per_second=60 / 60)
     app.state.admin_bucket = TokenBucket(capacity=30, refill_per_second=30 / 60)
     app.state.catalog_cache = Cache()
     # A separate bounded cache for short-TTL Seerr availability reads, so they

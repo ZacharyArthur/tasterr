@@ -1,7 +1,7 @@
 {
 	"name": "frontend",
 	"private": true,
-	"version": "0.0.0",
+	"version": "1.0.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
@@ -10,6 +10,7 @@
 		"lint": "biome check .",
 		"format": "biome check --write .",
 		"test": "vitest run --no-file-parallelism",
+		"e2e": "playwright test",
 		"preview": "vite preview"
 	},
 	"dependencies": {
@@ -22,6 +23,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.2",
+		"@playwright/test": "1.61.1",
 		"@testing-library/react": "^16.3.2",
 		"@types/node": "^24.13.2",
 		"@types/react": "^19.2.17",

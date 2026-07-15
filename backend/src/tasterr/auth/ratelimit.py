@@ -1,13 +1,18 @@
-"""In-process per-key token bucket for the login endpoints (SPEC §9, tight).
+"""Bounded in-process token buckets for login and authenticated mutations.
 
 Single-process by design (SPEC §2) and asyncio-single-threaded, so no locking.
-Behind the tunnel all clients may share one peer IP, degrading per-IP to a
-global bucket — acceptable at household scale; forwarded-for trust is M6.
+Login keys use the effective client address after Uvicorn's trusted-proxy filter;
+authenticated and admin mutations key only by server-derived user id.
 """
 
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Annotated, cast
+
+from fastapi import Depends, HTTPException, Request
+
+from tasterr.auth.deps import AuthedSession, require_admin, require_session
 
 
 @dataclass
@@ -40,7 +45,7 @@ class TokenBucket:
                 # Still full after pruning: a unique-key flood. Fail closed for
                 # new keys rather than resetting existing buckets — clearing
                 # would hand every exhausted offender a fresh allowance. Real
-                # exposure is gated on M6's forwarded-header trust decision.
+                # exposure is gated by the configured trusted-proxy allowlist.
                 return False
             bucket = _Bucket(tokens=self._capacity, updated=now)
             self._buckets[key] = bucket
@@ -58,3 +63,23 @@ class TokenBucket:
         full_after = self._capacity / self._refill if self._refill > 0 else 0.0
         for key in [k for k, b in self._buckets.items() if now - b.updated >= full_after]:
             del self._buckets[key]
+
+
+def mutation_rate_limit(
+    request: Request,
+    authed: Annotated[AuthedSession, Depends(require_session)],
+) -> None:
+    """Spend shared loose capacity only after session authentication succeeds."""
+    bucket = cast("TokenBucket", request.app.state.mutation_bucket)
+    if not bucket.allow(str(authed.user.id)):
+        raise HTTPException(status_code=429, detail="Too many actions")
+
+
+def admin_rate_limit(
+    request: Request,
+    admin: Annotated[AuthedSession, Depends(require_admin)],
+) -> None:
+    """Spend the separate admin bucket only after admin authority is proven."""
+    bucket = cast("TokenBucket", request.app.state.admin_bucket)
+    if not bucket.allow(str(admin.user.id)):
+        raise HTTPException(status_code=429, detail="Too many admin actions")

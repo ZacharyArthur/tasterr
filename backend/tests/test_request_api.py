@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from tasterr.api.request import SeerrRequestCtx, get_seerr_request_ctx
 from tasterr.auth.crypto import encrypt_token
+from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import hash_token, mint_session
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 from tasterr.db.engine import create_engine
@@ -135,6 +136,29 @@ def test_cross_origin_request_is_rejected(tmp_path: Path) -> None:
 
     assert response.status_code == 403
     assert calls == []  # rejected before any Seerr call
+
+
+def test_rate_limited_request_has_no_upstream_or_taste_side_effect(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(201, json={"media": {"status": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path, plex_token="plex-token")
+    app.state.mutation_bucket = TokenBucket(capacity=0, refill_per_second=0)
+
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json=_body())
+
+    assert response.status_code == 429
+    assert response.json() == {"detail": "Too many actions"}
+    assert calls == []
+    assert _stored_cookie(db_path, token) == SEED_COOKIE
+    assert _stored_taste_signals(db_path) == []
 
 
 # ── Success + attribution ────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 Requires a reachable Seerr instance and a *local* account, via env (values
 are never committed; see SECURITY.md working notes):
 
-    TASTERR_LIVE_SEERR_URL       e.g. http://192.0.2.10:5055
+    TASTERR_LIVE_SEERR_URL       e.g. http://seerr.example.test:5055
     TASTERR_LIVE_SEERR_EMAIL     local-account email
     TASTERR_LIVE_SEERR_PASSWORD  local-account password
     TASTERR_LIVE_SEERR_API_KEY   optional: the global API key, to validate the
@@ -36,11 +36,14 @@ tests in tests/test_request_api.py (forcing a live session expiry mid-flight wou
 be invasive and non-deterministic).
 """
 
+import asyncio
 import os
 
 import httpx
 import pytest
+from pydantic import BaseModel, ConfigDict, Field
 
+from tasterr.catalog.availability import NOT_REQUESTED, to_availability
 from tasterr.clients.errors import UpstreamRejected
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 
@@ -64,9 +67,9 @@ requires_env = pytest.mark.skipif(
 
 requires_url = pytest.mark.skipif(not URL, reason="TASTERR_LIVE_SEERR_URL not set")
 
-requires_api_key = pytest.mark.skipif(
-    not (URL and API_KEY),
-    reason="TASTERR_LIVE_SEERR_URL/TASTERR_LIVE_SEERR_API_KEY not set",
+requires_availability = pytest.mark.skipif(
+    not (URL and API_KEY and REQUEST_TMDB_ID),
+    reason="TASTERR_LIVE_SEERR_URL/API_KEY/TASTERR_LIVE_REQUEST_TMDB_ID not set",
 )
 
 requires_available = pytest.mark.skipif(
@@ -75,8 +78,8 @@ requires_available = pytest.mark.skipif(
 )
 
 requires_request = pytest.mark.skipif(
-    not (URL and EMAIL and PASSWORD and REQUEST_TMDB_ID),
-    reason="TASTERR_LIVE_SEERR_URL/EMAIL/PASSWORD/TASTERR_LIVE_REQUEST_TMDB_ID not set",
+    not (URL and EMAIL and PASSWORD and API_KEY and REQUEST_TMDB_ID),
+    reason=("TASTERR_LIVE_SEERR_URL/EMAIL/PASSWORD/API_KEY/TASTERR_LIVE_REQUEST_TMDB_ID not set"),
 )
 
 requires_plex_token = pytest.mark.skipif(
@@ -88,6 +91,59 @@ requires_history = pytest.mark.skipif(
     not (URL and EMAIL and PASSWORD and API_KEY),
     reason="TASTERR_LIVE_SEERR_URL/EMAIL/PASSWORD/TASTERR_LIVE_SEERR_API_KEY not set",
 )
+
+
+class _CleanupMedia(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    tmdb_id: int | None = Field(default=None, alias="tmdbId")
+
+
+class _CleanupRequest(BaseModel):
+    id: int
+    media: _CleanupMedia | None = None
+
+
+class _CleanupPage(BaseModel):
+    results: list[_CleanupRequest]
+
+
+async def _request_id_for_title(http: httpx.AsyncClient, user_id: int, tmdb_id: int) -> int | None:
+    response = await http.get(
+        f"{URL}/api/v1/request",
+        params={"take": 50, "skip": 0, "requestedBy": user_id, "sort": "added"},
+        headers={"X-Api-Key": API_KEY, "Accept": "application/json"},
+    )
+    response.raise_for_status()
+    page = _CleanupPage.model_validate(response.json())
+    for row in page.results:
+        if row.media is not None and row.media.tmdb_id == tmdb_id:
+            return row.id
+    return None
+
+
+async def _delete_request_and_verify(
+    http: httpx.AsyncClient,
+    cookie: str,
+    user_id: int,
+    tmdb_id: int,
+    request_id: int | None,
+) -> None:
+    client = SeerrClient(http, URL, API_KEY)
+    for _ in range(5):
+        request_id = request_id or await _request_id_for_title(http, user_id, tmdb_id)
+        if request_id is not None:
+            deleted = await http.delete(
+                f"{URL}/api/v1/request/{request_id}", headers={"Cookie": cookie}
+            )
+            assert deleted.status_code in (200, 204, 404)
+            request_id = None
+
+        history = await client.list_requests(user_id)
+        if all(item.tmdb_id != tmdb_id for item in history):
+            return
+        await asyncio.sleep(1)
+    pytest.fail("disposable live request remained after cleanup")
 
 
 @requires_env
@@ -143,11 +199,11 @@ async def test_plex_stored_token_login_contract() -> None:
         assert login.user.resolved_display_name
 
 
-@requires_api_key
+@requires_availability
 async def test_availability_read_smoke_and_not_in_library() -> None:
-    """A well-known title parses without error (its `mediaInfo` may be absent if the
-    library holds no record for it), and a bogus id is a known not-in-library (None),
-    never an error. The *available-title* shape is proven separately below."""
+    """A well-known title parses without error, and the operator-supplied valid,
+    unrequested title maps to known `not_requested` whether Seerr omits `mediaInfo`
+    or retains a status-1 record. The *available-title* shape is proven separately."""
     async with httpx.AsyncClient(timeout=10.0) as http:
         client = SeerrClient(http, URL, API_KEY)
 
@@ -155,19 +211,20 @@ async def test_availability_read_smoke_and_not_in_library() -> None:
         if info is not None:
             assert isinstance(info.status, int)
 
-        assert await client.media_status("movie", 999_999_999) is None
+        unrequested = await client.media_status("movie", int(REQUEST_TMDB_ID))
+        assert to_availability(unrequested) == NOT_REQUESTED
 
 
 @requires_available
 async def test_available_title_has_a_media_record() -> None:
     """Proves the available-title contract: an operator-supplied in-library id
-    returns a real `mediaInfo` with a valid MediaStatus code (1-5)."""
+    returns a real `mediaInfo` whose MediaStatus maps to available."""
     tmdb_id = int(AVAILABLE_TMDB_ID)
     async with httpx.AsyncClient(timeout=10.0) as http:
         info = await SeerrClient(http, URL, API_KEY).media_status("movie", tmdb_id)
 
         assert info is not None, "expected a media record for the supplied available id"
-        assert info.status in range(1, 6)  # Seerr MediaStatus is 1-5
+        assert to_availability(info).status == "available"
 
 
 @requires_history
@@ -199,6 +256,28 @@ async def test_request_history_read_contract() -> None:
             assert item.created_at.tzinfo is None  # naive UTC, the DB convention
 
 
+@requires_history
+async def test_request_history_second_page_when_data_exists() -> None:
+    """Exercise a real deeper page only when the operator account has enough data."""
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
+        headers = {"X-Api-Key": API_KEY, "Accept": "application/json"}
+        params = {
+            "take": 50,
+            "skip": 50,
+            "requestedBy": login.user.id,
+            "sort": "added",
+        }
+        response = await http.get(f"{URL}/api/v1/request", params=params, headers=headers)
+
+        assert response.status_code == 200
+        results = response.json()["results"]
+        if not results:
+            pytest.skip("live history pagination precondition absent")
+        for row in results:
+            assert row["requestedBy"]["id"] == login.user.id
+
+
 @requires_url
 async def test_request_with_invalid_session_is_403() -> None:
     """The request-side 403 the re-auth ladder keys on — validated without side
@@ -215,23 +294,32 @@ async def test_request_with_invalid_session_is_403() -> None:
 @requires_request
 async def test_request_as_user_attribution_and_cleanup() -> None:
     """The M3 milestone bar — a request lands in Seerr attributed to the member.
-    Invasive: creates a real request, then best-effort deletes it *without* trusting
-    the delete `204` while the request may be mid-dispatch (spike finding)."""
+    Invasive: creates a real request, deletes it, then verifies it disappears from
+    history instead of trusting the delete response while dispatch may still run."""
     tmdb_id = int(REQUEST_TMDB_ID)
     async with httpx.AsyncClient(timeout=10.0) as http:
         login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
+        info = await SeerrClient(http, URL, API_KEY).media_status("movie", tmdb_id)
+        assert to_availability(info) == NOT_REQUESTED
 
-        created = await http.post(
-            f"{URL}/api/v1/request",
-            headers={"Cookie": login.cookie},
-            json={"mediaType": "movie", "mediaId": tmdb_id},
-        )
-        assert created.status_code in (200, 201)
-        payload = created.json()
-        assert payload["requestedBy"]["id"] == login.user.id  # attributed to the member
-
-        request_id = payload.get("id")
-        if request_id is not None:  # cleanup only; not treated as authoritative
-            await http.delete(
-                f"{URL}/api/v1/request/{request_id}", headers={"Cookie": login.cookie}
+        created_may_have_succeeded = False
+        request_id: int | None = None
+        try:
+            created = await http.post(
+                f"{URL}/api/v1/request",
+                headers={"Cookie": login.cookie},
+                json={"mediaType": "movie", "mediaId": tmdb_id},
             )
+            created_may_have_succeeded = created.is_success
+            assert created.status_code in (200, 201)
+            payload = created.json()
+            candidate_id = payload.get("id")
+            if isinstance(candidate_id, int):
+                request_id = candidate_id
+            assert request_id is not None
+            assert payload["requestedBy"]["id"] == login.user.id
+        finally:
+            if created_may_have_succeeded:
+                await _delete_request_and_verify(
+                    http, login.cookie, login.user.id, tmdb_id, request_id
+                )

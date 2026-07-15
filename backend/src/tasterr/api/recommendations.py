@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import build_seerr, build_taste
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
+from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.recommend import store
 from tasterr.recommend.seed import seed_user
 from tasterr.recommend.signals import MediaType
@@ -59,7 +60,11 @@ async def explain_title(
     return ExplainResponse(personalized=explanation.personalized, reasons=explanation.reasons)
 
 
-@router.post("/recommendations/reset", dependencies=[Depends(require_same_origin)])
+@router.post(
+    "/recommendations/reset",
+    response_model=ResetResponse,
+    dependencies=[Depends(require_same_origin), Depends(mutation_rate_limit)],
+)
 async def reset_profile(
     authed: Annotated[AuthedSession, Depends(require_session)],
     db: Annotated[AsyncSession, Depends(get_db)],
