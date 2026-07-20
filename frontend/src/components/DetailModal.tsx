@@ -53,7 +53,7 @@ export function DetailModal() {
 	useFocusTrap(dialogRef, close);
 
 	return (
-		<div className="fixed inset-0 z-30 flex justify-center overflow-y-auto bg-black/70 sm:p-6">
+		<div className="fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/70 sm:p-6">
 			<div
 				ref={dialogRef}
 				tabIndex={-1}

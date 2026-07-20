@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { Home } from "./Home";
@@ -79,39 +79,51 @@ function renderHome(user?: {
 
 test("renders the hero and rails, then loads more via the sentinel", async () => {
 	vi.stubGlobal("IntersectionObserver", FiringIntersectionObserver);
-	vi.stubGlobal(
-		"fetch",
-		vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url === "/api/v1/home") {
-				return jsonResponse({
-					hero: [
-						{
-							item: card(1),
-							logo_path: null,
-							trailer: null,
-							certification: null,
-							runtime: null,
-							genres: [],
-						},
-					],
-					rails: [rail("trending", "Trending Now")],
-				});
-			}
-			if (url === "/api/v1/rails?cursor=0") {
-				return jsonResponse({
-					rails: [rail("top-rated-movie", "Top Rated Movies")],
-					next_cursor: 4,
-				});
-			}
+	let resolveHome!: (response: Response) => void;
+	const homeResponse = new Promise<Response>((resolve) => {
+		resolveHome = resolve;
+	});
+	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url === "/api/v1/home") {
+			return homeResponse;
+		}
+		if (url === "/api/v1/rails?cursor=0") {
 			return jsonResponse({
-				rails: [rail("decade-2020", "2020s")],
-				next_cursor: null,
+				rails: [rail("top-rated-movie", "Top Rated Movies")],
+				next_cursor: 4,
 			});
-		}),
-	);
+		}
+		return jsonResponse({
+			rails: [rail("decade-2020", "2020s")],
+			next_cursor: null,
+		});
+	});
+	vi.stubGlobal("fetch", fetchMock);
 
 	renderHome();
+	await waitFor(() =>
+		expect(
+			fetchMock.mock.calls.some(
+				([input]) => String(input) === "/api/v1/rails?cursor=0",
+			),
+		).toBe(true),
+	);
+	resolveHome(
+		jsonResponse({
+			hero: [
+				{
+					item: card(1),
+					logo_path: null,
+					trailer: null,
+					certification: null,
+					runtime: null,
+					genres: [],
+				},
+			],
+			rails: [rail("trending", "Trending Now")],
+		}),
+	);
 
 	expect(await screen.findByText("Trending Now")).toBeTruthy();
 	expect(await screen.findByText("Top Rated Movies")).toBeTruthy(); // auto-loaded first page

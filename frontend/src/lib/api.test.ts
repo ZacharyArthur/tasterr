@@ -5,6 +5,7 @@ import {
 	getServices,
 	loginLocal,
 	logout,
+	postAvailability,
 	saveSettings,
 	testConnection,
 } from "./api";
@@ -131,6 +132,38 @@ test("connection probes send only the allowlisted target", async () => {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ target: "seerr" }),
 	});
+});
+
+test("availability batches stay within the endpoint limit and merge responses", async () => {
+	const bodies: { items: { media_type: "movie" | "tv"; id: number }[] }[] = [];
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body)) as (typeof bodies)[number];
+			bodies.push(body);
+			return {
+				ok: true,
+				status: 200,
+				json: async () =>
+					Object.fromEntries(
+						body.items.map((item) => [
+							`${item.media_type}:${item.id}`,
+							{ status: "available", known: true },
+						]),
+					),
+			} as Response;
+		}),
+	);
+
+	const result = await postAvailability(
+		Array.from({ length: 101 }, (_, index) => ({
+			media_type: "movie" as const,
+			id: index + 1,
+		})),
+	);
+
+	expect(bodies.map((body) => body.items.length)).toEqual([100, 1]);
+	expect(Object.keys(result)).toHaveLength(101);
 });
 
 test.each([

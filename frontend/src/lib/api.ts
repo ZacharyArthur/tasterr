@@ -176,10 +176,21 @@ export function testConnection(
 }
 
 /** Batch-hydrate library status for the given titles (SPEC §6). */
-export function postAvailability(
+const AVAILABILITY_BATCH_SIZE = 100;
+
+export async function postAvailability(
 	items: { media_type: MediaType; id: number }[],
 ): Promise<AvailabilityMap> {
-	return postJson<AvailabilityMap>("/api/v1/availability", { items });
+	const availability: AvailabilityMap = {};
+	for (let start = 0; start < items.length; start += AVAILABILITY_BATCH_SIZE) {
+		Object.assign(
+			availability,
+			await postJson<AvailabilityMap>("/api/v1/availability", {
+				items: items.slice(start, start + AVAILABILITY_BATCH_SIZE),
+			}),
+		);
+	}
+	return availability;
 }
 
 /** Request a title as the current user; returns a discriminated outcome. */

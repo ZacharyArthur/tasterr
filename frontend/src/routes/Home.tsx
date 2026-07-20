@@ -15,6 +15,9 @@ export function Home() {
 
 	const { hasNextPage, isFetchingNextPage, fetchNextPage } = rails;
 	useEffect(() => {
+		if (home.isPending) {
+			return;
+		}
 		const node = sentinel.current;
 		if (!node) {
 			return;
@@ -29,7 +32,7 @@ export function Home() {
 		);
 		observer.observe(node);
 		return () => observer.disconnect();
-	}, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+	}, [home.isPending, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
 	// Every title on screen, batch-hydrated after the feed paints (never blocking
 	// the initial render). Grows as infinite scroll loads more rails.
