@@ -6,6 +6,7 @@
 .windsurf/
 .opencode/
 .aider*
+.zcode
 
 # Python
 __pycache__/

@@ -177,13 +177,17 @@ async def test_wrong_region_vector_is_rebuilt_lazily(db: AsyncSession) -> None:
     assert records[("movie", 1)].watch_region == "GB"
 
 
-async def test_failing_title_is_skipped_not_fatal(db: AsyncSession) -> None:
+async def test_failing_title_is_skipped_not_fatal(
+    db: AsyncSession, caplog: pytest.LogCaptureFixture
+) -> None:
     catalog = FakeCatalog()
     catalog.failing_facts = {("movie", 2)}
 
     records = await _service(db, catalog).ensure_vectors([("movie", 1), ("movie", 2)])
 
     assert set(records) == {("movie", 1)}
+    assert "vector build skipped for movie:2" in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 async def test_fresh_profile_is_served_from_the_materialization(db: AsyncSession) -> None:
