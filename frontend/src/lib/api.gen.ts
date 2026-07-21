@@ -55,17 +55,17 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/plex/pin/{pin_id}": {
+    "/api/v1/auth/plex/pin/poll": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Poll Plex Pin */
-        get: operations["poll_plex_pin_api_v1_auth_plex_pin__pin_id__get"];
+        get?: never;
         put?: never;
-        post?: never;
+        /** Poll Plex Pin */
+        post: operations["poll_plex_pin_api_v1_auth_plex_pin_poll_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -588,6 +588,11 @@ export interface components {
             /** Auth Url */
             auth_url: string;
         };
+        /** PinPollRequest */
+        PinPollRequest: {
+            /** Pin Id */
+            pin_id: string;
+        };
         /** PinPollResponse */
         PinPollResponse: {
             /**
@@ -948,16 +953,18 @@ export interface operations {
             };
         };
     };
-    poll_plex_pin_api_v1_auth_plex_pin__pin_id__get: {
+    poll_plex_pin_api_v1_auth_plex_pin_poll_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                pin_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PinPollRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -13,7 +13,11 @@ type Route = (init?: RequestInit) => { status: number; body: unknown };
 
 function stubFetch(routes: Record<string, Route>) {
 	const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-		const route = routes[String(input)];
+		// Key POSTs by URL + method so the Plex poll (POST /pin/poll) is distinct
+		// from the Plex create (POST /pin) under the same path prefix.
+		const method = init?.method ?? "GET";
+		const key = `${method} ${String(input)}`;
+		const route = routes[key] ?? routes[String(input)];
 		if (route === undefined) {
 			throw new Error(`unexpected fetch: ${String(input)}`);
 		}
@@ -51,14 +55,14 @@ const USER = {
 test("plex flow: opens approval url, keeps polling, then refreshes auth state", async () => {
 	let polls = 0;
 	stubFetch({
-		"/api/v1/auth/plex/pin": () => ({
+		"POST /api/v1/auth/plex/pin": () => ({
 			status: 200,
 			body: {
 				pin_id: "opaque-handle",
 				auth_url: "https://app.plex.tv/auth#?x",
 			},
 		}),
-		"/api/v1/auth/plex/pin/opaque-handle": () => {
+		"POST /api/v1/auth/plex/pin/poll": () => {
 			polls += 1;
 			return polls === 1
 				? { status: 200, body: { status: "pending", user: null } }
@@ -90,14 +94,14 @@ test("plex flow: opens approval url, keeps polling, then refreshes auth state", 
 
 test("plex flow: expired handle surfaces a retry message", async () => {
 	stubFetch({
-		"/api/v1/auth/plex/pin": () => ({
+		"POST /api/v1/auth/plex/pin": () => ({
 			status: 200,
 			body: {
 				pin_id: "opaque-handle",
 				auth_url: "https://app.plex.tv/auth#?x",
 			},
 		}),
-		"/api/v1/auth/plex/pin/opaque-handle": () => ({
+		"POST /api/v1/auth/plex/pin/poll": () => ({
 			status: 404,
 			body: { detail: "Unknown or expired sign-in attempt" },
 		}),

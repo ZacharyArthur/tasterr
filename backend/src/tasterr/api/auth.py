@@ -56,6 +56,10 @@ class PinCreateResponse(BaseModel):
     auth_url: str
 
 
+class PinPollRequest(BaseModel):
+    pin_id: str  # opaque poll handle — never the raw plex.tv PIN id
+
+
 class PinPollResponse(BaseModel):
     status: Literal["pending", "ok"]
     user: UserResponse | None = None
@@ -118,16 +122,24 @@ async def create_plex_pin(
 
 
 # Unauthenticated by nature (pre-login) and exempt from the tight login bucket:
-# it fires every ~2s by design and requires an unguessable 256-bit handle.
-@router.get("/auth/plex/pin/{pin_id}")
+# it fires every ~2s by design and is gated by an unguessable 256-bit handle.
+# A POST (not GET) with the same-origin guard below closes a login-CSRF / session
+# swap: a cross-site page can no longer trigger a session-minting completion by
+# top-level navigation, because the guard rejects cross-site fetch metadata before
+# any upstream call, handle consumption, or cookie change.
+@router.post(
+    "/auth/plex/pin/poll",
+    dependencies=[Depends(require_same_origin)],
+)
 async def poll_plex_pin(
-    pin_id: str,
+    payload: PinPollRequest,
     request: Request,
     response: Response,
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> PinPollResponse:
+    pin_id = payload.pin_id
     plex_pin_id = ctx.pins.get(pin_id)
     if plex_pin_id is None:
         raise HTTPException(status_code=404, detail=PIN_NOT_FOUND)

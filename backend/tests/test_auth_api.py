@@ -128,6 +128,16 @@ def _start_pin_login(client: TestClient) -> str:
     return response.json()["pin_id"]
 
 
+def _poll_pin(client: TestClient, handle: str, **headers: str) -> httpx.Response:
+    """POST the same-origin-protected poll. `headers` carries fetch metadata or
+    Origin for the CSRF regressions; the default (no headers) matches what
+    Starlette's TestClient sends and is treated as a non-browser client by
+    `require_same_origin`."""
+    return client.post(
+        "/api/v1/auth/plex/pin/poll", json={"pin_id": handle}, headers=headers or None
+    )
+
+
 # --- Plex PIN flow (4.2) ---
 
 
@@ -147,7 +157,7 @@ def test_poll_pending_sets_no_cookie(tmp_path: Path) -> None:
     harness = _harness(tmp_path)
     with TestClient(harness.app) as client:
         handle = _start_pin_login(client)
-        response = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        response = _poll_pin(client, handle)
 
     assert response.status_code == 200
     assert response.json() == {"status": "pending", "user": None}
@@ -160,7 +170,7 @@ def test_poll_after_approval_logs_in(tmp_path: Path) -> None:
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
 
-        response = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        response = _poll_pin(client, handle)
 
         assert response.status_code == 200
         body = response.json()
@@ -185,9 +195,9 @@ def test_handle_is_single_use_after_login(tmp_path: Path) -> None:
     with TestClient(harness.app) as client:
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
-        assert client.get(f"/api/v1/auth/plex/pin/{handle}").status_code == 200
+        assert _poll_pin(client, handle).status_code == 200
 
-        replay = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        replay = _poll_pin(client, handle)
 
     assert replay.status_code == 404
 
@@ -195,7 +205,7 @@ def test_handle_is_single_use_after_login(tmp_path: Path) -> None:
 def test_poll_unknown_handle_is_generic_404(tmp_path: Path) -> None:
     harness = _harness(tmp_path)
     with TestClient(harness.app) as client:
-        response = client.get("/api/v1/auth/plex/pin/no-such-handle")
+        response = _poll_pin(client, "no-such-handle")
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Unknown or expired sign-in attempt"}
@@ -207,9 +217,9 @@ def test_poll_expired_plex_pin_is_404_and_consumed(tmp_path: Path) -> None:
         handle = _start_pin_login(client)
         harness.plex.expired = True
 
-        first = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        first = _poll_pin(client, handle)
         harness.plex.expired = False
-        second = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        second = _poll_pin(client, handle)
 
     assert first.status_code == 404
     assert second.status_code == 404  # consumed on expiry, not retryable
@@ -221,7 +231,7 @@ def test_seerr_rejecting_plex_account_is_generic_401(tmp_path: Path) -> None:
         handle = _start_pin_login(client)
         harness.plex.token = "some-token-seerr-refuses"
 
-        response = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        response = _poll_pin(client, handle)
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Sign-in failed"}
@@ -232,7 +242,7 @@ def test_plex_token_is_encrypted_at_rest(tmp_path: Path) -> None:
     with TestClient(harness.app) as client:
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
-        assert client.get(f"/api/v1/auth/plex/pin/{handle}").status_code == 200
+        assert _poll_pin(client, handle).status_code == 200
 
     raw = harness.db_path.read_bytes()
     assert PLEX_TOKEN.encode() not in raw  # Fernet ciphertext only
@@ -254,8 +264,8 @@ async def test_concurrent_claimed_polls_mint_exactly_one_session(tmp_path: Path)
             harness.plex.token = PLEX_TOKEN
 
             first, second = await asyncio.gather(
-                client.get(f"/api/v1/auth/plex/pin/{handle}"),
-                client.get(f"/api/v1/auth/plex/pin/{handle}"),
+                client.post("/api/v1/auth/plex/pin/poll", json={"pin_id": handle}),
+                client.post("/api/v1/auth/plex/pin/poll", json={"pin_id": handle}),
             )
 
     assert sorted([first.status_code, second.status_code]) == [200, 404]
@@ -268,6 +278,156 @@ async def test_concurrent_claimed_polls_mint_exactly_one_session(tmp_path: Path)
     finally:
         await engine.dispose()
     assert count == 1
+
+
+# --- Plex PIN poll: CSRF / session-swap hardening ---
+
+
+def _session_count(db_path: Path) -> int:
+    """Count UserSession rows directly in the SQLite file (race-free read)."""
+
+    async def _run() -> int:
+        engine = create_engine(db_path)
+        try:
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            async with maker() as db:
+                stmt = select(func.count()).select_from(UserSession)
+                return (await db.execute(stmt)).scalar_one()
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def test_cross_site_poll_is_rejected_before_any_side_effect(tmp_path: Path) -> None:
+    """The CSRF fix: a cross-site poll must 403 before Plex/Seerr calls, handle
+    consumption, cookie changes, or session creation."""
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN  # the attacker's approved PIN
+        seerr_before = harness.seerr.login_calls
+
+        response = _poll_pin(client, handle, **{"Sec-Fetch-Site": "cross-site"})
+        seerr_during = harness.seerr.login_calls - seerr_before
+
+        # The handle survives the rejection: a follow-up poll still answers
+        # pending (the PIN returns no token once we clear the simulated approval,
+        # so this proves the handle was NOT consumed without minting a session).
+        harness.plex.token = None
+        pending = _poll_pin(client, handle)
+
+    assert response.status_code == 403
+    assert seerr_during == 0  # no upstream login fired
+    assert "set-cookie" not in response.headers  # no cookie touched
+    assert pending.status_code == 200  # handle was NOT consumed
+    assert pending.json() == {"status": "pending", "user": None}
+    assert _session_count(harness.db_path) == 0  # no session minted
+
+
+def test_victim_session_survives_a_rejected_cross_site_poll(tmp_path: Path) -> None:
+    """A victim with an existing session must come out the other side of a
+    cross-site poll attempt still identified as themselves, with no extra
+    session row."""
+    harness = _harness(tmp_path)
+    victim_token = _seed_session_token(harness.db_path)  # display_name="Seeded"
+
+    with TestClient(harness.app) as client:
+        client.cookies.set("tasterr_session", victim_token)
+        me_before = client.get("/api/v1/auth/me")
+        assert me_before.status_code == 200
+        assert me_before.json()["display_name"] == "Seeded"
+
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN  # attacker's approved PIN
+        rejected = _poll_pin(client, handle, **{"Sec-Fetch-Site": "cross-site"})
+
+        # Same cookie value, same identity, after the attempt.
+        assert client.cookies.get("tasterr_session") == victim_token
+        me_after = client.get("/api/v1/auth/me")
+        assert me_after.status_code == 200
+        assert me_after.json()["display_name"] == "Seeded"
+
+    assert rejected.status_code == 403
+    assert _session_count(harness.db_path) == 1  # only the victim's row
+
+
+def test_mismatched_origin_poll_is_rejected(tmp_path: Path) -> None:
+    """The Origin fallback path: without fetch metadata, a cross-origin Origin
+    is rejected 403 with no upstream call and no session minted."""
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        seerr_before = harness.seerr.login_calls
+
+        response = _poll_pin(client, handle, **{"Origin": "https://evil.example"})
+
+    assert response.status_code == 403
+    assert harness.seerr.login_calls == seerr_before
+    assert _session_count(harness.db_path) == 0
+
+
+def test_same_origin_and_headerless_polls_still_complete_login(tmp_path: Path) -> None:
+    """The guard's intentional behavior: same-origin fetch metadata passes, none
+    passes (non-browser client — CSRF is a browser attack), same-site rejects."""
+    harness = _harness(tmp_path)
+
+    # same-origin completes.
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        same_origin = _poll_pin(client, handle, **{"Sec-Fetch-Site": "same-origin"})
+        assert same_origin.status_code == 200
+        assert same_origin.json()["status"] == "ok"
+        assert "tasterr_session=" in same_origin.headers["set-cookie"]
+
+    # none (user-initiated, e.g. typed address bar) completes.
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        none_site = _poll_pin(client, handle, **{"Sec-Fetch-Site": "none"})
+        assert none_site.status_code == 200
+        assert none_site.json()["status"] == "ok"
+
+    # headerless non-browser client completes (the existing default behavior).
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        headerless = _poll_pin(client, handle)
+        assert headerless.status_code == 200
+        assert headerless.json()["status"] == "ok"
+
+    # same-site is rejected (sibling origin to a registrable domain).
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        same_site = _poll_pin(client, handle, **{"Sec-Fetch-Site": "same-site"})
+        assert same_site.status_code == 403
+        assert "set-cookie" not in same_site.headers
+
+
+def test_old_get_poll_route_cannot_mint_a_session(tmp_path: Path) -> None:
+    """The removed GET completion route must not exist: a request to it 404s
+    without any Seerr call, handle consumption, cookie change, or session row."""
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        handle = _start_pin_login(client)
+        harness.plex.token = PLEX_TOKEN
+        seerr_before = harness.seerr.login_calls
+
+        response = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        seerr_during_get = harness.seerr.login_calls - seerr_before
+
+        # The handle survives the 404: a follow-up poll still answers pending.
+        harness.plex.token = None
+        pending = _poll_pin(client, handle)
+
+    assert response.status_code == 404  # no such route
+    assert seerr_during_get == 0
+    assert "set-cookie" not in response.headers
+    assert pending.json() == {"status": "pending", "user": None}
+    assert _session_count(harness.db_path) == 0
 
 
 # --- Local login (4.3) ---
@@ -625,7 +785,7 @@ def test_pin_polling_is_exempt_from_login_bucket(tmp_path: Path) -> None:
     harness = _harness(tmp_path)
     with TestClient(harness.app) as client:
         handle = _start_pin_login(client)
-        statuses = {client.get(f"/api/v1/auth/plex/pin/{handle}").status_code for _ in range(25)}
+        statuses = {_poll_pin(client, handle).status_code for _ in range(25)}
 
     assert statuses == {200}
 
@@ -666,7 +826,7 @@ def test_logins_schedule_the_cold_start_seed(
         )
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
-        plex = client.get(f"/api/v1/auth/plex/pin/{handle}")
+        plex = _poll_pin(client, handle)
 
     assert local.status_code == 200
     assert plex.status_code == 200

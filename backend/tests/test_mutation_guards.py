@@ -15,6 +15,7 @@ MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 READ_ONLY_POSTS = {("POST", "/api/v1/availability")}
 EXPECTED_GUARDS = {
     ("POST", "/api/v1/auth/plex/pin"): {"require_same_origin", "login_rate_limit"},
+    ("POST", "/api/v1/auth/plex/pin/poll"): {"require_same_origin"},
     ("POST", "/api/v1/auth/local"): {"require_same_origin", "login_rate_limit"},
     ("POST", "/api/v1/auth/logout"): {"require_same_origin", "mutation_rate_limit"},
     ("PUT", "/api/v1/settings"): {"require_same_origin", "admin_rate_limit"},
@@ -32,6 +33,7 @@ AUTHENTICATED_MUTATIONS = {
     if key
     not in {
         ("POST", "/api/v1/auth/plex/pin"),
+        ("POST", "/api/v1/auth/plex/pin/poll"),
         ("POST", "/api/v1/auth/local"),
     }
 }
@@ -96,10 +98,16 @@ def test_read_only_post_and_pin_poll_are_explicitly_exempt() -> None:
     limited = {"login_rate_limit", "mutation_rate_limit", "admin_rate_limit"}
 
     availability = _dependency_names(routes[("POST", "/api/v1/availability")].dependant)
-    pin_poll = _dependency_names(routes[("GET", "/api/v1/auth/plex/pin/{pin_id}")].dependant)
+
+    # The old state-changing GET poll is gone; the replacement POST is guarded
+    # by the same-origin check (login-CSRF defense) but stays exempt from the
+    # tight login bucket — it polls every ~2s by design behind a 256-bit,
+    # expiring, single-use handle.
+    assert ("GET", "/api/v1/auth/plex/pin/{pin_id}") not in routes
+    pin_poll = _dependency_names(routes[("POST", "/api/v1/auth/plex/pin/poll")].dependant)
 
     assert "require_session" in availability
     assert "require_same_origin" not in availability
     assert availability.isdisjoint(limited)
-    assert "require_same_origin" not in pin_poll
+    assert "require_same_origin" in pin_poll
     assert pin_poll.isdisjoint(limited)

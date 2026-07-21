@@ -109,9 +109,11 @@ export function createPlexPin(): Promise<PinCreateResponse> {
 }
 
 export function pollPlexPin(pinId: string): Promise<PinPollResponse> {
-	return request<PinPollResponse>(
-		`/api/v1/auth/plex/pin/${encodeURIComponent(pinId)}`,
-	);
+	// POST + same-origin guard (the backend enforces Sec-Fetch-Site/Origin) closes
+	// a login-CSRF that a state-changing GET poll would allow.
+	return postJson<PinPollResponse>("/api/v1/auth/plex/pin/poll", {
+		pin_id: pinId,
+	});
 }
 
 export function loginLocal(email: string, password: string): Promise<User> {
