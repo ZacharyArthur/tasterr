@@ -44,6 +44,8 @@ def test_pull_request_gate_runs_all_blocking_local_contracts() -> None:
 
     assert "pull_request:" in gate
     assert "\n  push:" not in gate
+    assert "paths:" not in gate
+    assert "paths-ignore:" not in gate
     assert "permissions:\n  contents: read" in gate
     assert "  check:" in gate
     assert "  e2e:" in gate
@@ -56,10 +58,13 @@ def test_pull_request_gate_runs_all_blocking_local_contracts() -> None:
 
 def test_image_workflow_publishes_only_after_native_smoke() -> None:
     image = _text("image.yml")
+    image_config = yaml.safe_load(image)
+    push_config = image_config[True]["push"]
 
     assert "pull_request:" not in image
     assert "branches:\n      - main" in image
     assert 'tags:\n      - "v*"' in image
+    assert push_config["paths-ignore"] == ["docs/**", "README.md"]
     assert "permissions:\n  contents: read" in image
     assert "needs: smoke" in image
     assert image.index("just container-smoke") < image.index("docker/login-action")

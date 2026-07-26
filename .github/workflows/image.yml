@@ -6,6 +6,9 @@ on:
       - main
     tags:
       - "v*"
+    paths-ignore:
+      - "docs/**"
+      - README.md
 
 permissions:
   contents: read

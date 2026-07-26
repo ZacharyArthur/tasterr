@@ -46,6 +46,12 @@ npx @devcontainers/cli exec --workspace-folder . just release-check
 Record the date and result in `docs/releases/v1.0.1.md`. This command intentionally
 does not imply that audits, security review, or live contracts passed.
 
+For subsequent releases, the committed evidence file is the pre-tag record. Write
+it so it remains true after publication: use an `approved for release` disposition,
+not a pending post-tag state, and do not predict a manifest digest or publication
+time. The GitHub Release is the authoritative post-tag record for the final digest
+and post-tag smoke results.
+
 ## 4. Audit locked dependencies
 
 Run both ecosystem audits separately so findings can be reviewed:
@@ -164,6 +170,12 @@ commit-addressed `sha-<full-commit>` candidate tags. Before tagging:
 4. Remove the disposable project, volume, network, and secret file. Record the
    manifest digest and generic result in the release evidence.
 
+Documentation-only pushes under `docs/` or to `README.md` do not trigger the image
+workflow. A release-preparation merge must include the package-version changes in
+backend and frontend metadata, which are outside that ignore set and therefore
+publish the required candidate. GitHub does not evaluate path filters for tag
+pushes.
+
 ## 8. Tag and release
 
 After every pre-tag release-record field is final, create and push the annotated tag:
@@ -193,6 +205,11 @@ released artifact and do not reproduce private release evidence. Publish the Git
 Release only after `1.0.1`, `1.0`, `1`, and `latest` resolve to the expected release
 commit, the `sha-<full-commit>` candidate still resolves to its recorded pre-tag
 digest, and the tagged clean-install smoke passes.
+
+For subsequent releases, do not create a post-release evidence commit. Record the
+final digest, publication time, alias verification, and tagged-image smoke only in
+the GitHub Release. This avoids advancing `main` and publishing a new candidate
+image solely to describe the release that preceded it.
 
 If any post-tag check fails, do not move, delete, or reuse the published tag.
 Document the failure, fix forward through the normal protected-`main` workflow, and
