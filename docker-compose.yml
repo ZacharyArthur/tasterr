@@ -7,7 +7,7 @@ services:
     image: ${TASTERR_IMAGE:-tasterr:latest}
     restart: unless-stopped
     ports:
-      - "${TASTERR_HTTP_PORT:-8000}:8000"
+      - "${TASTERR_HTTP_PORT:-127.0.0.1:8000}:8000"
     env_file: ${TASTERR_ENV_FILE:-.env}
     volumes:
       - tasterr-data:/data

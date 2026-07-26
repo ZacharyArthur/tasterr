@@ -476,6 +476,9 @@ def test_credentials_never_persisted_or_logged(
         )
 
     assert "hunter2-password-sentinel" not in caplog.text
+    assert [
+        record.getMessage() for record in caplog.records if record.name == "tasterr.api.auth"
+    ] == ["auth: local login succeeded"]
     assert b"hunter2-password-sentinel" not in harness.db_path.read_bytes()
 
 

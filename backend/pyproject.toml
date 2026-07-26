@@ -2,6 +2,7 @@
 name = "tasterr"
 version = "1.0.0"
 description = "Self-hosted, Netflix-style discovery front-end for a household media stack"
+license = "AGPL-3.0-only"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",

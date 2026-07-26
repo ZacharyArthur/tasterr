@@ -21,8 +21,10 @@ just, or Docker build tooling is used.
 Walk every applicable item in [docs/SECURITY.md](SECURITY.md) against the full tree,
 not only the final diff. Confirm endpoint auth/CSRF/rate limits and response models,
 session and trusted-proxy behavior, outbound HTTP boundaries, frontend rendering and
-storage, database/migration handling, dependency provenance, logs, container build,
-workflow pins/permissions, and public-release controls.
+storage, database/migration handling, dependency provenance, logs, HTTP hardening,
+container build, workflow pins/permissions, licensing, and public-release controls.
+Confirm Uvicorn access logs are disabled and the deployment proxy omits or redacts
+request query strings.
 
 Before any public announcement, enable GitHub private vulnerability reporting,
 secret scanning (including push protection where available), and Dependabot alerts.
@@ -73,36 +75,70 @@ request case creates a real Seerr request and attempts cleanup, so choose a disp
 title and verify cleanup afterward. Record only the Seerr version and generic passed/
 skipped case names. A deeper pagination or available-title case may be skipped only
 when its documented data precondition is absent; stored-token auth and attributed
-request may not be skipped for v1.0. Remove the temporary secret file after the run.
+request may not be skipped within a performed v1.0 run.
+
+The release owner may waive a release-candidate rerun only when a complete prior v1.0
+baseline passed, the reviewed delta does not change Seerr clients, authentication or
+session behavior, request/availability contracts, or the live harness, and the
+release evidence records the baseline date/version/scope plus the waiver rationale
+without claiming a fresh pass. Any change to those surfaces invalidates the waiver.
+Remove the temporary secret file after a run.
 
 ## 6. Validate and archive the OpenSpec change
 
 Run strict validation on the change branch:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 validate m6-hardening-release --strict --no-interactive
+npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 validate v1-public-release-readiness --strict --no-interactive
 ```
 
 After every task and release-evidence field is complete, archive before merging so
 the implementation and living specs land atomically:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 archive m6-hardening-release
+npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 archive v1-public-release-readiness
 ```
 
 Review the archive diff and rerun `just check`. Do not use `--skip-specs` or
 `--no-validate` for this change.
 
-## 7. Commit, PR, and squash merge
+## 7. Bootstrap GitHub, open the PR, and squash merge
 
 Review `git diff --check`, the full diff, and the exact Conventional Commit subject
 and pull-request text before executing any external git action. The PR title becomes
 the squash commit on `main`; its body names the OpenSpec change, states what/why, and
-checks the gate only after it passes. Push the change branch, open the PR, require the
-three blocking gate jobs, then self-approve and squash merge.
+checks the gate only after it passes.
 
-The stable tag must not point at the unmerged change branch. Update local `main` to
-the squash commit and rerun the deterministic release check there:
+For the first publication, use this order:
+
+1. Create an empty **public** `ZacharyArthur/tasterr` repository only; do not push
+   yet, and do not use a create-and-push shortcut such as `gh repo create --push`.
+   Do not generate a README, license, or `.gitignore`. Set the description to
+   `Self-hosted TMDB and Seerr discovery with per-user learned taste profiles.` and
+   add the topics `self-hosted`, `seerr`, `tmdb`, `plex`, `recommendations`,
+   `fastapi`, `react`, and `docker`. The source history must have passed the
+   documented secret review before this public creation.
+2. Enable Issues. Disable Wiki, Projects, and Discussions. Allow squash merging
+   only, enable automatic head-branch deletion, keep the default `GITHUB_TOKEN`
+   permissions read-only, and leave workflow pull-request creation/approval
+   disabled. Require external Actions to be pinned to full commit SHAs.
+3. Disable Actions before the first push. Push the existing base `main` and the
+   reviewed `change/v1-public-release-readiness` branch, then re-enable Actions.
+   This prevents the old `main` commit from publishing a container during import.
+4. Enable the dependency graph, Dependabot alerts, Dependabot security updates,
+   secret scanning, push protection, and private vulnerability reporting. The image
+   workflow's publishing job is the only job granted `packages: write`; all other
+   workflow permissions remain read-only.
+5. Open the readiness PR against `main` and let `check`, `e2e`, and
+   `container-smoke` report at least once.
+6. Configure an active `main` ruleset that requires a pull request with zero approving
+   reviews, successful `check`, `e2e`, and `container-smoke` jobs, linear history,
+   conversation resolution, and blocks force pushes and deletion. Restrict merge
+   type to squash. Public repositories support this ruleset on GitHub Free.
+7. Wait for all three required jobs, self-review, resolve every conversation, and
+   squash merge. Do not tag the unmerged change branch.
+
+Update local `main` to the squash commit and rerun the deterministic release check:
 
 ```console
 npx @devcontainers/cli exec --workspace-folder . git switch main
@@ -110,10 +146,23 @@ npx @devcontainers/cli exec --workspace-folder . git pull --ff-only
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-## 8. Tag and verify GHCR
+The image workflow on the merged `main` commit publishes public `main` and immutable
+`sha-<full-commit>` candidate tags. Before tagging:
 
-After the release record is final and all required checks pass on the releasable main
-commit, create and push the annotated tag:
+1. Inspect the candidate manifest and confirm both `linux/amd64` and `linux/arm64`.
+2. Confirm that the GHCR package is linked to the public repository and explicitly
+   public; repository and package visibility are separate controls.
+3. From an environment with no GHCR credentials, verify an anonymous pull. Then use
+   a disposable empty directory, new Compose project, and `.env` to install the
+   immutable
+   `ghcr.io/zacharyarthur/tasterr:sha-<full-commit>` candidate. Verify health, SPA
+   serving, non-root uid, and named-volume persistence across recreation.
+4. Remove the disposable project, volume, network, and secret file. Record the
+   manifest digest and generic result in the release evidence.
+
+## 8. Tag and release
+
+After every pre-tag release-record field is final, create and push the annotated tag:
 
 ```console
 npx @devcontainers/cli exec --workspace-folder . git tag -a v1.0.0 -m "v1.0.0"
@@ -124,18 +173,24 @@ Wait for the image workflow. It must publish `1.0.0`, `1.0`, `1`, `latest`, and 
 immutable `sha-<full-commit>` tag. Inspect the manifest and confirm both platforms:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/OWNER/REPOSITORY:1.0.0
+npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.0.0
 ```
 
 Perform a fresh install in an empty directory with a new external network, disposable
 `.env`, and new Compose project. Set
-`TASTERR_IMAGE=ghcr.io/OWNER/REPOSITORY:1.0.0`, run `docker compose pull` and
+`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:1.0.0`, run `docker compose pull` and
 `docker compose up -d --no-build`, then verify health, SPA serving, non-root uid, and
 named-volume persistence. Delete every disposable resource after verification.
 
 Publish release notes only after the manifest and fresh install pass. Summarize user-
 visible changes, upgrade steps, known limitations, and the immutable image digest;
-do not reproduce private release evidence.
+do not reproduce private release evidence. Publish the GitHub Release only after
+`1.0.0`, `1.0`, `1`, `latest`, and `sha-<full-commit>` all resolve to the expected
+release commit and the tagged clean-install smoke passes.
+
+The selected public coordinate is `ZacharyArthur/tasterr` and the container path is
+`ghcr.io/zacharyarthur/tasterr`; verify both before repository creation. Repository
+settings and registry visibility cannot be proved by the source tree alone.
 
 ## 9. Roll back
 

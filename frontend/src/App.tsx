@@ -4,7 +4,7 @@ import {
 	Route,
 	Routes,
 	useLocation,
-} from "react-router-dom";
+} from "react-router";
 import { DetailModal } from "./components/DetailModal";
 import { Footer } from "./components/Footer";
 import { Navbar } from "./components/Navbar";

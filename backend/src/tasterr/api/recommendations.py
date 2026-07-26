@@ -81,7 +81,7 @@ async def reset_profile(
     try:
         seeded = await seed_user(db, taste, seerr, authed.user.id, authed.user.seerr_user_id)
     except Exception:  # cleared but unseeded — generic, no upstream detail
-        logger.exception("reset: re-seed failed user_id=%s", authed.user.id)
+        logger.exception("reset: re-seed failed")
         await db.rollback()
         return ResetResponse(seeded_signals=0)
     return ResetResponse(seeded_signals=seeded)

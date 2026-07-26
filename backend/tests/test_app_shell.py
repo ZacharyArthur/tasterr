@@ -12,6 +12,18 @@ from tasterr.main import create_app
 from tasterr.settings import Settings
 
 SENTINEL = "SENTINEL-SECRET-VALUE"
+EXPECTED_SECURITY_HEADERS = {
+    "content-security-policy": (
+        "default-src 'self'; base-uri 'self'; object-src 'none'; "
+        "frame-ancestors 'none'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data: https://image.tmdb.org; connect-src 'self'; "
+        "frame-src https://www.youtube.com; font-src 'self' data:; form-action 'self'"
+    ),
+    "x-frame-options": "DENY",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "permissions-policy": "camera=(), geolocation=(), microphone=()",
+}
 
 
 def _settings(tmp_path: Path, **overrides: object) -> Settings:
@@ -85,6 +97,39 @@ def test_static_file_served_directly(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "console.log" in response.text
+
+
+def test_api_spa_static_and_error_responses_carry_security_headers(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    assets = settings.static_dir / "assets"
+    assets.mkdir(parents=True)
+    (settings.static_dir / "index.html").write_text("<!doctype html>")
+    (assets / "app.js").write_text("console.log('hi')")
+
+    with TestClient(create_app(settings)) as client:
+        responses = (
+            client.get("/api/v1/health"),
+            client.get("/settings"),
+            client.get("/assets/app.js"),
+            client.get("/api/v1/nope"),
+        )
+
+    for response in responses:
+        for name, value in EXPECTED_SECURITY_HEADERS.items():
+            assert response.headers[name] == value
+        assert "strict-transport-security" not in response.headers
+
+
+def test_hsts_is_emitted_only_for_effective_https(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+
+    with TestClient(app) as client:
+        http = client.get("/api/v1/health")
+    with TestClient(app, base_url="https://testserver") as client:
+        https = client.get("/api/v1/health")
+
+    assert "strict-transport-security" not in http.headers
+    assert https.headers["strict-transport-security"] == "max-age=31536000"
 
 
 def test_unknown_api_route_stays_json_404(tmp_path: Path) -> None:

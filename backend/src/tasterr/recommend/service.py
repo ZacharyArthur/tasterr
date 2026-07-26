@@ -78,18 +78,11 @@ class TasteService:
                 try:
                     facts = await self._catalog.title_facts(media_type, tmdb_id)
                     return key, build_record(facts)
-                except UpstreamError as error:
-                    logger.warning(
-                        "recommend: vector build skipped for %s:%s: %s",
-                        media_type,
-                        tmdb_id,
-                        error,
-                    )
+                except UpstreamError:
+                    logger.warning("recommend: vector build skipped")
                     return None
                 except Exception:  # per-candidate: one bad title never drops the batch
-                    logger.exception(
-                        "recommend: vector build failed for %s:%s", media_type, tmdb_id
-                    )
+                    logger.exception("recommend: vector build failed")
                     return None
 
         built = await asyncio.gather(*(build(key) for key in missing))

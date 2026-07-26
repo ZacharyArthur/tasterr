@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import type { User } from "../lib/api";
 import { useLogout } from "../lib/auth";
 import { useResetRecommendations } from "../lib/taste";

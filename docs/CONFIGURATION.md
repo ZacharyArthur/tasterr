@@ -1,9 +1,16 @@
 # Configuration and operations
 
-Tasterr reads deployment connections and secrets from environment variables. The
-admin UI stores only non-secret household preferences in SQLite. Compose reads the
-same `.env` file for both interpolation and the container environment; never commit
-that file.
+Tasterr reads deployment connections and secrets from ordinary process environment
+variables; the application does not parse or require a `.env` file. The admin UI
+stores only non-secret household preferences in SQLite.
+
+The bundled Compose file explicitly loads `TASTERR_ENV_FILE` (default `.env`) into
+the container, so that deployment path requires the configured file. A service
+manager, container UI, or orchestrator may instead inject the same application
+variable names directly. Host shell variables do not enter a Compose container by
+themselves: when omitting `env_file`, declare each name under the service's
+`environment` section as shown in the README. Never commit a real environment file
+or place secret values directly in a Compose file.
 
 ## Application environment variables
 
@@ -30,8 +37,8 @@ hostnames, URLs, malformed networks, and wildcard trust fail boot.
 |---|---|---|
 | `TASTERR_MEDIA_NETWORK` | unset | Existing external Docker network used only with `docker-compose.seerr-network.yml` when Seerr runs on this same Docker host in another Compose project. |
 | `TASTERR_IMAGE` | `tasterr:latest` | Local or GHCR image name/tag used by Compose. |
-| `TASTERR_HTTP_PORT` | `8000` | Host-side port or bind expression. Use `127.0.0.1:8000` to expose only on loopback. |
-| `TASTERR_ENV_FILE` | `.env` | Service environment file path. With an alternate file, pass the same file to Compose via `--env-file`. |
+| `TASTERR_HTTP_PORT` | `127.0.0.1:8000` | Host-side port or bind expression. Set `8000` or a specific LAN IP and port only for intentional direct LAN access. |
+| `TASTERR_ENV_FILE` | `.env` | Environment file loaded by the bundled Compose service. With an alternate file, pass the same file to Compose via `--env-file`. This is a Compose concern, not an application requirement. |
 
 The base Compose file leaves an optional Seerr service commented out and uses its
 normal project-managed network. It does not require a pre-created network or silently
@@ -69,8 +76,10 @@ Choose `SEERR_INTERNAL_URL` according to where Seerr runs:
   name is unknown. The Seerr service name or network alias used by
   `SEERR_INTERNAL_URL` must resolve on that network.
 
-For the normal LAN/default-network path, start with `docker compose up -d --build`.
-Boot upgrades SQLite to the current
+For the default host-only or host-proxy path, start with
+`docker compose up -d --build`. To let household clients connect directly over the
+LAN, first set `TASTERR_HTTP_PORT=8000` (or a specific LAN bind) and restrict the host
+firewall to the intended network. Boot upgrades SQLite to the current
 Alembic revision, expires stale sessions, and then reports health at
 `/api/v1/health`. Sign in with an existing Seerr account. Seerr's admin permission is
 re-derived on each login and controls access to Tasterr's Settings screen.
@@ -95,11 +104,27 @@ The proxy must replace `X-Forwarded-For` and `X-Forwarded-Proto`, set the latter
 the direct proxy peer—not an arbitrary browser address. Prefer one static IP; use the
 narrowest container subnet only when a fixed address is impractical. Never use `*`.
 
-For a proxy on the host, loopback trust may be sufficient. For a proxy container,
-use its fixed network IP or narrow network CIDR. Bind Tasterr to loopback with
-`TASTERR_HTTP_PORT=127.0.0.1:8000` when the proxy reaches it through the host. A
-correct trusted `X-Forwarded-Proto: https` makes session cookies `Secure`; forwarding
-headers from any untrusted peer are ignored.
+For a proxy on the host, the default loopback publication and loopback trust may be
+sufficient. For a proxy container, use the Compose network plus its fixed network IP
+or narrow network CIDR. A correct trusted `X-Forwarded-Proto: https` makes session
+cookies `Secure` and enables the application HSTS header; forwarding headers from
+any untrusted peer are ignored.
+
+## HTTP security and private logs
+
+Tasterr disables Uvicorn request access logs so search query strings are not written
+by the application process. Configure the TLS proxy or tunnel to omit or redact query
+strings too: `/search?q=...` and `/api/v1/search?q=...` contain household search
+terms. Never attach raw access logs to an issue or release record.
+
+The application removes Uvicorn's identifying server header and applies the same
+browser policy to API, SPA, static, fallback, and error responses: a same-origin CSP
+with explicit TMDB-image and YouTube-frame allowances, frame denial, MIME-sniffing
+protection, origin-only cross-origin referrers, and denied camera/geolocation/
+microphone permissions. The referrer policy preserves the origin identity required
+by YouTube trailers without disclosing household paths or search queries. HSTS is
+emitted only for effective HTTPS requests from a trusted proxy. The proxy may add the
+same headers as defense-in-depth but must not weaken them.
 
 ## Degraded modes
 

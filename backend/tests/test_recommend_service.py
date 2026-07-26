@@ -186,7 +186,8 @@ async def test_failing_title_is_skipped_not_fatal(
     records = await _service(db, catalog).ensure_vectors([("movie", 1), ("movie", 2)])
 
     assert set(records) == {("movie", 1)}
-    assert "vector build skipped for movie:2" in caplog.text
+    assert "vector build skipped" in caplog.text
+    assert "movie:2" not in caplog.text
     assert all(record.exc_info is None for record in caplog.records)
 
 

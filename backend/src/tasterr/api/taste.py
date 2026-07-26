@@ -65,7 +65,7 @@ async def refresh_profile(
         await taste.recompute_profile(user_id)
         await db.commit()
     except Exception:  # cache maintenance — never the request's fate
-        logger.exception("taste: profile refresh failed user_id=%s", user_id)
+        logger.exception("taste: profile refresh failed")
         await db.rollback()  # repair the shared session for the caller
 
 

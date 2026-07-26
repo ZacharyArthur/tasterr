@@ -18,6 +18,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+COPY LICENSE /usr/share/licenses/tasterr/LICENSE
+
 # Dependency layer first so code changes don't re-resolve the environment.
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project

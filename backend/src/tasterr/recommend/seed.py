@@ -45,7 +45,7 @@ async def seed_user(
             await taste.recompute_profile(user_id)  # pre-builds the seeded vectors
             await db.commit()
         except Exception:  # signals are durable; the profile rebuilds on read
-            logger.exception("seed: profile materialization failed user_id=%s", user_id)
+            logger.exception("seed: profile materialization failed")
             await db.rollback()
     return written
 
@@ -70,8 +70,8 @@ async def seed_in_background(
             if await store.has_signals(db, user_id):
                 return  # returning user — nothing to seed
             written = await seed_user(db, taste_factory(db), seerr, user_id, seerr_user_id)
-            logger.info("seed: imported %s signals user_id=%s", written, user_id)
+            logger.info("seed: imported %s signals", written)
     except Exception:  # background: degrade to unseeded, retry next login/reset
-        logger.exception("seed: import failed user_id=%s", user_id)
+        logger.exception("seed: import failed")
     finally:
         seeding.discard(user_id)

@@ -106,7 +106,7 @@ def personalized_home_providers(
         try:
             result = await taste.more_like(user_id)
         except Exception:  # engine failure → no rail, never a failed home
-            logger.exception("rails: more-like failed user_id=%s", user_id)
+            logger.exception("rails: more-like failed")
             await _quiet_rollback(taste)
             return []
         if result is None:
@@ -149,7 +149,7 @@ async def _engine_safe(
     try:
         return await call
     except Exception:  # engine failure → no rail, never a failed home
-        logger.exception("rails: %s failed user_id=%s", rail_id, user_id)
+        logger.exception("rails: %s failed", rail_id)
         await _quiet_rollback(taste)
         return []
 
