@@ -1,8 +1,10 @@
 # Releasing
 
-This procedure is for stable v1 releases. The first stable package version is
-`1.0.0`, its Git tag is `v1.0.0`, and its image is published by the `image` workflow
-only after the OpenSpec change and code are archived and squash-merged together.
+This procedure is for stable v1 releases. The current package version is
+`1.0.1`, its Git tag is `v1.0.1`, and its image is published by the `image` workflow
+only after all release changes are squash-merged to protected `main`. The published
+`v1.0.0` tag is retained for provenance, but no GitHub Release was announced for it;
+`v1.0.1` is the immutable-tag fix-forward and first announced release.
 
 ## 1. Prepare the required devcontainer
 
@@ -41,7 +43,7 @@ native image/Compose smoke sequentially. Any failure blocks the release.
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-Record the date and result in `docs/releases/v1.0.0.md`. This command intentionally
+Record the date and result in `docs/releases/v1.0.1.md`. This command intentionally
 does not imply that audits, security review, or live contracts passed.
 
 ## 4. Audit locked dependencies
@@ -84,23 +86,25 @@ release evidence records the baseline date/version/scope plus the waiver rationa
 without claiming a fresh pass. Any change to those surfaces invalidates the waiver.
 Remove the temporary secret file after a run.
 
-## 6. Validate and archive the OpenSpec change
+## 6. Validate and archive any OpenSpec change
 
-Run strict validation on the change branch:
+When the release contains an OpenSpec change, run strict validation on its change
+branch:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 validate v1-public-release-readiness --strict --no-interactive
+npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 validate <change-id> --strict --no-interactive
 ```
 
-After every task and release-evidence field is complete, archive before merging so
-the implementation and living specs land atomically:
+After every task is complete, archive before merging so the implementation and
+living specs land atomically:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 archive v1-public-release-readiness
+npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 archive <change-id>
 ```
 
 Review the archive diff and rerun `just check`. Do not use `--skip-specs` or
-`--no-validate` for this change.
+`--no-validate`. A release containing only bug fixes, documentation, chores, or
+dependency bumps may record OpenSpec as `n/a` and skip this section.
 
 ## 7. Bootstrap GitHub, open the PR, and squash merge
 
@@ -165,28 +169,28 @@ commit-addressed `sha-<full-commit>` candidate tags. Before tagging:
 After every pre-tag release-record field is final, create and push the annotated tag:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . git tag -a v1.0.0 -m "v1.0.0"
-npx @devcontainers/cli exec --workspace-folder . git push origin v1.0.0
+npx @devcontainers/cli exec --workspace-folder . git tag -a v1.0.1 -m "v1.0.1"
+npx @devcontainers/cli exec --workspace-folder . git push origin v1.0.1
 ```
 
-Wait for the image workflow. It must publish `1.0.0`, `1.0`, `1`, and `latest`, and
+Wait for the image workflow. It must publish `1.0.1`, `1.0`, `1`, and `latest`, and
 leave the existing `sha-<full-commit>` candidate unchanged. Inspect the stable
 manifest and confirm both platforms:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.0.0
+npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.0.1
 ```
 
 Perform a fresh install in an empty directory with a new external network, disposable
 `.env`, and new Compose project. Set
-`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:1.0.0`, run `docker compose pull` and
+`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:1.0.1`, run `docker compose pull` and
 `docker compose up -d --no-build`, then verify health, SPA serving, non-root uid, and
 named-volume persistence. Delete every disposable resource after verification.
 
 Publish release notes only after the manifest and fresh install pass. Summarize user-
-visible changes, upgrade steps, and known limitations; pin the `1.0.0` digest as the
+visible changes, upgrade steps, and known limitations; pin the `1.0.1` digest as the
 released artifact and do not reproduce private release evidence. Publish the GitHub
-Release only after `1.0.0`, `1.0`, `1`, and `latest` resolve to the expected release
+Release only after `1.0.1`, `1.0`, `1`, and `latest` resolve to the expected release
 commit, the `sha-<full-commit>` candidate still resolves to its recorded pre-tag
 digest, and the tagged clean-install smoke passes.
 
