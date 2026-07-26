@@ -46,3 +46,5 @@ def test_release_documents_name_the_current_stable_tag() -> None:
     assert f"package version is\n`{VERSION}`" in releasing
     assert f"Git tag is `v{VERSION}`" in releasing
     assert f"Git tag: `v{VERSION}`" in evidence
+    assert re.search(r"(?m)^- Release date: \d{4}-\d{2}-\d{2}$", evidence)
+    assert "pending GitHub Release" not in evidence

@@ -85,6 +85,8 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "`check`, `e2e`, and `container-smoke`" in releasing
     assert "leave the existing `sha-<full-commit>` candidate unchanged" in releasing
     assert "pin the `1.0.1` digest" in releasing
+    assert "GitHub Release is the authoritative post-tag record" in releasing
+    assert "do not create a post-release evidence commit" in releasing
     assert "do not move, delete, or reuse the published tag" in releasing
     assert "Public repositories support this ruleset on GitHub Free" in releasing
     assert "private vulnerability reporting" in releasing
