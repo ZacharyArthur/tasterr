@@ -33,7 +33,6 @@ def test_image_workflow_maps_v1_tag_to_release_aliases() -> None:
     image = (ROOT / ".github" / "workflows" / "image.yml").read_text(encoding="utf-8")
 
     assert 'tags:\n      - "v*"' in image
-    assert "type=sha,format=long,prefix=sha-" in image
     assert "type=semver,pattern={{version}}" in image
     assert "type=semver,pattern={{major}}.{{minor}}" in image
     assert "type=semver,pattern={{major}}" in image

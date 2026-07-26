@@ -60,7 +60,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,format=long,prefix=sha-
+            type=sha,format=long,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}

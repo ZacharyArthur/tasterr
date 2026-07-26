@@ -83,7 +83,9 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "OWNER/REPOSITORY" not in readme + releasing + evidence
     assert "empty **public** `ZacharyArthur/tasterr` repository" in releasing
     assert "`check`, `e2e`, and `container-smoke`" in releasing
-    assert "sha-<full-commit>" in releasing
+    assert "leave the existing `sha-<full-commit>` candidate unchanged" in releasing
+    assert "pin the `1.0.0` digest" in releasing
+    assert "do not move, delete, or reuse the published tag" in releasing
     assert "Public repositories support this ruleset on GitHub Free" in releasing
     assert "private vulnerability reporting" in releasing
     assert "do not use a create-and-push shortcut" in releasing
