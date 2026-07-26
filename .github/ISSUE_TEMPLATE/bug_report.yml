@@ -1,0 +1,76 @@
+name: Bug report
+description: Report reproducible behavior that is not working as expected
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Search existing issues first and try the
+        latest stable patch release when practical.
+
+        **Do not include API keys, credentials, session data, private URLs,
+        household identities, viewing history, or database contents.** Report
+        security vulnerabilities privately through the
+        [security policy](https://github.com/ZacharyArthur/tasterr/security/policy).
+
+  - type: input
+    id: version
+    attributes:
+      label: Tasterr version
+      description: Provide the image tag, release version, or commit SHA.
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reliable sequence that demonstrates the problem.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        Include the relevant browser, operating system, and deployment method, plus
+        the Seerr version when applicable. Redact hostnames and addresses.
+      placeholder: |
+        Browser:
+        Operating system:
+        Deployment:
+        Seerr version (if relevant):
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste only the smallest relevant excerpt after removing secrets and private data.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I removed secrets, credentials, private URLs, and household data.
+          required: true

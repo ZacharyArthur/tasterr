@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Configuration and troubleshooting
+    url: https://github.com/ZacharyArthur/tasterr/blob/main/docs/CONFIGURATION.md#troubleshooting
+    about: Check the setup, operations, and troubleshooting guidance.
+  - name: Security vulnerability
+    url: https://github.com/ZacharyArthur/tasterr/security/policy
+    about: Read the security policy and report vulnerabilities privately.

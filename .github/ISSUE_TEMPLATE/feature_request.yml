@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an improvement grounded in a concrete use case
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before prescribing an implementation. Tasterr favors
+        small, maintainable features that fit its self-hosted household-media scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to accomplish, and what prevents it today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the behavior you would find useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Alternatives or additional context
+      description: >-
+        Note workarounds or simpler alternatives, and add examples or screenshots
+        when helpful. Do not include secrets or private household data.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for this request.
+          required: true

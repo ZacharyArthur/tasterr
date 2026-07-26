@@ -126,6 +126,8 @@ specific LAN bind only when direct household-network access is intentional.
   taste flows, storage, caches, and generated API types.
 - [Security policy](SECURITY.md): supported releases and private vulnerability
   reporting. The developer threat model lives in [docs/SECURITY.md](docs/SECURITY.md).
+- [Contributing guide](CONTRIBUTING.md): issue reporting, development setup, change
+  workflow, and pull request expectations.
 - [Release procedure](docs/RELEASING.md): deterministic checks, audits, live
   contracts, image verification, and rollback.
 
