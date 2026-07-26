@@ -146,15 +146,15 @@ npx @devcontainers/cli exec --workspace-folder . git pull --ff-only
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-The image workflow on the merged `main` commit publishes public `main` and immutable
-`sha-<full-commit>` candidate tags. Before tagging:
+The image workflow on the merged `main` commit publishes public `main` and
+commit-addressed `sha-<full-commit>` candidate tags. Before tagging:
 
 1. Inspect the candidate manifest and confirm both `linux/amd64` and `linux/arm64`.
 2. Confirm that the GHCR package is linked to the public repository and explicitly
    public; repository and package visibility are separate controls.
 3. From an environment with no GHCR credentials, verify an anonymous pull. Then use
    a disposable empty directory, new Compose project, and `.env` to install the
-   immutable
+   commit-SHA
    `ghcr.io/zacharyarthur/tasterr:sha-<full-commit>` candidate. Verify health, SPA
    serving, non-root uid, and named-volume persistence across recreation.
 4. Remove the disposable project, volume, network, and secret file. Record the
@@ -169,8 +169,9 @@ npx @devcontainers/cli exec --workspace-folder . git tag -a v1.0.0 -m "v1.0.0"
 npx @devcontainers/cli exec --workspace-folder . git push origin v1.0.0
 ```
 
-Wait for the image workflow. It must publish `1.0.0`, `1.0`, `1`, `latest`, and the
-immutable `sha-<full-commit>` tag. Inspect the manifest and confirm both platforms:
+Wait for the image workflow. It must publish `1.0.0`, `1.0`, `1`, and `latest`, and
+leave the existing `sha-<full-commit>` candidate unchanged. Inspect the stable
+manifest and confirm both platforms:
 
 ```console
 npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.0.0
@@ -183,10 +184,15 @@ Perform a fresh install in an empty directory with a new external network, dispo
 named-volume persistence. Delete every disposable resource after verification.
 
 Publish release notes only after the manifest and fresh install pass. Summarize user-
-visible changes, upgrade steps, known limitations, and the immutable image digest;
-do not reproduce private release evidence. Publish the GitHub Release only after
-`1.0.0`, `1.0`, `1`, `latest`, and `sha-<full-commit>` all resolve to the expected
-release commit and the tagged clean-install smoke passes.
+visible changes, upgrade steps, and known limitations; pin the `1.0.0` digest as the
+released artifact and do not reproduce private release evidence. Publish the GitHub
+Release only after `1.0.0`, `1.0`, `1`, and `latest` resolve to the expected release
+commit, the `sha-<full-commit>` candidate still resolves to its recorded pre-tag
+digest, and the tagged clean-install smoke passes.
+
+If any post-tag check fails, do not move, delete, or reuse the published tag.
+Document the failure, fix forward through the normal protected-`main` workflow, and
+issue the next patch version.
 
 The selected public coordinate is `ZacharyArthur/tasterr` and the container path is
 `ghcr.io/zacharyarthur/tasterr`; verify both before repository creation. Repository

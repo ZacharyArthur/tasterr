@@ -69,7 +69,10 @@ def test_image_workflow_publishes_only_after_native_smoke() -> None:
     assert "packages: write" in image
     assert "platforms: linux/amd64,linux/arm64" in image
     assert "type=raw,value=main" in image
-    assert "type=sha,format=long,prefix=sha-" in image
+    sha_rules = [line.strip() for line in image.splitlines() if line.strip().startswith("type=sha")]
+    assert sha_rules == [
+        "type=sha,format=long,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}"
+    ]
     assert "type=semver,pattern={{version}}" in image
     assert "type=semver,pattern={{major}}.{{minor}}" in image
     assert "type=semver,pattern={{major}}" in image
