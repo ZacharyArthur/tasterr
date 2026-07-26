@@ -1,6 +1,7 @@
 """Living operator documentation stays complete as settings and release commands evolve."""
 
 import re
+import tomllib
 from pathlib import Path
 
 from tasterr.settings import Settings
@@ -38,6 +39,7 @@ def test_configuration_documents_every_app_and_compose_variable() -> None:
 
 def test_readme_links_every_living_operator_document() -> None:
     readme = _read(ROOT / "README.md")
+    index = _read(ROOT / "frontend" / "index.html")
 
     for target in (
         "docs/CONFIGURATION.md",
@@ -50,10 +52,52 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "docker compose up -d --build" in readme
     assert "SEERR_INTERNAL_URL" in readme
     assert "A shared Docker network is not required" in readme
+    assert "TASTERR_HTTP_PORT=8000" in readme
+    assert "github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml/badge.svg" in readme
+    assert "image: ghcr.io/zacharyarthur/tasterr:1.0.0" in readme
+    assert '- "127.0.0.1:8000:8000"' in readme
+    assert "tasterr-data:/data" in readme
+    assert "does not require a\n`.env` file" in readme
+    assert "Host variables are not passed into a Compose service automatically" in readme
+    assert "      - TMDB_API_KEY" in readme
+    assert 'src="frontend/public/favicon.svg"' in readme
+    assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />' in index
+    assert (ROOT / "frontend" / "public" / "favicon.svg").is_file()
+
+    for screenshot in ("home.jpg", "detail.jpg", "search.jpg"):
+        path = DOCS / "screenshots" / screenshot
+        assert f'src="docs/screenshots/{screenshot}"' in readme
+        assert path.is_file()
+        assert path.stat().st_size < 1_000_000
 
     configuration = _read(DOCS / "CONFIGURATION.md")
     assert "docker-compose.seerr-network.yml" in configuration
     assert "Docker networks do not span hosts" in configuration
+    assert "`127.0.0.1:8000`" in configuration
+    assert "omit or redact query" in configuration
+    assert "application does not parse or require a `.env` file" in configuration
+    assert "This is a Compose concern, not an application requirement" in configuration
+
+    releasing = _read(DOCS / "RELEASING.md")
+    evidence = _read(DOCS / "releases" / "v1.0.0.md")
+    assert "OWNER/REPOSITORY" not in readme + releasing + evidence
+    assert "empty **private** `ZacharyArthur/tasterr` repository" in releasing
+    assert "`check`, `e2e`, and `container-smoke`" in releasing
+    assert "sha-<full-commit>" in releasing
+    assert "make the repository public" in releasing
+    assert "private vulnerability reporting" in releasing
+    assert "do not use a create-and-push shortcut" in releasing
+
+
+def test_agpl_license_is_declared_consistently() -> None:
+    license_text = _read(ROOT / "LICENSE")
+    readme = _read(ROOT / "README.md")
+    package = tomllib.loads(_read(ROOT / "backend" / "pyproject.toml"))
+
+    assert "GNU AFFERO GENERAL PUBLIC LICENSE" in license_text
+    assert "Version 3, 19 November 2007" in license_text
+    assert "](LICENSE)" in readme
+    assert package["project"]["license"] == "AGPL-3.0-only"
 
 
 def test_architecture_pins_enforced_boundaries_and_degradation() -> None:
@@ -86,7 +130,7 @@ def test_release_check_is_deterministic_and_keeps_external_checks_explicit() -> 
     assert "just audit" in releasing
     assert "just test-live" in releasing
     assert "v1.0.0" in releasing
-    assert "archive m6-hardening-release" in releasing
+    assert "archive v1-public-release-readiness" in releasing
 
 
 def test_public_security_policy_is_private_and_actionable() -> None:

@@ -1,5 +1,5 @@
 import type { KeyboardEventHandler } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router";
 import type { MediaSummary } from "../lib/api";
 import { useAvailabilityFor } from "../lib/availability";
 import { posterUrl } from "../lib/images";

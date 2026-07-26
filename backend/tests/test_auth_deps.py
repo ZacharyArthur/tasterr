@@ -175,6 +175,9 @@ def test_stale_session_refresh_survives_unhandled_500(tmp_path: Path) -> None:
         response = client.get("/api/v1/probe/boom")
 
     assert response.status_code == 500
+    assert response.headers["content-security-policy"].startswith("default-src 'self'")
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["x-content-type-options"] == "nosniff"
     header = response.headers["set-cookie"]
     assert header.startswith(f"{COOKIE_NAME}={token}")
     assert "max-age=2592000" in header.lower()

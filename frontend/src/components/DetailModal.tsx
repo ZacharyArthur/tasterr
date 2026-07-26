@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router";
 import type { MediaDetail, MediaType } from "../lib/api";
 import { useTitle } from "../lib/browse";
 import {

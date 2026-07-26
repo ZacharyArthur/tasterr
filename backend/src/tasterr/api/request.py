@@ -140,7 +140,7 @@ async def _record_request_signal(
         await store.record_signal(db, user_id, media_type, tmdb_id, "request")
         await db.commit()
     except Exception:  # the Seerr request already succeeded; never fail it now
-        logger.exception("request: taste signal write failed user_id=%s", user_id)
+        logger.exception("request: taste signal write failed")
         await db.rollback()
         return
     await refresh_profile(request, settings, db, user_id, runtime)
@@ -198,5 +198,5 @@ async def _reauth_plex(ctx: SeerrRequestCtx, db: AsyncSession, authed: AuthedSes
         return None
     authed.session.seerr_cookie = login.cookie
     await db.commit()
-    logger.info("request: silent re-auth refreshed seerr session user_id=%s", authed.user.id)
+    logger.info("request: silent re-auth refreshed seerr session")
     return login.cookie

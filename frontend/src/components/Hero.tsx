@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router";
 import type { HeroSlide } from "../lib/api";
 import { AvailabilityContext, availabilityKey } from "../lib/availability";
 import { backdropUrl, logoUrl } from "../lib/images";

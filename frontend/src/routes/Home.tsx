@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Hero } from "../components/Hero";
 import { Rail } from "../components/Rail";
 import type { MediaSummary } from "../lib/api";

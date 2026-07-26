@@ -70,6 +70,9 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       HttpOnly cookie the JS can't read.
 - [ ] Browser tests use invented local fixtures, make no live request, and retain no
       trace containing placeholder credentials; failure artifacts are reviewed before publish.
+- [ ] API, SPA, static, fallback, and error responses retain the fixed CSP/frame,
+      MIME-sniffing, referrer, and permissions policy; HSTS appears only on trusted
+      effective HTTPS.
 
 ### Database & migrations
 
@@ -99,6 +102,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       reviewed before any intentional publication.
 - [ ] Release evidence identifies versions, checks, advisory dispositions, and
       generic exercised/skipped cases without reproducing sensitive command output.
+- [ ] Uvicorn request access logging remains disabled, and every deployment proxy
+      omits or redacts query strings before retaining or exporting access logs.
 
 ### Public repository and package release
 
@@ -108,6 +113,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Dependabot alerts are enabled and triaged.
 - [ ] `.env.example`, fixtures, history, staged files, and release notes are reviewed
       for live secrets, URLs, identities, and household data.
+- [ ] Root licensing, package metadata, published image license text, and the public
+      source coordinate agree.
 
 ## Release checklist (before every tag)
 

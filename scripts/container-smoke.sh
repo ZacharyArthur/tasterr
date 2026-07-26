@@ -74,13 +74,24 @@ wait_healthy
 docker exec "$container" python -c \
     "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).status == 200"
 docker exec "$container" python -c \
+    "import urllib.request; r = urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3); h = r.headers; assert h.get('Server') is None; assert h['X-Frame-Options'] == 'DENY'; assert h['X-Content-Type-Options'] == 'nosniff'; assert h['Referrer-Policy'] == 'strict-origin-when-cross-origin'; assert h['Permissions-Policy'] == 'camera=(), geolocation=(), microphone=()'; assert h['Content-Security-Policy'].startswith(\"default-src 'self'\"); assert h.get('Strict-Transport-Security') is None"
+docker exec "$container" python -c \
     "import urllib.request; body = urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).read(); assert b'<div id=\"root\"></div>' in body"
+
+log_sentinel="container-smoke-private-query"
+docker exec "$container" python -c \
+    "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health?q=$log_sentinel', timeout=3).status == 200"
+if compose logs --no-color tasterr | grep --fixed-strings --quiet "$log_sentinel"; then
+    echo "container smoke: request query leaked into logs" >&2
+    exit 1
+fi
 
 uid="$(docker exec "$container" id -u)"
 if [[ "$uid" == "0" ]]; then
     echo "container smoke: runtime uid must be non-root" >&2
     exit 1
 fi
+docker exec "$container" test -f /usr/share/licenses/tasterr/LICENSE
 docker exec "$container" test -f /data/tasterr.db
 docker exec "$container" python -c \
     "import sqlite3; db = sqlite3.connect('/data/tasterr.db'); db.execute('CREATE TABLE container_smoke (marker TEXT PRIMARY KEY)'); db.execute('INSERT INTO container_smoke VALUES (?)', ('persisted',)); db.commit(); db.close()"
@@ -90,7 +101,7 @@ wait_healthy
 docker exec "$container" python -c \
     "import sqlite3; db = sqlite3.connect('/data/tasterr.db'); row = db.execute('SELECT marker FROM container_smoke').fetchone(); db.close(); assert row == ('persisted',)"
 
-echo "container smoke: health, SPA, non-root uid, and volume persistence passed"
+echo "container smoke: health, private logs, headers, SPA, non-root uid, and volume persistence passed"
 
 # Successful runs also prove the cleanup routine removed every owned resource.
 cleanup

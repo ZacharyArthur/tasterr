@@ -33,6 +33,28 @@ from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.settings import Settings, get_settings
 
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "base-uri 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none'; "
+    "script-src 'self'; "
+    "style-src 'self'; "
+    "img-src 'self' data: https://image.tmdb.org; "
+    "connect-src 'self'; "
+    "frame-src https://www.youtube.com; "
+    "font-src 'self' data:; "
+    "form-action 'self'"
+)
+SECURITY_HEADERS = {
+    "content-security-policy": CONTENT_SECURITY_POLICY,
+    "x-frame-options": "DENY",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "permissions-policy": "camera=(), geolocation=(), microphone=()",
+}
+HSTS = "max-age=31536000"
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings if settings is not None else get_settings()
@@ -114,7 +136,31 @@ class Tasterr(FastAPI):
     would then bypass the cookie refresh."""
 
     def build_middleware_stack(self) -> ASGIApp:
-        return SessionCookieSlide(super().build_middleware_stack())
+        return SecurityHeaders(SessionCookieSlide(super().build_middleware_stack()))
+
+
+class SecurityHeaders:
+    """Apply the fixed browser policy outside every HTTP response path."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                message.setdefault("headers", [])
+                headers = MutableHeaders(scope=message)
+                for name, value in SECURITY_HEADERS.items():
+                    headers[name] = value
+                if scope.get("scheme") == "https":
+                    headers["strict-transport-security"] = HSTS
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 class SessionCookieSlide:
@@ -140,6 +186,7 @@ class SessionCookieSlide:
             if message["type"] == "http.response.start":
                 token = cast("str | None", scope.get("state", {}).get("session_cookie_refresh"))
                 if token is not None:
+                    message.setdefault("headers", [])
                     headers = MutableHeaders(scope=message)
                     prefix = f"{COOKIE_NAME}="
                     if not any(v.startswith(prefix) for v in headers.getlist("set-cookie")):

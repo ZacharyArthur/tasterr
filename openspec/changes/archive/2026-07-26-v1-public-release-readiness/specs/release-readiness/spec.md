@@ -1,8 +1,5 @@
-# release-readiness Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change m6-hardening-release. Update Purpose after archive.
-## Requirements
 ### Requirement: Release-facing documentation is complete and linked
 
 The repository SHALL provide a root quick start plus living configuration,
@@ -57,67 +54,6 @@ Compose service can inject the same variable names without a file.
   environment variables
 - **AND** it explains that Compose requires an explicit `environment` mapping to
   pass host variables into the service when `env_file` is not used
-
-### Requirement: Public vulnerability reporting is private and actionable
-
-The root `SECURITY.md` SHALL state the supported release line, direct vulnerability
-reports to GitHub private vulnerability reporting, tell reporters not to disclose
-secrets or household data, and describe the acknowledgement/remediation expectations.
-The release procedure SHALL require private vulnerability reporting, secret scanning,
-and Dependabot alerts to be enabled before a public repository or package is
-announced.
-
-#### Scenario: Reporter finds a private channel
-- **WHEN** a security researcher opens the repository security policy
-- **THEN** they are directed to a private reporting path and warned not to open a
-  public issue containing exploit details or sensitive data
-
-#### Scenario: Public release checks repository security features
-- **WHEN** the operator prepares to make the repository or package public
-- **THEN** the release checklist requires private reporting, secret scanning, and
-  dependency alerts to be enabled first
-
-### Requirement: Deterministic pre-release verification is repeatable
-
-The repository SHALL provide a documented deterministic release command that runs
-the ordinary quality gate, the real-backend Playwright smoke, and the native
-container/Compose smoke. The release procedure SHALL separately require dependency
-audits, the full relevant security checklist, placeholder-only env verification, and
-the live Seerr contract suite because those checks require network access, operator
-credentials, or human triage. A failed required check MUST block tagging unless a
-specific audit finding is risk-triaged in the release record.
-
-#### Scenario: Deterministic release checks pass
-- **WHEN** the release command runs in the devcontainer on a release candidate
-- **THEN** it exits zero only after `just check`, Playwright E2E, and container/Compose
-  smoke all pass
-
-#### Scenario: External release checks remain explicit
-- **WHEN** the deterministic command passes without live credentials or registry
-  access
-- **THEN** the release procedure still shows dependency audit, security review, and
-  live Seerr contracts as incomplete pre-tag requirements
-
-### Requirement: Each release has a redacted evidence record
-
-Before a stable tag is created, the repository SHALL contain a release record naming
-the release version/date, deterministic check results, dependency-audit disposition,
-security-review scope/result, live Seerr version and exercised/skipped cases, known
-limitations, and rollback basis. The record MUST NOT contain credentials, tokens,
-cookies, household identities, request titles, internal/live URLs, or other private
-viewing data. A live case MAY be recorded as skipped only when its documented data
-precondition is absent; the stored-Plex-token authentication contract MUST pass for
-v1.0.
-
-#### Scenario: v1.0 evidence is complete before tagging
-- **WHEN** the operator reaches the v1.0 tag step
-- **THEN** `docs/releases/v1.0.0.md` records all required outcomes and the tested
-  Seerr version with no mandatory case unresolved
-
-#### Scenario: Evidence remains safe to publish
-- **WHEN** the release record is reviewed or published
-- **THEN** it contains outcomes, versions, and generic limitations only, with none of
-  the prohibited secret or household-specific material
 
 ### Requirement: Stable versioning and release order are explicit
 

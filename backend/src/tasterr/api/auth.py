@@ -170,7 +170,7 @@ async def poll_plex_pin(
 
     user, token = await complete_login(db, ctx.secret_key, login, "plex", plex_token)
     _set_cookie(request, response, token)
-    logger.info("auth: plex login succeeded user_id=%s", user.id)
+    logger.info("auth: plex login succeeded")
     schedule_seed(request, settings, user.id, user.seerr_user_id)
     return PinPollResponse(status="ok", user=UserResponse.from_user(user))
 
@@ -198,7 +198,7 @@ async def local_login(
 
     user, token = await complete_login(db, ctx.secret_key, login, "local", None)
     _set_cookie(request, response, token)
-    logger.info("auth: local login succeeded user_id=%s", user.id)
+    logger.info("auth: local login succeeded")
     schedule_seed(request, settings, user.id, user.seerr_user_id)
     return UserResponse.from_user(user)
 
