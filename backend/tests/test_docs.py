@@ -81,10 +81,10 @@ def test_readme_links_every_living_operator_document() -> None:
     releasing = _read(DOCS / "RELEASING.md")
     evidence = _read(DOCS / "releases" / "v1.0.0.md")
     assert "OWNER/REPOSITORY" not in readme + releasing + evidence
-    assert "empty **private** `ZacharyArthur/tasterr` repository" in releasing
+    assert "empty **public** `ZacharyArthur/tasterr` repository" in releasing
     assert "`check`, `e2e`, and `container-smoke`" in releasing
     assert "sha-<full-commit>" in releasing
-    assert "make the repository public" in releasing
+    assert "Public repositories support this ruleset on GitHub Free" in releasing
     assert "private vulnerability reporting" in releasing
     assert "do not use a create-and-push shortcut" in releasing
 

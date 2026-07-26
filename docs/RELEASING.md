@@ -111,12 +111,13 @@ checks the gate only after it passes.
 
 For the first publication, use this order:
 
-1. Create an empty **private** `ZacharyArthur/tasterr` repository only; do not push
+1. Create an empty **public** `ZacharyArthur/tasterr` repository only; do not push
    yet, and do not use a create-and-push shortcut such as `gh repo create --push`.
    Do not generate a README, license, or `.gitignore`. Set the description to
    `Self-hosted TMDB and Seerr discovery with per-user learned taste profiles.` and
    add the topics `self-hosted`, `seerr`, `tmdb`, `plex`, `recommendations`,
-   `fastapi`, `react`, and `docker`.
+   `fastapi`, `react`, and `docker`. The source history must have passed the
+   documented secret review before this public creation.
 2. Enable Issues. Disable Wiki, Projects, and Discussions. Allow squash merging
    only, enable automatic head-branch deletion, keep the default `GITHUB_TOKEN`
    permissions read-only, and leave workflow pull-request creation/approval
@@ -125,19 +126,15 @@ For the first publication, use this order:
    reviewed `change/v1-public-release-readiness` branch, then re-enable Actions.
    This prevents the old `main` commit from publishing a container during import.
 4. Enable the dependency graph, Dependabot alerts, Dependabot security updates,
-   secret scanning, and push protection where the account and repository visibility
-   make them available. The image workflow's publishing job is the only job granted
-   `packages: write`; all other workflow permissions remain read-only.
+   secret scanning, push protection, and private vulnerability reporting. The image
+   workflow's publishing job is the only job granted `packages: write`; all other
+   workflow permissions remain read-only.
 5. Open the readiness PR against `main` and let `check`, `e2e`, and
    `container-smoke` report at least once.
-6. Configure a `main` ruleset that requires a pull request with zero approving
+6. Configure an active `main` ruleset that requires a pull request with zero approving
    reviews, successful `check`, `e2e`, and `container-smoke` jobs, linear history,
    conversation resolution, and blocks force pushes and deletion. Restrict merge
-   type to squash. GitHub Free does not offer rulesets for private personal
-   repositories; if the account plan cannot apply this rule while private, wait for
-   all three checks and resolve every conversation manually on this one bootstrap
-   PR, then activate the complete ruleset immediately after the repository becomes
-   public.
+   type to squash. Public repositories support this ruleset on GitHub Free.
 7. Wait for all three required jobs, self-review, resolve every conversation, and
    squash merge. Do not tag the unmerged change branch.
 
@@ -149,30 +146,21 @@ npx @devcontainers/cli exec --workspace-folder . git pull --ff-only
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-The image workflow on the merged `main` commit publishes `main` and immutable
-`sha-<full-commit>` candidate tags. Before changing visibility or tagging:
+The image workflow on the merged `main` commit publishes public `main` and immutable
+`sha-<full-commit>` candidate tags. Before tagging:
 
 1. Inspect the candidate manifest and confirm both `linux/amd64` and `linux/arm64`.
-2. From a disposable empty directory, authenticate to GHCR, use a new Compose
-   project and `.env`, and install the immutable
+2. Confirm that the GHCR package is linked to the public repository and explicitly
+   public; repository and package visibility are separate controls.
+3. From an environment with no GHCR credentials, verify an anonymous pull. Then use
+   a disposable empty directory, new Compose project, and `.env` to install the
+   immutable
    `ghcr.io/zacharyarthur/tasterr:sha-<full-commit>` candidate. Verify health, SPA
    serving, non-root uid, and named-volume persistence across recreation.
-3. Remove the disposable project, volume, network, and secret file. Record the
+4. Remove the disposable project, volume, network, and secret file. Record the
    manifest digest and generic result in the release evidence.
 
-This private candidate briefly consumes private package storage. Confirm the account
-package spending limit before the merge so it cannot create an unexpected charge.
-
-## 8. Make the source and package public, tag, and release
-
-After the candidate passes, make the repository public. Immediately apply the full
-`main` ruleset if the private account plan could not apply it, and enable private
-vulnerability reporting. Explicitly link the GHCR package to the repository and make
-the package public; repository and package visibility are separate controls, and a
-public package cannot later be made private.
-
-Verify an anonymous pull from an environment with no GHCR credentials. Public
-visibility and anonymous pulling must pass before the stable tag.
+## 8. Tag and release
 
 After every pre-tag release-record field is final, create and push the annotated tag:
 

@@ -125,16 +125,16 @@ The first stable release SHALL use SemVer `1.0.0` in package metadata and Git ta
 `v1.0.0`. The readiness change's code and living specs SHALL be archived and merged
 atomically before the operator creates the tag. Before repository creation or public
 announcement, every template owner/repository marker MUST be replaced by the final
-coordinate. The first repository bootstrap SHALL begin with an empty private
+coordinate. The first repository bootstrap SHALL begin with an empty public
 repository and Actions disabled while the existing base and reviewed change branches
 are imported. The readiness change SHALL merge through the required `check`, `e2e`,
 and `container-smoke` pull-request gates before the main workflow publishes an
 immutable candidate. The release procedure SHALL verify that candidate's
-multi-architecture manifest and clean installation before making the source and
-package public, then verify anonymous pulling before creating the stable tag. It
-SHALL verify the tagged image's `1.0.0`, `1.0`, `1`, `latest`, and immutable SHA
-tags and fresh deployment before the GitHub Release, and SHALL document rollback by
-immutable image digest and validated SQLite backup.
+multi-architecture manifest, public package visibility, and anonymous clean
+installation before creating the stable tag. It SHALL verify the tagged image's
+`1.0.0`, `1.0`, `1`, `latest`, and immutable SHA tags and fresh deployment before
+the GitHub Release, and SHALL document rollback by immutable image digest and
+validated SQLite backup.
 
 #### Scenario: First stable tag follows the atomic merge
 
@@ -156,13 +156,12 @@ immutable image digest and validated SQLite backup.
 - **THEN** Actions remains disabled until both branches exist and the release change
   can enter the documented gated pull-request flow
 
-#### Scenario: Public visibility follows candidate verification
+#### Scenario: Public candidate precedes the stable tag
 
 - **WHEN** the readiness change is squash-merged and the main workflow publishes its
   immutable candidate
-- **THEN** the operator verifies both architectures and a clean authenticated
-  installation before making the repository and package public
-- **AND THEN** verifies an anonymous pull before creating `v1.0.0`
+- **THEN** the operator verifies both architectures, public package visibility, and
+  a clean anonymous installation before creating `v1.0.0`
 
 #### Scenario: Published image is verified
 
