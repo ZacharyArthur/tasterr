@@ -54,7 +54,7 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "A shared Docker network is not required" in readme
     assert "TASTERR_HTTP_PORT=8000" in readme
     assert "github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml/badge.svg" in readme
-    assert "image: ghcr.io/zacharyarthur/tasterr:1.0.0" in readme
+    assert "image: ghcr.io/zacharyarthur/tasterr:1.0.1" in readme
     assert '- "127.0.0.1:8000:8000"' in readme
     assert "tasterr-data:/data" in readme
     assert "does not require a\n`.env` file" in readme
@@ -79,12 +79,12 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "This is a Compose concern, not an application requirement" in configuration
 
     releasing = _read(DOCS / "RELEASING.md")
-    evidence = _read(DOCS / "releases" / "v1.0.0.md")
+    evidence = _read(DOCS / "releases" / "v1.0.1.md")
     assert "OWNER/REPOSITORY" not in readme + releasing + evidence
     assert "empty **public** `ZacharyArthur/tasterr` repository" in releasing
     assert "`check`, `e2e`, and `container-smoke`" in releasing
     assert "leave the existing `sha-<full-commit>` candidate unchanged" in releasing
-    assert "pin the `1.0.0` digest" in releasing
+    assert "pin the `1.0.1` digest" in releasing
     assert "do not move, delete, or reuse the published tag" in releasing
     assert "Public repositories support this ruleset on GitHub Free" in releasing
     assert "private vulnerability reporting" in releasing
@@ -131,8 +131,8 @@ def test_release_check_is_deterministic_and_keeps_external_checks_explicit() -> 
     assert "just release-check" in releasing
     assert "just audit" in releasing
     assert "just test-live" in releasing
-    assert "v1.0.0" in releasing
-    assert "archive v1-public-release-readiness" in releasing
+    assert "v1.0.1" in releasing
+    assert "archive <change-id>" in releasing
 
 
 def test_public_security_policy_is_private_and_actionable() -> None:

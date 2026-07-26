@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 class PackageManifest(BaseModel):
@@ -39,10 +39,10 @@ def test_image_workflow_maps_v1_tag_to_release_aliases() -> None:
     assert "type=raw,value=latest" in image
 
 
-def test_release_documents_name_the_first_stable_tag() -> None:
+def test_release_documents_name_the_current_stable_tag() -> None:
     releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
-    evidence = (ROOT / "docs" / "releases" / "v1.0.0.md").read_text(encoding="utf-8")
+    evidence = (ROOT / "docs" / "releases" / "v1.0.1.md").read_text(encoding="utf-8")
 
-    assert "package version is\n`1.0.0`" in releasing
-    assert "Git tag is `v1.0.0`" in releasing
-    assert "Git tag: `v1.0.0`" in evidence
+    assert f"package version is\n`{VERSION}`" in releasing
+    assert f"Git tag is `v{VERSION}`" in releasing
+    assert f"Git tag: `v{VERSION}`" in evidence
