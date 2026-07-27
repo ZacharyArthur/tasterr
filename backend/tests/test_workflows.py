@@ -11,6 +11,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
+DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 ACTION_REF = re.compile(r"uses:\s+[^@\s]+@(?P<sha>[0-9a-f]{40})\s+#\s+v[^\s]+\s*$")
 
 
@@ -27,6 +28,29 @@ def test_workflows_are_valid_yaml() -> None:
         assert yaml.safe_load(path.read_text(encoding="utf-8")) is not None
 
 
+def test_dependabot_groups_every_repository_ecosystem_weekly() -> None:
+    config = yaml.safe_load(DEPENDABOT.read_text(encoding="utf-8"))
+    group = config["multi-ecosystem-groups"]["dependencies"]
+
+    assert group["schedule"] == {"interval": "weekly"}
+    assert group["commit-message"]["prefix"] == "chore(deps)"
+    assert {
+        (
+            update["package-ecosystem"],
+            tuple(update.get("directories") or [update["directory"]]),
+        )
+        for update in config["updates"]
+    } == {
+        ("uv", ("/backend",)),
+        ("npm", ("/frontend",)),
+        ("github-actions", ("/",)),
+        ("docker", ("/", "/.devcontainer")),
+        ("devcontainers", ("/",)),
+    }
+    assert all(update["patterns"] == ["*"] for update in config["updates"])
+    assert all(update["multi-ecosystem-group"] == "dependencies" for update in config["updates"])
+
+
 def test_every_third_party_action_is_immutable_and_versioned() -> None:
     for path in WORKFLOWS.glob("*.yml"):
         uses_lines = [
@@ -41,12 +65,20 @@ def test_every_third_party_action_is_immutable_and_versioned() -> None:
 
 def test_pull_request_gate_runs_all_blocking_local_contracts() -> None:
     gate = _text("gate.yml")
+    jobs = yaml.safe_load(gate)["jobs"]
 
     assert "pull_request:" in gate
     assert "\n  push:" not in gate
     assert "paths:" not in gate
     assert "paths-ignore:" not in gate
     assert "permissions:\n  contents: read" in gate
+    assert "group: gate-${{ github.event.pull_request.number }}" in gate
+    assert "cancel-in-progress: true" in gate
+    assert {name: job["timeout-minutes"] for name, job in jobs.items()} == {
+        "check": 15,
+        "e2e": 15,
+        "container-smoke": 15,
+    }
     assert "  check:" in gate
     assert "  e2e:" in gate
     assert "  container-smoke:" in gate
@@ -66,12 +98,27 @@ def test_image_workflow_publishes_only_after_native_smoke() -> None:
     assert 'tags:\n      - "v*"' in image
     assert push_config["paths-ignore"] == ["docs/**", "README.md"]
     assert "permissions:\n  contents: read" in image
+    assert image_config["concurrency"] == {
+        "group": "image-${{ github.ref }}",
+        "cancel-in-progress": False,
+    }
+    assert {name: job["timeout-minutes"] for name, job in image_config["jobs"].items()} == {
+        "smoke": 15,
+        "publish": 30,
+    }
     assert "needs: smoke" in image
     assert image.index("just container-smoke") < image.index("docker/login-action")
     assert "fetch-depth: 0" in image
     assert "^v[0-9]+\\.[0-9]+\\.[0-9]+$" in image
     assert 'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main' in image
     assert "packages: write" in image
+    assert "attestations: write" in image
+    assert "id-token: write" in image
+    assert "id: build" in image
+    assert "actions/attest@" in image
+    assert "subject-name: ghcr.io/${{ github.repository }}\n" in image
+    assert "subject-digest: ${{ steps.build.outputs.digest }}" in image
+    assert "push-to-registry: true" in image
     assert "platforms: linux/amd64,linux/arm64" in image
     assert "type=raw,value=main" in image
     sha_rules = [line.strip() for line in image.splitlines() if line.strip().startswith("type=sha")]

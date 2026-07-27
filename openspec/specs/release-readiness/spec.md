@@ -64,8 +64,8 @@ The root `SECURITY.md` SHALL state the supported release line, direct vulnerabil
 reports to GitHub private vulnerability reporting, tell reporters not to disclose
 secrets or household data, and describe the acknowledgement/remediation expectations.
 The release procedure SHALL require private vulnerability reporting, secret scanning,
-and Dependabot alerts to be enabled before a public repository or package is
-announced.
+Dependabot alerts and updates, immutable releases, and protected version tags to be
+enabled before a public repository or package is announced.
 
 #### Scenario: Reporter finds a private channel
 - **WHEN** a security researcher opens the repository security policy
@@ -74,8 +74,8 @@ announced.
 
 #### Scenario: Public release checks repository security features
 - **WHEN** the operator prepares to make the repository or package public
-- **THEN** the release checklist requires private reporting, secret scanning, and
-  dependency alerts to be enabled first
+- **THEN** the release checklist requires private reporting, secret scanning,
+  dependency maintenance, immutable releases, and protected version tags first
 
 ### Requirement: Deterministic pre-release verification is repeatable
 
@@ -128,13 +128,13 @@ announcement, every template owner/repository marker MUST be replaced by the fin
 coordinate. The first repository bootstrap SHALL begin with an empty public
 repository and Actions disabled while the existing base and reviewed change branches
 are imported. The readiness change SHALL merge through the required `check`, `e2e`,
-and `container-smoke` pull-request gates before the main workflow publishes an
-immutable candidate. The release procedure SHALL verify that candidate's
-multi-architecture manifest, public package visibility, and anonymous clean
-installation before creating the stable tag. It SHALL verify the tagged image's
-`1.0.0`, `1.0`, `1`, `latest`, and immutable SHA tags and fresh deployment before
-the GitHub Release, and SHALL document rollback by immutable image digest and
-validated SQLite backup.
+`container-smoke`, and `CodeQL` pull-request gates before the main workflow publishes
+an immutable candidate with verifiable build provenance. The release procedure SHALL
+verify that candidate's multi-architecture manifest, artifact attestation, public
+package visibility, and anonymous clean installation before creating the stable tag.
+It SHALL verify the tagged image's `1.0.0`, `1.0`, `1`, `latest`, and immutable SHA
+tags, artifact attestation, and fresh deployment before the immutable GitHub Release,
+and SHALL document rollback by immutable image digest and validated SQLite backup.
 
 #### Scenario: First stable tag follows the atomic merge
 
@@ -167,5 +167,5 @@ validated SQLite backup.
 
 - **WHEN** the stable image workflow finishes for `v1.0.0`
 - **THEN** the operator confirms every documented stable and immutable tag, verifies
-  amd64 and arm64 manifests, and completes a fresh-start smoke from the tagged GHCR
-  image before publishing the GitHub Release
+  amd64 and arm64 manifests plus the image attestation, and completes a fresh-start
+  smoke from the tagged GHCR image before publishing the immutable GitHub Release

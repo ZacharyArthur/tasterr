@@ -1,6 +1,7 @@
 """Static and Compose-rendered contracts for the production container smoke."""
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -157,8 +158,19 @@ def test_optional_override_requires_network_name(tmp_path: Path) -> None:
 def test_dockerfile_and_smoke_are_fail_closed() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     smoke = SMOKE.read_text(encoding="utf-8")
+    from_lines = [line for line in dockerfile.splitlines() if line.startswith("FROM ")]
+    image_refs = [line.split()[1] for line in from_lines]
+    stage_names = {line.split()[-1] for line in from_lines if " AS " in line}
+    copy_sources = {
+        line.removeprefix("COPY --from=").split()[0]
+        for line in dockerfile.splitlines()
+        if line.startswith("COPY --from=")
+    }
 
     assert "USER app" in dockerfile
+    assert len(image_refs) == 3
+    assert all(re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", ref) for ref in image_refs)
+    assert copy_sources <= stage_names
     assert "ARG " not in dockerfile
     assert "npm ci" in dockerfile
     assert dockerfile.count("uv sync --frozen") == 2

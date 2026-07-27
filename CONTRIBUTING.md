@@ -1,7 +1,7 @@
 # Contributing to Tasterr
 
 Thanks for helping improve Tasterr. Small, focused changes are the easiest to review
-and maintain.
+and maintain. Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Before you start
 
@@ -74,8 +74,9 @@ Before opening a pull request:
 4. Complete the pull request template. Use the Conventional Commit subject as the
    pull request title.
 
-The required PR checks are `check`, `e2e`, and `container-smoke`. To reproduce all
-three locally, install Chromium once inside the devcontainer and run:
+The required PR checks are `check`, `e2e`, `container-smoke`, and GitHub's `CodeQL`
+analysis. To reproduce the three repository-owned checks locally, install Chromium
+once inside the devcontainer and run:
 
 ```console
 cd frontend && npx playwright install --with-deps chromium

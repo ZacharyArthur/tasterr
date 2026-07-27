@@ -1,5 +1,6 @@
 # AI tool artifacts (AGENTS.md, CLAUDE.md, and openspec/ ARE committed)
 .claude/
+.agents/
 .cursor/
 .codex/
 .gemini/

@@ -5,6 +5,8 @@ This procedure is for stable v1 releases. The current package version is
 only after all release changes are squash-merged to protected `main`. The published
 `v1.0.0` tag is retained for provenance, but no GitHub Release was announced for it;
 `v1.0.1` is the immutable-tag fix-forward and first announced release.
+The v1.0.1 image and GitHub Release predate image attestations and immutable GitHub
+Releases; those guarantees apply to later publications.
 
 ## 1. Prepare the required devcontainer
 
@@ -29,10 +31,11 @@ Confirm Uvicorn access logs are disabled and the deployment proxy omits or redac
 request query strings.
 
 Before any public announcement, enable GitHub private vulnerability reporting,
-secret scanning (including push protection where available), and Dependabot alerts.
-Confirm `.env.example` and test fixtures contain invented placeholders only, and
-review staged files for live URLs, identities, viewing data, credentials, and
-generated failure artifacts.
+secret scanning (including push protection where available), Dependabot alerts and
+updates, and immutable releases. Confirm an active `v*` tag ruleset blocks updates
+and deletion. Confirm `.env.example` and test fixtures contain invented placeholders
+only, and review staged files for live URLs, identities, viewing data, credentials,
+and generated failure artifacts.
 
 ## 3. Run deterministic checks
 
@@ -129,23 +132,28 @@ For the first publication, use this order:
    `fastapi`, `react`, and `docker`. The source history must have passed the
    documented secret review before this public creation.
 2. Enable Issues. Disable Wiki, Projects, and Discussions. Allow squash merging
-   only, enable automatic head-branch deletion, keep the default `GITHUB_TOKEN`
-   permissions read-only, and leave workflow pull-request creation/approval
-   disabled. Require external Actions to be pinned to full commit SHAs.
+   only with pull-request titles as the default squash-commit title, enable automatic
+   head-branch deletion, keep the default `GITHUB_TOKEN` permissions read-only, and
+   leave workflow pull-request creation/approval disabled. Require external Actions
+   to be pinned to full commit SHAs.
 3. Disable Actions before the first push. Push the existing base `main` and the
    reviewed `change/v1-public-release-readiness` branch, then re-enable Actions.
    This prevents the old `main` commit from publishing a container during import.
-4. Enable the dependency graph, Dependabot alerts, Dependabot security updates,
-   secret scanning, push protection, and private vulnerability reporting. The image
-   workflow's publishing job is the only job granted `packages: write`; all other
-   workflow permissions remain read-only.
-5. Open the readiness PR against `main` and let `check`, `e2e`, and
-   `container-smoke` report at least once.
+4. Enable the dependency graph, Dependabot alerts and security updates, secret
+   scanning, push protection, private vulnerability reporting, and immutable
+   releases. Confirm GitHub accepts the committed Dependabot version-update
+   configuration. The image workflow's publishing job is the only job granted
+   package, attestation, and OIDC write permissions; all other workflow permissions
+   remain read-only.
+5. Open the readiness PR against `main` and let `check`, `e2e`, `container-smoke`,
+   and `CodeQL` report at least once.
 6. Configure an active `main` ruleset that requires a pull request with zero approving
-   reviews, successful `check`, `e2e`, and `container-smoke` jobs, linear history,
-   conversation resolution, and blocks force pushes and deletion. Restrict merge
-   type to squash. Public repositories support this ruleset on GitHub Free.
-7. Wait for all three required jobs, self-review, resolve every conversation, and
+   reviews, successful `check`, `e2e`, `container-smoke`, and `CodeQL` jobs, linear
+   history, conversation resolution, and blocks force pushes and deletion. Restrict
+   merge type to squash. Public repositories support this ruleset on GitHub Free.
+7. Configure an active `v*` tag ruleset that permits creation but blocks tag updates
+   and deletion without bypass.
+8. Wait for all four required jobs, self-review, resolve every conversation, and
    squash merge. Do not tag the unmerged change branch.
 
 Update local `main` to the squash commit and rerun the deterministic release check:
@@ -159,7 +167,13 @@ npx @devcontainers/cli exec --workspace-folder . just release-check
 The image workflow on the merged `main` commit publishes public `main` and
 commit-addressed `sha-<full-commit>` candidate tags. Before tagging:
 
-1. Inspect the candidate manifest and confirm both `linux/amd64` and `linux/arm64`.
+1. Inspect the candidate manifest, confirm both `linux/amd64` and `linux/arm64`, and
+   verify its GitHub artifact attestation:
+
+   ```console
+   gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:sha-<full-commit> -R ZacharyArthur/tasterr
+   ```
+
 2. Confirm that the GHCR package is linked to the public repository and explicitly
    public; repository and package visibility are separate controls.
 3. From an environment with no GHCR credentials, verify an anonymous pull. Then use
@@ -193,18 +207,26 @@ manifest and confirm both platforms:
 npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.0.1
 ```
 
+The historical v1.0.1 image has no attestation. For subsequent releases, substitute
+the release version and verify the stable image attestation:
+
+```console
+gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:<version> -R ZacharyArthur/tasterr
+```
+
 Perform a fresh install in an empty directory with a new external network, disposable
 `.env`, and new Compose project. Set
 `TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:1.0.1`, run `docker compose pull` and
 `docker compose up -d --no-build`, then verify health, SPA serving, non-root uid, and
 named-volume persistence. Delete every disposable resource after verification.
 
-Publish release notes only after the manifest and fresh install pass. Summarize user-
-visible changes, upgrade steps, and known limitations; pin the `1.0.1` digest as the
-released artifact and do not reproduce private release evidence. Publish the GitHub
-Release only after `1.0.1`, `1.0`, `1`, and `latest` resolve to the expected release
-commit, the `sha-<full-commit>` candidate still resolves to its recorded pre-tag
-digest, and the tagged clean-install smoke passes.
+Publish release notes only after the applicable manifest, attestation, and fresh
+install checks pass. Summarize user-visible changes, upgrade steps, and known
+limitations; then pin the `1.0.1` digest as the released artifact without reproducing
+private evidence. The historical v1.0.1 GitHub Release is mutable. For subsequent
+releases, publish with repository immutability enabled only after every stable alias
+resolves to the expected release commit, the `sha-<full-commit>` candidate still
+resolves to its recorded pre-tag digest, and the tagged clean-install smoke passes.
 
 For subsequent releases, do not create a post-release evidence commit. Record the
 final digest, publication time, alias verification, and tagged-image smoke only in
