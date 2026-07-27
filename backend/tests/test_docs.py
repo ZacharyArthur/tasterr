@@ -45,10 +45,12 @@ def test_readme_links_every_living_operator_document() -> None:
         "docs/CONFIGURATION.md",
         "docs/ARCHITECTURE.md",
         "SECURITY.md",
+        "CODE_OF_CONDUCT.md",
         "docs/SECURITY.md",
         "docs/RELEASING.md",
     ):
         assert f"]({target})" in readme
+        assert (ROOT / target).is_file()
     assert "docker compose up -d --build" in readme
     assert "SEERR_INTERNAL_URL" in readme
     assert "A shared Docker network is not required" in readme
@@ -82,7 +84,7 @@ def test_readme_links_every_living_operator_document() -> None:
     evidence = _read(DOCS / "releases" / "v1.0.1.md")
     assert "OWNER/REPOSITORY" not in readme + releasing + evidence
     assert "empty **public** `ZacharyArthur/tasterr` repository" in releasing
-    assert "`check`, `e2e`, and `container-smoke`" in releasing
+    assert "`check`, `e2e`, `container-smoke`, and `CodeQL`" in releasing
     assert "leave the existing `sha-<full-commit>` candidate unchanged" in releasing
     assert "pin the `1.0.1` digest" in releasing
     assert "GitHub Release is the authoritative post-tag record" in releasing
@@ -90,6 +92,9 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "do not move, delete, or reuse the published tag" in releasing
     assert "Public repositories support this ruleset on GitHub Free" in releasing
     assert "private vulnerability reporting" in releasing
+    assert "immutable releases" in releasing
+    assert "gh attestation verify" in releasing
+    assert "predates image attestations and immutable GitHub Releases" in evidence
     assert "do not use a create-and-push shortcut" in releasing
 
 

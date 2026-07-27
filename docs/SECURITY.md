@@ -87,11 +87,13 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] New dependency: justified against the AGENTS.md stack slate in design.md; check
       maintenance status and provenance before adding.
 - [ ] `uv.lock` / `package-lock.json` updated and committed together with the change.
-- [ ] Dockerfile: non-root user, minimal base image, no secrets in layers or build args.
+- [ ] Dockerfile: non-root user, minimal digest-pinned base images, no secrets in
+      layers or build args.
 - [ ] Native container smoke proves health, SPA, non-root uid, named-volume
       persistence, isolated placeholder configuration, and unconditional cleanup.
 - [ ] Every third-party workflow action is pinned to a reviewed full commit SHA;
-      permissions default read-only and package write exists only on the publish job.
+      permissions default read-only, and package/attestation/OIDC write exists only
+      on the publish job.
 
 ### Logging and release evidence
 
@@ -111,6 +113,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] GitHub private vulnerability reporting is enabled.
 - [ ] Secret scanning and push protection (where available) are enabled.
 - [ ] Dependabot alerts are enabled and triaged.
+- [ ] Immutable releases are enabled and a `v*` tag ruleset blocks release-tag
+      updates and deletion.
 - [ ] `.env.example`, fixtures, history, staged files, and release notes are reviewed
       for live secrets, URLs, identities, and household data.
 - [ ] Root licensing, package metadata, published image license text, and the public
@@ -125,8 +129,9 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 - [ ] `just release-check` passes in the devcontainer (ordinary gate + browser +
       native container smoke).
-- [ ] GHCR workflow permissions/tags are reviewed; stable manifests and a fresh
-      registry-image deployment are verified before announcement.
+- [ ] GHCR workflow permissions/tags are reviewed; stable manifests, image
+      attestations, and a fresh registry-image deployment are verified before
+      announcement.
 
 ## Working notes
 

@@ -97,9 +97,9 @@ dependencies). Walk the relevant checklist whenever touching `api/`, `auth/`,
 
 ## Git workflow
 
-- `main` is always releasable. Branch per change: `change/<openspec-change-id>`;
-  `fix/<slug>` / `chore/<slug>` for non-spec work. Trivial fixes (typos, docs,
-  dep bumps) may commit directly to `main`.
+- `main` is always releasable. Every change lands through a pull request. Branch per
+  change: `change/<openspec-change-id>`; `fix/<slug>` / `chore/<slug>` for non-spec
+  work. Trivial fixes (typos, docs, dep bumps) may skip OpenSpec, not the branch/PR.
 - **Conventional Commits**: `feat:` `fix:` `refactor:` `docs:` `test:` `chore:`,
   imperative subject <= 72 chars.
 - PRs: **squash merge**, self-approved. PR title = the Conventional Commit subject
