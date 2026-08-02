@@ -1,8 +1,8 @@
 # Keep uv on a FROM line so Dependabot can update its digest.
-FROM ghcr.io/astral-sh/uv:0.11@sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c AS uv
+FROM ghcr.io/astral-sh/uv:0.11@sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7 AS uv
 
 # Build the SPA.
-FROM node:24-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS frontend
+FROM node:25-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -10,7 +10,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Serve the API and built SPA from the Python runtime.
-FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6
 COPY --from=uv /uv /uvx /usr/local/bin/
 
 ENV PYTHONUNBUFFERED=1 \
