@@ -1,6 +1,6 @@
 [project]
 name = "tasterr"
-version = "1.0.1"
+version = "1.0.2"
 description = "Self-hosted, Netflix-style discovery front-end for a household media stack"
 license = "AGPL-3.0-only"
 requires-python = ">=3.13"
@@ -12,7 +12,7 @@ dependencies = [
     "aiosqlite>=0.21",
     "alembic>=1.15",
     "httpx>=0.28",
-    "cryptography>=44",
+    "cryptography>=50",
     "cachetools>=7.1.4",
 ]
 

@@ -2,7 +2,7 @@
 // lazy explain, and the confirmed reset. Signal failures never disturb
 // browsing — the worst case is an interaction the profile didn't learn from.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	getExplain,
 	type MediaType,
@@ -28,6 +28,7 @@ export function useTasteToggle(
 ): { active: boolean; pending: boolean; toggle: () => void } {
 	const queryClient = useQueryClient();
 	const [active, setActive] = useState(initial);
+	useEffect(() => setActive(initial), [initial]);
 	const mutation = useMutation({
 		mutationFn: (wasActive: boolean) => postSignal(type, id, kind, wasActive),
 		onError: (_error, wasActive) => setActive(wasActive), // revert the flip

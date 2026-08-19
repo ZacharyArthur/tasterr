@@ -50,6 +50,7 @@ def _detail(i: int) -> MediaDetail:
         year=2020,
         vote_average=7.0,
         tagline="",
+        external_url=f"https://www.themoviedb.org/movie/{i}",
         genres=[Genre(id=18, name="Drama")],
         runtime=100,
         release_date="2020-01-01",

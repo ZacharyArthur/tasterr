@@ -41,6 +41,7 @@ def _detail(tmdb_id: int, recommendations: list[MediaSummary]) -> MediaDetail:
     return MediaDetail(
         **_summary(tmdb_id).model_dump(),
         tagline="",
+        external_url=f"https://www.themoviedb.org/movie/{tmdb_id}",
         genres=[],
         runtime=None,
         release_date=None,

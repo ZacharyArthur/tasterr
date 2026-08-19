@@ -41,6 +41,8 @@ export function DetailModal() {
 	const valid = isMediaType(type) && Number.isFinite(id) && id > 0;
 	const detail = useTitle(valid ? type : "movie", valid ? id : 0);
 	const dialogRef = useRef<HTMLDivElement>(null);
+	const titleKey = `${type}:${id}`;
+	const previousTitleKey = useRef(titleKey);
 
 	// Opening a detail is deliberate browse intent (SPEC §8) — recorded
 	// fire-and-forget so a failed signal never disturbs the view.
@@ -49,8 +51,21 @@ export function DetailModal() {
 			recordDetailOpen(type, id);
 		}
 	}, [valid, type, id]);
+	useEffect(() => {
+		const overflow = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = overflow;
+		};
+	}, []);
 
 	useFocusTrap(dialogRef, close);
+	useEffect(() => {
+		if (previousTitleKey.current !== titleKey) {
+			previousTitleKey.current = titleKey;
+			dialogRef.current?.focus();
+		}
+	}, [titleKey]);
 
 	return (
 		<div className="fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/70 sm:p-6">
@@ -139,6 +154,15 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 					<p className="italic text-app-subtle">{detail.tagline}</p>
 				)}
 				<p className="text-app-text">{detail.overview}</p>
+				<a
+					href={detail.external_url}
+					target="_blank"
+					rel="noopener noreferrer"
+					aria-label="View on TMDB (opens in a new tab)"
+					className="min-h-11 self-start text-sm text-app-subtle underline-offset-2 hover:text-app-text hover:underline focus-visible:outline-2 focus-visible:outline-app-accent"
+				>
+					View on TMDB <span aria-hidden="true">↗</span>
+				</a>
 
 				<TasteControls detail={detail} />
 

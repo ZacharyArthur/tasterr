@@ -226,6 +226,7 @@ def to_detail(raw: TmdbDetail, media: MediaType, region: str) -> MediaDetail:
         year=parse_year(raw.release_date or raw.first_air_date),
         vote_average=raw.vote_average,
         tagline=raw.tagline or "",
+        external_url=f"https://www.themoviedb.org/{media}/{raw.id}",
         genres=[Genre(id=g.id, name=g.name) for g in raw.genres],
         runtime=runtime,
         release_date=raw.release_date or raw.first_air_date,

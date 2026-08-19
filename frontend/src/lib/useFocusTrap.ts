@@ -42,7 +42,10 @@ export function useFocusTrap(
 			}
 			const first = items[0];
 			const last = items.at(-1);
-			if (event.shiftKey && document.activeElement === first) {
+			if (!items.includes(document.activeElement as HTMLElement)) {
+				event.preventDefault();
+				(event.shiftKey ? last : first)?.focus();
+			} else if (event.shiftKey && document.activeElement === first) {
 				event.preventDefault();
 				last?.focus();
 			} else if (!event.shiftKey && document.activeElement === last) {
