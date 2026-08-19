@@ -6,12 +6,15 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
 import { DetailModal } from "./DetailModal";
+import { MediaCard } from "./MediaCard";
 
 afterEach(() => {
 	cleanup();
+	document.body.style.overflow = "";
 	vi.unstubAllGlobals();
 });
 
@@ -25,6 +28,7 @@ const DETAIL = {
 	year: 2020,
 	vote_average: 7,
 	tagline: "A tagline",
+	external_url: "https://www.themoviedb.org/movie/42",
 	genres: [{ id: 18, name: "Drama" }],
 	runtime: 120,
 	release_date: "2020-01-01",
@@ -51,16 +55,36 @@ const DETAIL = {
 	number_of_seasons: null,
 };
 
-function renderModal() {
+function summary(id: number, title: string) {
+	return {
+		id,
+		media_type: "movie" as const,
+		title,
+		overview: "",
+		poster_path: null,
+		backdrop_path: null,
+		year: 2021,
+		vote_average: 6,
+	};
+}
+
+function renderModal(
+	initialEntries: ComponentProps<typeof MemoryRouter>["initialEntries"] = [
+		"/title/movie/42",
+	],
+) {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<MemoryRouter initialEntries={["/title/movie/42"]}>
+			<MemoryRouter initialEntries={initialEntries}>
 				<Routes>
 					<Route path="/title/:type/:id" element={<DetailModal />} />
-					<Route path="/" element={null} />
+					<Route
+						path="/"
+						element={<MediaCard item={summary(42, "Deep Movie")} />}
+					/>
 				</Routes>
 			</MemoryRouter>
 		</QueryClientProvider>,
@@ -85,6 +109,14 @@ test("renders the title detail sections", async () => {
 	expect(screen.getByText("Netflix")).toBeTruthy();
 	expect(screen.getByText("Actor One")).toBeTruthy();
 	expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+	const external = screen.getByRole("link", {
+		name: "View on TMDB (opens in a new tab)",
+	});
+	expect(external.getAttribute("href")).toBe(
+		"https://www.themoviedb.org/movie/42",
+	);
+	expect(external.getAttribute("target")).toBe("_blank");
+	expect(external.getAttribute("rel")).toBe("noopener noreferrer");
 });
 
 test("traps focus, marks the browse shell inert, and cleans up on Escape", async () => {
@@ -116,10 +148,100 @@ test("traps focus, marks the browse shell inert, and cleans up on Escape", async
 	close.focus();
 	fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
 	expect(document.activeElement).toBe(last);
+	dialog.focus();
+	fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+	expect(document.activeElement).toBe(last);
+	dialog.focus();
+	fireEvent.keyDown(document, { key: "Tab" });
+	expect(document.activeElement).toBe(close);
 	fireEvent.keyDown(document, { key: "Escape" });
 	expect(screen.queryByRole("dialog")).toBeNull();
 	expect(background.inert).toBe(false);
 	background.remove();
+});
+
+test("locks body scrolling and restores the previous overflow on close", async () => {
+	document.body.style.overflow = "scroll";
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(
+			async () =>
+				({ ok: true, status: 200, json: async () => DETAIL }) as Response,
+		),
+	);
+	renderModal();
+
+	expect(document.body.style.overflow).toBe("hidden");
+	fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+	expect(document.body.style.overflow).toBe("scroll");
+});
+
+test("related titles replace the modal route and close to the browse view", async () => {
+	stubTasteFetch({
+		"/api/v1/title/movie/42": {
+			...DETAIL,
+			recommendations: [summary(43, "Other Movie")],
+		},
+		"/api/v1/title/movie/43": {
+			...DETAIL,
+			id: 43,
+			title: "Other Movie",
+			external_url: "https://www.themoviedb.org/movie/43",
+			recommendations: [summary(44, "Third Movie")],
+		},
+		"/api/v1/title/movie/44": {
+			...DETAIL,
+			id: 44,
+			title: "Third Movie",
+			external_url: "https://www.themoviedb.org/movie/44",
+		},
+		"/api/v1/signals": { recorded: true },
+		"/api/v1/availability": {},
+	});
+	renderModal(["/"]);
+
+	fireEvent.click(screen.getByRole("link", { name: /Deep Movie/ }));
+	const related = await screen.findByRole("link", { name: /Other Movie/ });
+	related.focus();
+	fireEvent.click(related);
+	await screen.findByRole("heading", { name: "Other Movie" });
+	expect(document.activeElement).toBe(screen.getByRole("dialog"));
+	fireEvent.click(await screen.findByRole("link", { name: /Third Movie/ }));
+	expect(
+		await screen.findByRole("heading", { name: "Third Movie" }),
+	).toBeTruthy();
+
+	fireEvent.click(screen.getByRole("button", { name: "Close" }));
+	expect(await screen.findByRole("link", { name: /Deep Movie/ })).toBeTruthy();
+	expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("a related title from a direct detail still closes to Home", async () => {
+	stubTasteFetch({
+		"/api/v1/title/movie/42": {
+			...DETAIL,
+			recommendations: [summary(43, "Other Movie")],
+		},
+		"/api/v1/title/movie/43": {
+			...DETAIL,
+			id: 43,
+			title: "Other Movie",
+			external_url: "https://www.themoviedb.org/movie/43",
+		},
+		"/api/v1/signals": { recorded: true },
+		"/api/v1/availability": {},
+	});
+	renderModal();
+
+	fireEvent.click(await screen.findByRole("link", { name: /Other Movie/ }));
+	expect(
+		await screen.findByRole("heading", { name: "Other Movie" }),
+	).toBeTruthy();
+	fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+	expect(await screen.findByRole("link", { name: /Deep Movie/ })).toBeTruthy();
+	expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 // ── Taste affordances (M4) ───────────────────────────────────────────────────
@@ -218,6 +340,67 @@ test("watchlist toggles optimistically and posts add then retract", async () => 
 	);
 });
 
+test("reopened cached detail adopts the refreshed watchlist state", async () => {
+	let watchlisted = false;
+	let titleReads = 0;
+	let releaseRefresh = () => {};
+	const refreshBlocked = new Promise<void>((resolve) => {
+		releaseRefresh = resolve;
+	});
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.includes("/api/v1/title/movie/42")) {
+				titleReads += 1;
+				if (titleReads > 1) {
+					await refreshBlocked;
+				}
+				return {
+					ok: true,
+					status: 200,
+					json: async () => ({
+						...DETAIL,
+						taste: { watchlisted, hidden: false },
+					}),
+				} as Response;
+			}
+			if (url.includes("/api/v1/signals")) {
+				const body =
+					typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+				if (body?.kind === "watchlist") {
+					watchlisted = !body.retract;
+				}
+				return {
+					ok: true,
+					status: 200,
+					json: async () => ({ recorded: true }),
+				} as Response;
+			}
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({}),
+			} as Response;
+		}),
+	);
+	renderModal(["/"]);
+
+	fireEvent.click(screen.getByRole("link", { name: /Deep Movie/ }));
+	fireEvent.click(await screen.findByRole("button", { name: "＋ My List" }));
+	await waitFor(() => expect(watchlisted).toBe(true));
+	fireEvent.click(screen.getByRole("button", { name: "Close" }));
+	fireEvent.click(await screen.findByRole("link", { name: /Deep Movie/ }));
+
+	expect(
+		await screen.findByRole("button", { name: "＋ My List" }),
+	).toBeTruthy();
+	releaseRefresh();
+	expect(
+		await screen.findByRole("button", { name: "✓ In My List" }),
+	).toBeTruthy();
+});
+
 test("not-interested offers an undo and a failed post reverts the flip", async () => {
 	stubTasteFetch({ "/api/v1/signals": "reject" });
 	renderModal();
@@ -252,16 +435,6 @@ test("toggle state resets when navigating between cached titles in-modal", async
 	// The stale-state hazard needs a *cached* target: uncached navigations
 	// unmount DetailBody while loading, which resets state by accident.
 	// Visit 42 → 43 → back to 42 (now cached, renders synchronously).
-	const summary = (id: number, title: string) => ({
-		id,
-		media_type: "movie",
-		title,
-		overview: "",
-		poster_path: null,
-		backdrop_path: null,
-		year: 2021,
-		vote_average: 6,
-	});
 	stubTasteFetch({
 		"/api/v1/title/movie/42": {
 			...DETAIL,

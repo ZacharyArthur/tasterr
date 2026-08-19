@@ -61,6 +61,7 @@ def _detail(i: int) -> MediaDetail:
         year=2020,
         vote_average=7.0,
         tagline="",
+        external_url=f"https://www.themoviedb.org/movie/{i}",
         genres=[Genre(id=18, name="Drama")],
         runtime=100,
         release_date="2020-01-01",
@@ -238,6 +239,7 @@ def test_title_detail_returns_media_detail(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json()["id"] == 42
+    assert response.json()["external_url"] == "https://www.themoviedb.org/movie/42"
 
 
 def test_title_invalid_type_is_rejected(tmp_path: Path) -> None:

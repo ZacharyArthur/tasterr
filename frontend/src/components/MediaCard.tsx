@@ -1,5 +1,5 @@
 import type { KeyboardEventHandler } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, type Location, useLocation } from "react-router";
 import type { MediaSummary } from "../lib/api";
 import { useAvailabilityFor } from "../lib/availability";
 import { posterUrl } from "../lib/images";
@@ -15,12 +15,21 @@ export function MediaCard({
 	const location = useLocation();
 	const poster = posterUrl(item.poster_path);
 	const availability = useAvailabilityFor(item);
+	const inDetail = location.pathname.startsWith("/title/");
+	const backgroundLocation = (
+		location.state as { backgroundLocation?: Location } | null
+	)?.backgroundLocation;
 	return (
 		<Link
 			data-rail-item
 			onKeyDown={onKeyDown}
 			to={`/title/${item.media_type}/${item.id}`}
-			state={{ backgroundLocation: location }}
+			replace={inDetail}
+			state={
+				inDetail
+					? backgroundLocation && { backgroundLocation }
+					: { backgroundLocation: location }
+			}
 			className="group block w-36 shrink-0 rounded-md focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-app-accent sm:w-44"
 		>
 			<div className="relative aspect-[2/3] overflow-hidden rounded-md bg-app-muted">

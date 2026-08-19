@@ -503,6 +503,8 @@ export interface components {
             vote_average: number;
             /** Tagline */
             tagline: string;
+            /** External Url */
+            external_url: string;
             /**
              * Genres
              * @default []

@@ -142,6 +142,7 @@ def _movie_detail() -> TmdbDetail:
 
 def test_to_detail_maps_movie_fields() -> None:
     detail = to_detail(_movie_detail(), "movie", "US")
+    assert detail.external_url == "https://www.themoviedb.org/movie/42"
     assert detail.runtime == 120
     assert detail.certification == "PG-13"
     assert detail.logo_path == "/en.png"
@@ -165,6 +166,7 @@ def test_to_detail_tv_drops_specials_and_reads_content_rating() -> None:
         ),
     )
     detail = to_detail(raw, "tv", "US")
+    assert detail.external_url == "https://www.themoviedb.org/tv/5"
     assert [s.season_number for s in detail.seasons] == [1]
     assert detail.certification == "TV-MA"
 

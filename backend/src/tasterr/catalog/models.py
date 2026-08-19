@@ -87,6 +87,7 @@ class TasteFlags(BaseModel):
 
 class MediaDetail(MediaSummary):
     tagline: str
+    external_url: str
     genres: list[Genre] = []
     runtime: int | None
     release_date: str | None
