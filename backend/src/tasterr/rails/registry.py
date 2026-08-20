@@ -184,7 +184,7 @@ def home_providers() -> list[RailProvider]:
         ),
         RailProvider(
             "recently-added",
-            "Recently Added",
+            "Recent Releases",
             "standard",
             lambda ctx: ctx.catalog.discover(
                 "movie",
@@ -244,7 +244,7 @@ def service_provider(service: ServiceOption) -> RailProvider:
         return await ctx.catalog.discover(
             "movie",
             sort_by="primary_release_date.desc",
-            release_gte=_days_ago(150),
+            release_gte=_days_ago(365),
             release_lte=_today(),
             min_votes=3,
             service_ids=[service.provider_id],
@@ -252,7 +252,7 @@ def service_provider(service: ServiceOption) -> RailProvider:
 
     return RailProvider(
         f"service-{service.provider_id}",
-        f"New on {service.name}",
+        f"Recent Releases on {service.name}",
         "standard",
         fetch,
         RailType.SERVICES,

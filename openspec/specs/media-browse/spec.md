@@ -2,21 +2,27 @@
 
 ## Purpose
 TBD - created by archiving change m2-browse. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Home feed of a hero and composed rails
 
 `GET /api/v1/home` SHALL return the enabled hero section and an ordered list of
 enabled rails, each a titled list of media summaries. The global runtime snapshot
 SHALL gate registered provider types before they fetch. The provider set SHALL
-include non-personalized trending, popular-in-region, recently-added, genre, and
+include non-personalized trending, popular-in-region, recent-release, genre, and
 bounded per-selected-service rails plus the authenticated user's
-recommended-for-you, because-you-watched, and my-list providers. Dynamic genre
-and service instances share their registered type gate; absent disablement means
-enabled, including for a newly registered type. A provider failure SHALL degrade
-the feed to fewer rails rather than fail the request, and rails with fewer than a
-minimum number of items SHALL be omitted. Titles SHALL be de-duplicated across
-returned rails so a title does not repeat later. Disabling every provider SHALL
-return a valid empty feed rather than override the admin's choice.
+recommended-for-you, because-you-watched, and my-list providers. The generic
+release rail SHALL be titled `Recent Releases`. Each per-selected-service rail
+SHALL use current flatrate movie availability and movie release dates from the
+preceding 365 days and SHALL be titled `Recent Releases on {service}`. Dynamic
+genre and service instances share their registered type gate; absent disablement
+means enabled, including for a newly registered type. A provider failure SHALL
+degrade the feed to fewer rails rather than fail the request, and rails with
+fewer than a minimum number of items SHALL be omitted. Titles SHALL be
+de-duplicated across returned rails so a title does not repeat later. Disabling
+every provider SHALL return a valid empty feed rather than override the admin's
+choice.
 
 #### Scenario: Authenticated home returns enabled hero and rails
 - **WHEN** an authenticated client requests `GET /api/v1/home` with default
@@ -32,10 +38,15 @@ return a valid empty feed rather than override the admin's choice.
 - **WHEN** a registered type has no entry in the disabled set
 - **THEN** it participates in composition by default
 
+#### Scenario: Generic release rail is labelled honestly
+- **WHEN** the generic release provider yields enough movie titles
+- **THEN** the home feed includes a `Recent Releases` rail
+
 #### Scenario: Selected service produces a bounded service rail
-- **WHEN** a selected service has provider metadata and enough catalog titles
-- **THEN** the home feed includes a `New on {service}` rail for it, up to the
-  documented service-rail cap
+- **WHEN** a selected service has provider metadata and enough flatrate movie
+  titles released during the preceding 365 days
+- **THEN** the home feed includes a `Recent Releases on {service}` rail for it,
+  up to the documented service-rail cap
 
 #### Scenario: Service metadata failure degrades independently
 - **WHEN** provider metadata cannot be resolved and no stale value exists
@@ -71,14 +82,21 @@ return a valid empty feed rather than override the admin's choice.
 `GET /api/v1/rails?cursor=` SHALL return a page of enabled additional rails
 (top-rated, by-decade, and further genres across movie and TV) together with a
 cursor for the next page or a signal that the bounded catalogue is exhausted.
-The provider catalogue SHALL be filtered by the request's global rail-type gates
-before slicing and SHALL use the same active region/service discovery context as
-home, so a cursor is stable for that settings snapshot.
+Every available curated movie genre not selected for the Home feed SHALL remain
+reachable through these additional pages. The provider catalogue SHALL be
+filtered by the request's global rail-type gates before slicing and SHALL use the
+same active region/service discovery context as home, so a cursor is stable for
+that settings snapshot.
 
 #### Scenario: First page returns enabled rails and a next cursor
 - **WHEN** a client requests `GET /api/v1/rails` with no cursor
 - **THEN** it receives a page of enabled settings-aware rails and a cursor for the
   next page
+
+#### Scenario: Remaining curated movie genres stay reachable
+- **WHEN** more curated movie genres are available than the Home feed displays
+- **THEN** every remaining curated movie genre occurs in the additional-rail
+  catalogue
 
 #### Scenario: Disabled additional type is skipped before pagination
 - **WHEN** top-rated, decade, or genre rails are disabled
@@ -366,4 +384,3 @@ browsing context without granting the destination access to the opener.
 
 - **WHEN** the user activates the TMDB link in a detail view
 - **THEN** it opens in a separate browsing context with opener access disabled
-

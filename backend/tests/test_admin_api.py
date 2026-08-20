@@ -122,6 +122,9 @@ def test_admin_settings_default_and_round_trip(tmp_path: Path) -> None:
     assert default.status_code == 200
     assert default.json()["settings"]["region"] == "US"
     assert {item["id"] for item in default.json()["rail_types"]} >= {"hero", "services"}
+    assert {item["id"]: item["label"] for item in default.json()["rail_types"]}["recent"] == (
+        "Recent releases"
+    )
     assert saved.status_code == 200
     assert saved.json()["settings"] == reread.json()["settings"]
     assert reread.json()["settings"]["region"] == "GB"

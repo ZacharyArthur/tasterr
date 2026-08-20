@@ -1,5 +1,6 @@
 """Rail providers and the composer: degrade, de-dupe, drop, paginate (tasks 3.2, 3.3)."""
 
+from datetime import date, timedelta
 from typing import cast
 
 import pytest
@@ -16,11 +17,14 @@ from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.rails.composer import build_extra_rails, build_home
 from tasterr.rails.registry import (
     EXTRA_PAGE_SIZE,
+    GENRE_PICKS,
     HERO_SIZE,
+    HOME_GENRE_COUNT,
     RailContext,
     decade_provider,
     genre_provider,
     home_providers,
+    service_provider,
     top_rated_providers,
 )
 from tasterr.runtime_settings import RailType
@@ -148,6 +152,7 @@ def test_home_provider_ids_and_kinds() -> None:
     providers = home_providers()
     assert [p.id for p in providers] == ["trending", "popular", "recently-added"]
     assert providers[1].kind == "standard"
+    assert providers[2].title == "Recent Releases"
 
 
 async def test_top_region_provider_queries_popular_movies() -> None:
@@ -187,6 +192,30 @@ async def test_decade_provider_bounds_release_window() -> None:
 
 def test_top_rated_provider_ids() -> None:
     assert [p.id for p in top_rated_providers()] == ["top-rated-movie", "top-rated-tv"]
+
+
+async def test_service_provider_queries_recent_flatrate_movies() -> None:
+    service = ServiceOption(
+        provider_id=8,
+        name="Netflix",
+        logo_path=None,
+        display_priority=1,
+    )
+    provider = service_provider(service)
+    fake = FakeCatalog()
+
+    await provider.fetch(_ctx(fake))
+
+    assert provider.title == "Recent Releases on Netflix"
+    assert fake.discover_calls[-1] == {
+        "media": "movie",
+        "sort_by": "primary_release_date.desc",
+        "genres": None,
+        "min_votes": 3,
+        "release_gte": (date.today() - timedelta(days=365)).isoformat(),
+        "release_lte": date.today().isoformat(),
+        "service_ids": [8],
+    }
 
 
 async def test_disabled_provider_is_not_fetched() -> None:
@@ -343,6 +372,51 @@ async def test_extra_rails_paginate_then_complete() -> None:
         pages += 1
         assert pages < 20  # guard against a runaway cursor
     assert pages >= 2  # catalogue spans multiple pages then ends
+
+
+async def test_curated_movie_genres_split_between_home_and_extra() -> None:
+    fake = FakeCatalog()
+    genre_names = (
+        "Western",
+        "Comedy",
+        "Crime",
+        "Drama",
+        "Family",
+        "Fantasy",
+        "History",
+        "Horror",
+        "Music",
+        "Mystery",
+        "Romance",
+        "Science Fiction",
+        "TV Movie",
+        "Thriller",
+        "War",
+        "Adventure",
+        "Documentary",
+    )
+    fake.genre_map_result = {name: index for index, name in enumerate(genre_names, start=1)}
+    present_curated = [name for name in GENRE_PICKS if name in fake.genre_map_result]
+
+    home = await build_home(_ctx(fake))
+    home_genres = [rail.title for rail in home.rails if rail.id.startswith("genre-movie-")]
+
+    extra_genres: list[str] = []
+    cursor: int | None = 0
+    pages = 0
+    while cursor is not None:
+        page = await build_extra_rails(_ctx(fake), cursor)
+        extra_genres.extend(rail.title for rail in page.rails if rail.id.startswith("genre-movie-"))
+        cursor = page.next_cursor
+        pages += 1
+        assert pages < 20  # guard against a runaway cursor
+
+    extra_curated = [name for name in extra_genres if name in GENRE_PICKS]
+    combined = home_genres + extra_curated
+    assert home_genres == present_curated[:HOME_GENRE_COUNT]
+    assert set(home_genres).isdisjoint(extra_curated)
+    assert len(combined) == len(set(combined)) == len(present_curated)
+    assert set(combined) == set(present_curated)
 
 
 async def test_all_disabled_extra_rails_are_terminal_without_catalog_work() -> None:
