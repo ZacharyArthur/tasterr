@@ -176,14 +176,11 @@ async def _hero_slide(ctx: RailContext, summary: MediaSummary) -> HeroSlide:
 
 
 def _home_genre_providers(genre_map: dict[str, int]) -> list[RailProvider]:
-    providers: list[RailProvider] = []
-    for name in GENRE_PICKS:
-        genre_id = genre_map.get(name)
-        if genre_id is not None:
-            providers.append(genre_provider(genre_id, name, "movie"))
-        if len(providers) >= HOME_GENRE_COUNT:
-            break
-    return providers
+    return [genre_provider(genre_map[name], name, "movie") for name in _home_genre_names(genre_map)]
+
+
+def _home_genre_names(genre_map: dict[str, int]) -> list[str]:
+    return [name for name in GENRE_PICKS if name in genre_map][:HOME_GENRE_COUNT]
 
 
 async def _extended_providers(ctx: RailContext) -> list[RailProvider]:
@@ -197,7 +194,7 @@ async def _extended_providers(ctx: RailContext) -> list[RailProvider]:
     movie_map, tv_map = await asyncio.gather(
         _safe_genre_map(ctx.catalog, "movie"), _safe_genre_map(ctx.catalog, "tv")
     )
-    featured = set(GENRE_PICKS)
+    featured = set(_home_genre_names(movie_map))
     providers += [
         genre_provider(gid, name, "movie")
         for name, gid in movie_map.items()

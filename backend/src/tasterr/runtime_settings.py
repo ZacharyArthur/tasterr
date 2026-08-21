@@ -49,7 +49,7 @@ RAIL_TYPE_LABELS: dict[RailType, str] = {
     RailType.RECOMMENDED: "Recommended for you",
     RailType.SERVICES: "Selected services",
     RailType.GENRES: "Genres",
-    RailType.RECENT: "Recently added",
+    RailType.RECENT: "Recent releases",
     RailType.TOP_RATED: "Top rated",
     RailType.DECADES: "By decade",
 }
