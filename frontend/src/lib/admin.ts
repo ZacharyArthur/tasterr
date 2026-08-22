@@ -7,6 +7,7 @@ import {
 	saveSettings,
 	testConnection,
 } from "./api";
+import { captureSession, isSessionCurrent } from "./auth";
 
 export const SETTINGS_QUERY_KEY = ["admin", "settings"] as const;
 
@@ -40,7 +41,9 @@ export function useSaveSettings() {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: (settings: RuntimeSettings) => saveSettings(settings),
-		onSuccess: (response) => {
+		onMutate: () => captureSession(queryClient),
+		onSuccess: (response, _settings, sessionEpoch) => {
+			if (!isSessionCurrent(queryClient, sessionEpoch)) return;
 			queryClient.setQueryData(SETTINGS_QUERY_KEY, response);
 			queryClient.setQueryData(["config"], (current: object | undefined) =>
 				current

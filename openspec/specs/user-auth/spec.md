@@ -203,7 +203,13 @@ A blocked, manually closed, or browser-severed context SHALL NOT block polling o
 successful login, and the user SHALL be able to reopen a new protected approval
 context. On success the SPA SHALL switch to the authenticated state without a full
 reload; a logout control SHALL end the session and return to the login screen.
-Failures SHALL surface as generic, human-readable messages.
+Failures SHALL surface as generic, human-readable messages. On each confirmed
+session transition — successful local login, successful Plex PIN completion,
+successful logout, or `auth/me` resolving to a different user — the SPA SHALL
+invalidate prior-session mutation callbacks, cancel in-flight TanStack Query
+requests before removing cached query data, and publish the confirmed user or
+signed-out state only after that boundary completes. Failed login or logout
+attempts SHALL preserve the current confirmed auth state and query cache.
 
 #### Scenario: Plex login from the SPA
 
@@ -233,6 +239,35 @@ Failures SHALL surface as generic, human-readable messages.
 
 - **WHEN** the user activates logout
 - **THEN** the SPA returns to the login screen and the session is revoked
+
+#### Scenario: Shared browser changes household user
+
+- **WHEN** one household user logs out and another completes local or Plex login
+- **THEN** no cached response from the prior user renders while the new user's
+  responses are loading
+
+#### Scenario: Prior-session query completes late
+
+- **WHEN** an in-flight query from the prior session completes after a confirmed
+  session transition
+- **THEN** its response does not repopulate the active query cache
+
+#### Scenario: Current-user refresh detects a different identity
+
+- **WHEN** `auth/me` refetches after the browser session cookie changes from one
+  household user to another
+- **THEN** the prior user's query data is removed before the new identity renders
+
+#### Scenario: Prior-session mutation completes late
+
+- **WHEN** a mutation from the prior session completes after a confirmed session
+  transition
+- **THEN** its callback does not alter the active session's UI or cached queries
+
+#### Scenario: Auth transition fails
+
+- **WHEN** login or logout fails before a new session state is confirmed
+- **THEN** the SPA preserves the current confirmed auth state and cached data
 
 ### Requirement: Live Seerr contract tests
 A pytest-marked live suite (excluded from `just check` and CI) SHALL validate the
@@ -265,4 +300,3 @@ or influence cookie security.
 #### Scenario: Untrusted forwarding headers are ignored
 - **WHEN** a non-allowlisted peer supplies forwarded client IP or scheme headers
 - **THEN** auth uses the socket peer and direct request scheme instead
-

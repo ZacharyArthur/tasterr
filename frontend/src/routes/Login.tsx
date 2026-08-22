@@ -7,7 +7,7 @@ import {
 	useState,
 } from "react";
 import { ApiError, createPlexPin, loginLocal, pollPlexPin } from "../lib/api";
-import { ME_QUERY_KEY } from "../lib/auth";
+import { setConfirmedSession } from "../lib/auth";
 
 interface PendingPin {
 	pinId: string;
@@ -91,13 +91,19 @@ export function Login() {
 
 	useEffect(() => {
 		if (pollData?.status === "ok") {
+			if (pollData.user == null) {
+				closeApprovalWindow();
+				setPlexError("Plex sign-in failed — try again.");
+				setPin(null);
+				return;
+			}
 			closeApprovalWindow();
 			try {
 				window.focus();
 			} catch {
 				// Browsers may reject programmatic focus after cross-origin navigation.
 			}
-			void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
+			void setConfirmedSession(queryClient, pollData.user);
 		}
 	}, [pollData, queryClient, closeApprovalWindow]);
 
@@ -118,8 +124,7 @@ export function Login() {
 	const localLogin = useMutation({
 		mutationFn: (credentials: { email: string; password: string }) =>
 			loginLocal(credentials.email, credentials.password),
-		onSuccess: () =>
-			void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY }),
+		onSuccess: (user) => setConfirmedSession(queryClient, user),
 	});
 
 	function submitLocal(event: FormEvent<HTMLFormElement>) {

@@ -37,17 +37,17 @@ function stubFetch(routes: Record<string, Route>) {
 	return mock;
 }
 
-function renderLogin() {
-	const queryClient = new QueryClient({
+function renderLogin(
+	queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
-	});
-	const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+	}),
+) {
 	render(
 		<QueryClientProvider client={queryClient}>
 			<Login />
 		</QueryClientProvider>,
 	);
-	return invalidate;
+	return queryClient;
 }
 
 const USER = {
@@ -92,7 +92,11 @@ test("plex flow protects and closes its approval window after polling succeeds",
 	const open = vi.fn(() => approval);
 	vi.stubGlobal("open", open);
 	const parentFocus = vi.mocked(window.focus);
-	const invalidate = renderLogin();
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	});
+	queryClient.setQueryData(["title", "movie", 7], { owner: "A" });
+	renderLogin(queryClient);
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
 
@@ -111,12 +115,59 @@ test("plex flow protects and closes its approval window after polling succeeds",
 		interval: 100,
 	});
 	await vi.waitFor(
-		() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+		() => expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER),
 		{ timeout: 5000 },
 	);
 	expect(close).toHaveBeenCalledOnce();
 	expect(parentFocus).toHaveBeenCalledOnce();
+	expect(queryClient.getQueryData(["title", "movie", 7])).toBeUndefined();
+	expect(
+		queryClient.getQueriesData({ queryKey: ["auth", "plex-pin"] }),
+	).toEqual([]);
+	expect(queryClient.getMutationCache().getAll()).toEqual([]);
 }, 15000);
+
+test("plex flow rejects a completed poll without a user", async () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: {
+				pin_id: "opaque-handle",
+				auth_url: "https://app.plex.tv/auth#?x",
+			},
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 200,
+			body: { status: "ok", user: null },
+		}),
+	});
+	const { approval, close } = fakeApprovalWindow();
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => approval),
+	);
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	});
+	queryClient.setQueryData(["pre-login"], "keep");
+	renderLogin(queryClient);
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+
+	expect(
+		await screen.findByText("Plex sign-in failed — try again."),
+	).toBeTruthy();
+	expect(close).toHaveBeenCalledOnce();
+	expect(queryClient.getQueryData(["pre-login"])).toBe("keep");
+	expect(queryClient.getQueryData(ME_QUERY_KEY)).toBeUndefined();
+	expect(
+		(
+			screen.getByRole("button", {
+				name: "Sign in with Plex",
+			}) as HTMLButtonElement
+		).disabled,
+	).toBe(false);
+});
 
 test("plex flow: expired handle surfaces a retry message", async () => {
 	stubFetch({
@@ -188,12 +239,12 @@ test("plex flow can complete when the approval window is blocked", async () => {
 		"open",
 		vi.fn(() => null),
 	);
-	const invalidate = renderLogin();
+	const queryClient = renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
 
 	await vi.waitFor(() =>
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+		expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER),
 	);
 });
 
@@ -255,12 +306,12 @@ test("plex flow can complete after the user closes the approval window", async (
 		"open",
 		vi.fn(() => approval),
 	);
-	const invalidate = renderLogin();
+	const queryClient = renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
 
 	await vi.waitFor(() =>
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+		expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER),
 	);
 	expect(replace).not.toHaveBeenCalled();
 	expect(close).not.toHaveBeenCalled();
@@ -295,12 +346,12 @@ test("plex flow can complete when the browser severs the approval proxy", async 
 		"open",
 		vi.fn(() => approval),
 	);
-	const invalidate = renderLogin();
+	const queryClient = renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
 
 	await vi.waitFor(() =>
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+		expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER),
 	);
 	expect(approval.location.replace).not.toHaveBeenCalled();
 });
@@ -309,7 +360,11 @@ test("local login posts credentials and refreshes auth state", async () => {
 	const mock = stubFetch({
 		"/api/v1/auth/local": () => ({ status: 200, body: USER }),
 	});
-	const invalidate = renderLogin();
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	});
+	queryClient.setQueryData(["home"], { owner: "A" });
+	renderLogin(queryClient);
 
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "a@b.c" },
@@ -320,8 +375,10 @@ test("local login posts credentials and refreshes auth state", async () => {
 	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
 	await vi.waitFor(() => {
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY });
+		expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER);
 	});
+	expect(queryClient.getQueryData(["home"])).toBeUndefined();
+	expect(queryClient.getMutationCache().getAll()).toEqual([]);
 	expect(mock).toHaveBeenCalledWith(
 		"/api/v1/auth/local",
 		expect.objectContaining({

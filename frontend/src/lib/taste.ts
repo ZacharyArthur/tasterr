@@ -13,6 +13,7 @@ import {
 	type TasteOnboardingSelection,
 	type TasteOnboardingStateResponse,
 } from "./api";
+import { captureSession, isSessionCurrent } from "./auth";
 
 /** Fire-and-forget detail-open signal: errors are deliberately swallowed. */
 export function recordDetailOpen(type: MediaType, id: number): void {
@@ -35,8 +36,20 @@ export function useTasteToggle(
 	useEffect(() => setActive(initial), [initial]);
 	const mutation = useMutation({
 		mutationFn: (wasActive: boolean) => postSignal(type, id, kind, wasActive),
-		onError: (_error, wasActive) => setActive(wasActive), // revert the flip
-		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["home"] }),
+		onMutate: () => captureSession(queryClient),
+		onError: (_error, wasActive, sessionEpoch) => {
+			if (
+				sessionEpoch !== undefined &&
+				isSessionCurrent(queryClient, sessionEpoch)
+			) {
+				setActive(wasActive);
+			}
+		},
+		onSuccess: (_data, _wasActive, sessionEpoch) => {
+			if (isSessionCurrent(queryClient, sessionEpoch)) {
+				return queryClient.invalidateQueries({ queryKey: ["home"] });
+			}
+		},
 	});
 	const toggle = () => {
 		const wasActive = active;
@@ -60,7 +73,12 @@ export function useResetRecommendations() {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: resetRecommendations,
-		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["home"] }),
+		onMutate: () => captureSession(queryClient),
+		onSuccess: (_data, _variables, sessionEpoch) => {
+			if (isSessionCurrent(queryClient, sessionEpoch)) {
+				return queryClient.invalidateQueries({ queryKey: ["home"] });
+			}
+		},
 	});
 }
 
@@ -85,7 +103,9 @@ export function useCompleteTasteOnboarding(userId: number | undefined) {
 	return useMutation({
 		mutationFn: (selections: TasteOnboardingSelection[]) =>
 			completeTasteOnboarding(selections),
-		onSuccess: () => {
+		onMutate: () => captureSession(queryClient),
+		onSuccess: (_data, _selections, sessionEpoch) => {
+			if (!isSessionCurrent(queryClient, sessionEpoch)) return;
 			queryClient.setQueryData<TasteOnboardingStateResponse>(
 				tasteOnboardingKey(userId),
 				{ state: "done" },

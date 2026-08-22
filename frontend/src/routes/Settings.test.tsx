@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
+import { setConfirmedSession } from "../lib/auth";
 import { Settings } from "./Settings";
 
 afterEach(() => {
@@ -50,11 +51,13 @@ function response(body: unknown, status = 200): Response {
 	return { ok: status < 400, status, json: async () => body } as Response;
 }
 
-function renderSettings(fetchMock: ReturnType<typeof vi.fn>) {
-	vi.stubGlobal("fetch", fetchMock);
-	const queryClient = new QueryClient({
+function renderSettings(
+	fetchMock: ReturnType<typeof vi.fn>,
+	queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
-	});
+	}),
+) {
+	vi.stubGlobal("fetch", fetchMock);
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
@@ -63,6 +66,14 @@ function renderSettings(fetchMock: ReturnType<typeof vi.fn>) {
 		</QueryClientProvider>,
 	);
 	return queryClient;
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
 }
 
 function routeAdminFetch() {
@@ -145,4 +156,58 @@ test("connection results are announced without exposing configuration", async ()
 	expect(result.tagName).toBe("OUTPUT");
 	const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
 	expect(JSON.parse(String(post?.[1]?.body))).toEqual({ target: "tmdb" });
+});
+
+test("a late save cannot repopulate cache after the session changes", async () => {
+	const lateSave = deferred<Response>();
+	const baseFetch = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && init?.method === "PUT") {
+				return lateSave.promise;
+			}
+			return baseFetch(input, init);
+		},
+	);
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	});
+	queryClient.setQueryData(["auth", "me"], {
+		id: 1,
+		display_name: "Viewer A",
+		avatar_url: null,
+		is_admin: true,
+	});
+	renderSettings(fetchMock, queryClient);
+	await screen.findByLabelText("Netflix");
+
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await waitFor(() =>
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/v1/settings",
+			expect.objectContaining({ method: "PUT" }),
+		),
+	);
+	expect(queryClient.getMutationCache().getAll()).toHaveLength(1);
+	await setConfirmedSession(queryClient, {
+		id: 2,
+		display_name: "Viewer B",
+		avatar_url: null,
+		is_admin: true,
+	});
+	expect(queryClient.getMutationCache().getAll()).toEqual([]);
+
+	lateSave.resolve(response({ ...SETTINGS, owner: "A-late" }));
+	await waitFor(() =>
+		expect(
+			(
+				screen.getByRole("button", {
+					name: "Save settings",
+				}) as HTMLButtonElement
+			).disabled,
+		).toBe(false),
+	);
+	expect(
+		queryClient.getQueryData<{ owner?: string }>(["admin", "settings"])?.owner,
+	).toBeUndefined();
 });
