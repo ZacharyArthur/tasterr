@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 
@@ -93,10 +93,17 @@ class SeerrMediaInfo(BaseModel):
     3 processing, 4 partially available, 5 available); `seasons` carries per-season
     status for TV. catalog/availability.py maps this to the domain model."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     status: int = 0
+    status_4k: int = Field(default=0, alias="status4k")
     seasons: list[SeerrSeasonStatus] = []
+    web_url: str | None = Field(default=None, validation_alias=AliasChoices("plexUrl", "mediaUrl"))
+    app_url: str | None = Field(default=None, alias="iOSPlexUrl")
+    web_url_4k: str | None = Field(
+        default=None, validation_alias=AliasChoices("plexUrl4k", "mediaUrl4k")
+    )
+    app_url_4k: str | None = Field(default=None, alias="iOSPlexUrl4k")
 
 
 class _SeerrTitle(BaseModel):

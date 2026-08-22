@@ -4,10 +4,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
+	completeTasteOnboarding,
 	getExplain,
+	getTasteOnboarding,
 	type MediaType,
 	postSignal,
 	resetRecommendations,
+	type TasteOnboardingSelection,
+	type TasteOnboardingStateResponse,
 } from "./api";
 
 /** Fire-and-forget detail-open signal: errors are deliberately swallowed. */
@@ -57,5 +61,36 @@ export function useResetRecommendations() {
 	return useMutation({
 		mutationFn: resetRecommendations,
 		onSuccess: () => queryClient.invalidateQueries({ queryKey: ["home"] }),
+	});
+}
+
+const tasteOnboardingKey = (userId: number | undefined) =>
+	["taste-onboarding", userId] as const;
+
+export function useTasteOnboarding(userId: number | undefined) {
+	return useQuery({
+		queryKey: tasteOnboardingKey(userId),
+		queryFn: getTasteOnboarding,
+		enabled: userId !== undefined,
+		retry: false,
+		refetchInterval: (query) =>
+			query.state.status === "success" && query.state.data?.state === "pending"
+				? 500
+				: false,
+	});
+}
+
+export function useCompleteTasteOnboarding(userId: number | undefined) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (selections: TasteOnboardingSelection[]) =>
+			completeTasteOnboarding(selections),
+		onSuccess: () => {
+			queryClient.setQueryData<TasteOnboardingStateResponse>(
+				tasteOnboardingKey(userId),
+				{ state: "done" },
+			);
+			void queryClient.invalidateQueries({ queryKey: ["home"] });
+		},
 	});
 }

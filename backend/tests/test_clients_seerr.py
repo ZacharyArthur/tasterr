@@ -172,6 +172,50 @@ async def test_media_status_parses_movie_mediainfo() -> None:
     assert info.status == 5
 
 
+@pytest.mark.parametrize("web_field", ["plexUrl", "mediaUrl"])
+async def test_media_status_accepts_both_seerr_playback_link_aliases(web_field: str) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "mediaInfo": {
+                    "status": 5,
+                    web_field: "https://app.plex.tv/desktop/#!/details",
+                    "iOSPlexUrl": "plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F42",
+                    "ignoredFutureField": "safe to drop",
+                }
+            },
+        )
+
+    info = await _media_client(handler).media_status("movie", 42)
+
+    assert info is not None
+    assert info.web_url == "https://app.plex.tv/desktop/#!/details"
+    assert info.app_url == "plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F42"
+
+
+async def test_media_status_parses_4k_playback_fields() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "mediaInfo": {
+                    "status": 1,
+                    "status4k": 5,
+                    "mediaUrl4k": "https://app.plex.tv/desktop/#!/4k-details",
+                    "iOSPlexUrl4k": "plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F84",
+                }
+            },
+        )
+
+    info = await _media_client(handler).media_status("movie", 42)
+
+    assert info is not None
+    assert info.status_4k == 5
+    assert info.web_url_4k == "https://app.plex.tv/desktop/#!/4k-details"
+    assert info.app_url_4k == "plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F84"
+
+
 async def test_media_status_parses_tv_per_season() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(

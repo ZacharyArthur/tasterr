@@ -311,6 +311,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/taste-onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Taste Onboarding */
+        get: operations["get_taste_onboarding_api_v1_taste_onboarding_get"];
+        put?: never;
+        /** Complete Taste Onboarding */
+        post: operations["complete_taste_onboarding_api_v1_taste_onboarding_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recommendations/explain": {
         parameters: {
             query?: never;
@@ -374,6 +392,7 @@ export interface components {
             status: "available" | "partial" | "processing" | "pending" | "not_requested" | "unknown";
             /** Known */
             known: boolean;
+            playback?: components["schemas"]["PlaybackLinks"] | null;
         };
         /** AvailabilityItem */
         AvailabilityItem: {
@@ -604,6 +623,20 @@ export interface components {
             status: "pending" | "ok";
             user?: components["schemas"]["UserResponse"] | null;
         };
+        /** PlaybackLinks */
+        PlaybackLinks: {
+            regular?: components["schemas"]["PlaybackVariant"] | null;
+            four_k?: components["schemas"]["PlaybackVariant"] | null;
+        };
+        /** PlaybackVariant */
+        PlaybackVariant: {
+            /** Web Url */
+            web_url: string;
+            /** App Url */
+            app_url?: string | null;
+            /** Android Intent Url */
+            android_intent_url?: string | null;
+        };
         /** ProviderInfo */
         ProviderInfo: {
             /** Provider Id */
@@ -820,6 +853,37 @@ export interface components {
              * @default false
              */
             hidden: boolean;
+        };
+        /** TasteOnboardingBody */
+        TasteOnboardingBody: {
+            /**
+             * Selections
+             * @default []
+             */
+            selections: components["schemas"]["TasteOnboardingSelection"][];
+        };
+        /** TasteOnboardingSelection */
+        TasteOnboardingSelection: {
+            /**
+             * Media Type
+             * @enum {string}
+             */
+            media_type: "movie" | "tv";
+            /** Tmdb Id */
+            tmdb_id: number;
+        };
+        /** TasteOnboardingStateResponse */
+        TasteOnboardingStateResponse: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "show" | "done";
+        };
+        /** TasteOnboardingSubmitResponse */
+        TasteOnboardingSubmitResponse: {
+            /** Recorded Signals */
+            recorded_signals: number;
         };
         /**
          * Theme
@@ -1398,6 +1462,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_taste_onboarding_api_v1_taste_onboarding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TasteOnboardingStateResponse"];
+                };
+            };
+        };
+    };
+    complete_taste_onboarding_api_v1_taste_onboarding_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TasteOnboardingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TasteOnboardingSubmitResponse"];
                 };
             };
             /** @description Validation Error */

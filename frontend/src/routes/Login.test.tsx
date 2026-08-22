@@ -1,11 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ME_QUERY_KEY } from "../lib/auth";
 import { Login } from "./Login";
 
+beforeEach(() => {
+	vi.spyOn(window, "focus").mockImplementation(() => undefined);
+});
+
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 });
 
@@ -52,7 +57,21 @@ const USER = {
 	is_admin: false,
 };
 
-test("plex flow: opens approval url, keeps polling, then refreshes auth state", async () => {
+function fakeApprovalWindow(closed = false) {
+	const close = vi.fn();
+	const focus = vi.fn();
+	const replace = vi.fn();
+	const approval = {
+		closed,
+		close,
+		focus,
+		opener: window,
+		location: { replace },
+	} as unknown as Window;
+	return { approval, close, focus, replace };
+}
+
+test("plex flow protects and closes its approval window after polling succeeds", async () => {
 	let polls = 0;
 	stubFetch({
 		"POST /api/v1/auth/plex/pin": () => ({
@@ -69,18 +88,23 @@ test("plex flow: opens approval url, keeps polling, then refreshes auth state", 
 				: { status: 200, body: { status: "ok", user: USER } };
 		},
 	});
-	const open = vi.fn();
+	const { approval, close, focus, replace } = fakeApprovalWindow();
+	const open = vi.fn(() => approval);
 	vi.stubGlobal("open", open);
+	const parentFocus = vi.mocked(window.focus);
 	const invalidate = renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
 
 	await screen.findByText("Waiting for Plex approval…");
 	expect(open).toHaveBeenCalledWith(
-		"https://app.plex.tv/auth#?x",
-		"_blank",
-		"noopener",
+		"",
+		"tasterr-plex-auth",
+		"popup=yes,width=600,height=700,scrollbars=yes,resizable=yes",
 	);
+	expect(approval.opener).toBeNull();
+	expect(focus).toHaveBeenCalledOnce();
+	expect(replace).toHaveBeenCalledWith("https://app.plex.tv/auth#?x");
 	// First poll answers pending; the 2s refetch interval must fire again.
 	await vi.waitFor(() => expect(polls).toBeGreaterThanOrEqual(2), {
 		timeout: 5000,
@@ -90,6 +114,8 @@ test("plex flow: opens approval url, keeps polling, then refreshes auth state", 
 		() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
 		{ timeout: 5000 },
 	);
+	expect(close).toHaveBeenCalledOnce();
+	expect(parentFocus).toHaveBeenCalledOnce();
 }, 15000);
 
 test("plex flow: expired handle surfaces a retry message", async () => {
@@ -106,7 +132,11 @@ test("plex flow: expired handle surfaces a retry message", async () => {
 			body: { detail: "Unknown or expired sign-in attempt" },
 		}),
 	});
-	vi.stubGlobal("open", vi.fn());
+	const { approval, close } = fakeApprovalWindow();
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => approval),
+	);
 	renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
@@ -118,6 +148,161 @@ test("plex flow: expired handle surfaces a retry message", async () => {
 	expect(
 		screen.getByRole("button", { name: "Sign in with Plex" }),
 	).toBeTruthy();
+	expect(close).toHaveBeenCalledOnce();
+});
+
+test("plex flow closes its blank window when PIN creation fails", async () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({ status: 503, body: {} }),
+	});
+	const { approval, close } = fakeApprovalWindow();
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => approval),
+	);
+	renderLogin();
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+
+	expect(
+		await screen.findByText("Could not reach Plex — try again."),
+	).toBeTruthy();
+	expect(close).toHaveBeenCalledOnce();
+});
+
+test("plex flow can complete when the approval window is blocked", async () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: {
+				pin_id: "opaque-handle",
+				auth_url: "https://app.plex.tv/auth#?x",
+			},
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 200,
+			body: { status: "ok", user: USER },
+		}),
+	});
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => null),
+	);
+	const invalidate = renderLogin();
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+
+	await vi.waitFor(() =>
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+	);
+});
+
+test("plex flow reopens a protected approval window after popup blocking", async () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: {
+				pin_id: "opaque-handle",
+				auth_url: "https://app.plex.tv/auth#?x",
+			},
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 200,
+			body: { status: "pending", user: null },
+		}),
+	});
+	const { approval, close, replace } = fakeApprovalWindow();
+	const open = vi
+		.fn<() => Window | null>()
+		.mockReturnValueOnce(null)
+		.mockReturnValueOnce(approval);
+	vi.stubGlobal("open", open);
+	renderLogin();
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Reopen the approval page" }),
+	);
+
+	expect(open).toHaveBeenNthCalledWith(
+		2,
+		"",
+		"tasterr-plex-auth",
+		"popup=yes,width=600,height=700,scrollbars=yes,resizable=yes",
+	);
+	expect(approval.opener).toBeNull();
+	expect(replace).toHaveBeenCalledWith("https://app.plex.tv/auth#?x");
+	cleanup();
+	expect(close).toHaveBeenCalledOnce();
+});
+
+test("plex flow can complete after the user closes the approval window", async () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: {
+				pin_id: "opaque-handle",
+				auth_url: "https://app.plex.tv/auth#?x",
+			},
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 200,
+			body: { status: "ok", user: USER },
+		}),
+	});
+	const { approval, close, replace } = fakeApprovalWindow(true);
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => approval),
+	);
+	const invalidate = renderLogin();
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+
+	await vi.waitFor(() =>
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+	);
+	expect(replace).not.toHaveBeenCalled();
+	expect(close).not.toHaveBeenCalled();
+});
+
+test("plex flow can complete when the browser severs the approval proxy", async () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: {
+				pin_id: "opaque-handle",
+				auth_url: "https://app.plex.tv/auth#?x",
+			},
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 200,
+			body: { status: "ok", user: USER },
+		}),
+	});
+	const approval = {
+		get closed() {
+			throw new DOMException("WindowProxy severed");
+		},
+		set opener(_value: Window | null) {
+			throw new DOMException("WindowProxy severed");
+		},
+		close: vi.fn(),
+		focus: vi.fn(),
+		location: { replace: vi.fn() },
+	} as unknown as Window;
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => approval),
+	);
+	const invalidate = renderLogin();
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+
+	await vi.waitFor(() =>
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: ME_QUERY_KEY }),
+	);
+	expect(approval.location.replace).not.toHaveBeenCalled();
 });
 
 test("local login posts credentials and refreshes auth state", async () => {

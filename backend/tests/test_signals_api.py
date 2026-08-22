@@ -77,6 +77,19 @@ def test_unauthenticated_signal_is_rejected(tmp_path: Path) -> None:
     assert _stored_signals(tmp_path / "tasterr.db") == []
 
 
+def test_out_of_range_tmdb_id_is_rejected_before_database_write(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path)
+    body = _body()
+    body["tmdb_id"] = 2_147_483_648
+    with _client(app, token) as client:
+        response = client.post("/api/v1/signals", json=body)
+
+    assert response.status_code == 422
+    assert _stored_signals(db_path) == []
+
+
 def test_cross_origin_signal_is_rejected(tmp_path: Path) -> None:
     app = _app(tmp_path)
     token = _seed_session(tmp_path / "tasterr.db")

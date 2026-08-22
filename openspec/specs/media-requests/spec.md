@@ -5,16 +5,17 @@ TBD - created by archiving change m3-seerr. Update Purpose after archive.
 ## Requirements
 ### Requirement: Request a title as the member
 
-`POST /api/v1/request` SHALL proxy `POST {SEERR_INTERNAL_URL}/api/v1/request` using
-the **per-user Seerr session cookie** stored on the member's Tasterr session row,
-so the request is attributed to that member in Seerr and subject to their own quota
-and approval rules. The request body SHALL be validated (`media_type` constrained
-to `movie` or `tv`, a positive integer `tmdb_id`); a TV request SHALL request the
-whole series at the default quality. The global Seerr API key SHALL NOT be used for
-requests. On success the response SHALL carry the title's resulting library status
-so the SPA can update its badge, and the backend SHALL record a `request` taste
-signal for the member server-side — a failure to record the signal SHALL NOT fail
-the request response.
+`POST /api/v1/request` SHALL proxy `POST {SEERR_INTERNAL_URL}/api/v1/request`
+using the **per-user Seerr session cookie** stored on the member's Tasterr
+session row, so the request is attributed to that member in Seerr and subject to
+their own quota and approval rules. The request body SHALL be validated
+(`media_type` constrained to `movie` or `tv`, an integer `tmdb_id` between 1 and
+2,147,483,647 inclusive); a TV request SHALL request the whole series at the
+default quality. The global Seerr API key SHALL NOT be used for requests. On
+success the response SHALL carry the title's resulting library status so the SPA
+can update its badge, and the backend SHALL record a `request` taste signal for
+the member server-side — a failure to record the signal SHALL NOT fail the
+request response.
 
 #### Scenario: Request lands attributed to the member
 
@@ -41,6 +42,11 @@ the request response.
 
 - **WHEN** the taste-signal write errors after Seerr accepted the request
 - **THEN** the request response still reports success
+
+#### Scenario: Out-of-range title id rejected before request
+
+- **WHEN** a member submits a `tmdb_id` outside the supported range
+- **THEN** input validation rejects it before any Seerr or taste side effect
 
 ### Requirement: Invalid-session re-auth ladder
 

@@ -50,7 +50,10 @@ async def test_background_seed_resolves_its_own_runtime_snapshot(
         seeding: set[int],
         user_id: int,
         seerr_user_id: int,
+        *,
+        reserved: bool = False,
     ) -> None:
+        assert reserved is True
         async with seed_maker() as db:
             factory(db)
 
@@ -62,7 +65,8 @@ async def test_background_seed_resolves_its_own_runtime_snapshot(
     app.state.http = http
     app.state.catalog_cache = Cache()
     app.state.sessionmaker = maker
-    app.state.seeding = set()
+    seeding: set[int] = set()
+    app.state.seeding = seeding
     seed_tasks: set[asyncio.Task[None]] = set()
     app.state.seed_tasks = seed_tasks
     scope = cast(
@@ -89,9 +93,12 @@ async def test_background_seed_resolves_its_own_runtime_snapshot(
     )
 
     schedule_seed(request, settings, user_id=1, seerr_user_id=7)
+    assert seeding == {1}
+    schedule_seed(request, settings, user_id=1, seerr_user_id=7)
     tasks = list(seed_tasks)
     await asyncio.gather(*tasks)
 
     assert captured == [("GB", (8, 337))]
+    assert seeding == set()
     await http.aclose()
     await engine.dispose()
