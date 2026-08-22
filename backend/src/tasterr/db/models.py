@@ -24,6 +24,7 @@ class User(Base):
     avatar_url: Mapped[str | None]
     auth_type: Mapped[str] = mapped_column(String(8))  # 'plex' | 'local'
     is_admin: Mapped[bool] = mapped_column(default=False)
+    taste_onboarding_seen: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     last_login_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
 

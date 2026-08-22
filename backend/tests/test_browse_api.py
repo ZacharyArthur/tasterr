@@ -280,13 +280,31 @@ def _override_availability(
 def test_title_detail_includes_availability(tmp_path: Path) -> None:
     app = _app(tmp_path)
     app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
-    _override_availability(app, lambda _: httpx.Response(200, json={"mediaInfo": {"status": 5}}))
+    _override_availability(
+        app,
+        lambda _: httpx.Response(
+            200,
+            json={
+                "mediaInfo": {
+                    "status": 5,
+                    "plexUrl": "https://app.plex.tv/desktop/#!/details",
+                    "iOSPlexUrl": "plex://preplay/?metadataKey=x",
+                }
+            },
+        ),
+    )
     db_path = tmp_path / "tasterr.db"
     with _authed_client(app, db_path) as client:
         response = client.get("/api/v1/title/movie/42")
 
     assert response.status_code == 200
-    assert response.json()["availability"] == {"status": "available", "known": True}
+    availability = response.json()["availability"]
+    assert availability["status"] == "available"
+    assert availability["known"] is True
+    assert availability["playback"]["regular"]["web_url"] == (
+        "https://app.plex.tv/desktop/#!/details"
+    )
+    assert availability["playback"]["regular"]["android_intent_url"].startswith("intent://preplay/")
 
 
 def test_title_availability_degrades_when_seerr_down(tmp_path: Path) -> None:
@@ -301,7 +319,7 @@ def test_title_availability_degrades_when_seerr_down(tmp_path: Path) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == 42
-    assert body["availability"] == {"status": "unknown", "known": False}
+    assert body["availability"] == {"status": "unknown", "known": False, "playback": None}
 
 
 # ── Search (4.3) ─────────────────────────────────────────────────────────────

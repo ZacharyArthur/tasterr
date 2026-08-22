@@ -18,7 +18,7 @@ from tasterr.catalog.service import CatalogService
 from tasterr.clients.seerr import SeerrClient
 from tasterr.clients.tmdb import TmdbClient
 from tasterr.db.runtime_settings import load_runtime_settings
-from tasterr.recommend.seed import seed_in_background
+from tasterr.recommend.seed import reserve_seed, seed_in_background
 from tasterr.recommend.service import TasteService
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
@@ -108,17 +108,34 @@ def schedule_seed(request: Request, settings: Settings, user_id: int, seerr_user
 
     maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
     seeding = cast("set[int]", state.seeding)
+    if not reserve_seed(seeding, user_id):
+        return
 
     async def run_seed() -> None:
-        async with maker() as db:
-            runtime = await load_runtime_settings(db)
+        try:
+            async with maker() as db:
+                runtime = await load_runtime_settings(db)
 
-        def factory(seed_db: AsyncSession) -> TasteService:
-            return taste_factory(seed_db, runtime)
+            def factory(seed_db: AsyncSession) -> TasteService:
+                return taste_factory(seed_db, runtime)
 
-        await seed_in_background(maker, factory, seerr, seeding, user_id, seerr_user_id)
+            await seed_in_background(
+                maker,
+                factory,
+                seerr,
+                seeding,
+                user_id,
+                seerr_user_id,
+                reserved=True,
+            )
+        finally:
+            seeding.discard(user_id)
 
-    task = asyncio.create_task(run_seed())
+    try:
+        task = asyncio.create_task(run_seed())
+    except Exception:
+        seeding.discard(user_id)
+        raise
     tasks = cast("set[asyncio.Task[None]]", state.seed_tasks)
     tasks.add(task)
     task.add_done_callback(tasks.discard)

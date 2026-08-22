@@ -26,6 +26,12 @@ export type SignalResponse = components["schemas"]["SignalResponse"];
 export type ExplainResponse = components["schemas"]["ExplainResponse"];
 export type ResetResponse = components["schemas"]["ResetResponse"];
 export type TasteFlags = components["schemas"]["TasteFlags"];
+export type TasteOnboardingSelection =
+	components["schemas"]["TasteOnboardingSelection"];
+export type TasteOnboardingStateResponse =
+	components["schemas"]["TasteOnboardingStateResponse"];
+export type TasteOnboardingSubmitResponse =
+	components["schemas"]["TasteOnboardingSubmitResponse"];
 export type Appearance = components["schemas"]["Appearance"];
 export type RuntimeSettings = components["schemas"]["RuntimeSettings"];
 export type SettingsResponse = components["schemas"]["SettingsResponse"];
@@ -234,4 +240,16 @@ export function getExplain(
 /** Wipe the caller's signals + profile and re-seed from Seerr history. */
 export function resetRecommendations(): Promise<ResetResponse> {
 	return postJson<ResetResponse>("/api/v1/recommendations/reset");
+}
+
+export function getTasteOnboarding(): Promise<TasteOnboardingStateResponse> {
+	return request<TasteOnboardingStateResponse>("/api/v1/taste-onboarding");
+}
+
+export function completeTasteOnboarding(
+	selections: TasteOnboardingSelection[],
+): Promise<TasteOnboardingSubmitResponse> {
+	return postJson<TasteOnboardingSubmitResponse>("/api/v1/taste-onboarding", {
+		selections,
+	});
 }

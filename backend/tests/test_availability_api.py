@@ -89,7 +89,16 @@ def test_availability_requires_a_session(tmp_path: Path) -> None:
 def test_batch_returns_a_status_per_title(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/movie/1":
-            return httpx.Response(200, json={"mediaInfo": {"status": 5}})
+            return httpx.Response(
+                200,
+                json={
+                    "mediaInfo": {
+                        "status": 5,
+                        "mediaUrl": "https://app.plex.tv/desktop/#!/details",
+                        "iOSPlexUrl": "plex://preplay/?metadataKey=x",
+                    }
+                },
+            )
         return httpx.Response(404, json={})  # movie/2: known, not in library
 
     app = _app(tmp_path)
@@ -103,8 +112,23 @@ def test_batch_returns_a_status_per_title(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        "movie:1": {"status": "available", "known": True},
-        "movie:2": {"status": "not_requested", "known": True},
+        "movie:1": {
+            "status": "available",
+            "known": True,
+            "playback": {
+                "regular": {
+                    "web_url": "https://app.plex.tv/desktop/#!/details",
+                    "app_url": "plex://preplay/?metadataKey=x",
+                    "android_intent_url": (
+                        "intent://preplay/?metadataKey=x#Intent;scheme=plex;"
+                        "package=com.plexapp.android;S.browser_fallback_url="
+                        "https%3A%2F%2Fapp.plex.tv%2Fdesktop%2F%23%21%2Fdetails;end"
+                    ),
+                },
+                "four_k": None,
+            },
+        },
+        "movie:2": {"status": "not_requested", "known": True, "playback": None},
     }
 
 
@@ -125,8 +149,8 @@ def test_one_unresolved_title_does_not_fail_the_batch(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["movie:1"] == {"status": "available", "known": True}
-    assert body["movie:3"] == {"status": "unknown", "known": False}
+    assert body["movie:1"] == {"status": "available", "known": True, "playback": None}
+    assert body["movie:3"] == {"status": "unknown", "known": False, "playback": None}
 
 
 def test_unconfigured_seerr_yields_unknown_without_a_call(tmp_path: Path) -> None:
@@ -142,8 +166,8 @@ def test_unconfigured_seerr_yields_unknown_without_a_call(tmp_path: Path) -> Non
 
     assert response.status_code == 200
     assert response.json() == {
-        "movie:1": {"status": "unknown", "known": False},
-        "tv:2": {"status": "unknown", "known": False},
+        "movie:1": {"status": "unknown", "known": False, "playback": None},
+        "tv:2": {"status": "unknown", "known": False, "playback": None},
     }
 
 

@@ -10,6 +10,7 @@ from typing import Literal, get_args
 
 MediaType = Literal["movie", "tv"]
 TitleKey = tuple[MediaType, int]
+MAX_TMDB_ID = 2_147_483_647
 
 SignalKind = Literal[
     "request", "watchlist", "detail_open", "not_interested", "seed_request_history"

@@ -19,6 +19,14 @@ from tasterr.recommend.service import TasteService
 logger = logging.getLogger("tasterr.seed")
 
 
+def reserve_seed(seeding: set[int], user_id: int) -> bool:
+    """Synchronously reserve one user's background seed before scheduling it."""
+    if user_id in seeding:
+        return False
+    seeding.add(user_id)
+    return True
+
+
 async def seed_user(
     db: AsyncSession,
     taste: TasteService,
@@ -57,14 +65,15 @@ async def seed_in_background(
     seeding: set[int],
     user_id: int,
     seerr_user_id: int,
+    *,
+    reserved: bool = False,
 ) -> None:
     """The post-login runner: opens its own session (the request's is gone by
     the time this runs), seeds only a signal-less user, single-flights per
     user (in-process set — one replica by design), and swallows every failure
     with a log line carrying no viewing behavior."""
-    if user_id in seeding:
+    if not reserved and not reserve_seed(seeding, user_id):
         return
-    seeding.add(user_id)
     try:
         async with maker() as db:
             if await store.has_signals(db, user_id):

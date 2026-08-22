@@ -18,7 +18,7 @@ from tasterr.api.taste import refresh_profile
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
 from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.recommend import store
-from tasterr.recommend.signals import TOGGLE_KINDS, ClientSignalKind, MediaType
+from tasterr.recommend.signals import MAX_TMDB_ID, TOGGLE_KINDS, ClientSignalKind, MediaType
 from tasterr.settings import Settings, get_settings
 
 router = APIRouter()
@@ -26,7 +26,7 @@ router = APIRouter()
 
 class SignalBody(BaseModel):
     media_type: MediaType
-    tmdb_id: int = Field(ge=1)
+    tmdb_id: int = Field(ge=1, le=MAX_TMDB_ID)
     kind: ClientSignalKind
     retract: bool = False
 

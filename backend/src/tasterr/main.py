@@ -16,6 +16,7 @@ from tasterr.api.auth import router as auth_router
 from tasterr.api.availability import router as availability_router
 from tasterr.api.home import router as home_router
 from tasterr.api.meta import router as meta_router
+from tasterr.api.onboarding import router as onboarding_router
 from tasterr.api.recommendations import router as recommendations_router
 from tasterr.api.request import router as request_router
 from tasterr.api.search import router as search_router
@@ -96,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(availability_router, prefix="/api/v1")
     app.include_router(request_router, prefix="/api/v1")
     app.include_router(signals_router, prefix="/api/v1")
+    app.include_router(onboarding_router, prefix="/api/v1")
     app.include_router(recommendations_router, prefix="/api/v1")
     app.state.pin_store = PinStore()
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.

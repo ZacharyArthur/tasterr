@@ -30,6 +30,13 @@ def _downgrade(connection: Connection, revision: str) -> None:
     command.downgrade(config, revision)
 
 
+def _upgrade(connection: Connection, revision: str) -> None:
+    config = Config()
+    config.set_main_option("script_location", str(ALEMBIC_DIR))
+    config.attributes["connection"] = connection
+    command.upgrade(config, revision)
+
+
 async def test_fresh_database_migrates_to_head(tmp_path: Path) -> None:
     engine = create_engine(tmp_path / "tasterr.db")
     try:
@@ -137,8 +144,55 @@ async def test_downgrade_drops_only_settings_table(tmp_path: Path) -> None:
         tables = await _table_names(engine)
         assert "settings" not in tables
         assert {"users", "signals", "title_features", "profiles"} <= tables
+        async with engine.connect() as connection:
+            user_id = await connection.execute(text("select seerr_user_id from users"))
+            assert user_id.scalar_one() == 8
+    finally:
+        await engine.dispose()
+
+
+async def test_migration_0005_defaults_existing_users_to_unseen(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(_upgrade, "0004")
+        maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
-            assert (await db.execute(select(User))).scalars().one().seerr_user_id == 8
+            await db.execute(
+                text(
+                    "insert into users "
+                    "(seerr_user_id, display_name, auth_type, is_admin, created_at, last_login_at) "
+                    "values (8, 'member', 'local', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await db.commit()
+
+        await upgrade_to_head(engine)
+
+        async with maker() as db:
+            user = (await db.execute(select(User))).scalars().one()
+            assert user.taste_onboarding_seen is False
+    finally:
+        await engine.dispose()
+
+
+async def test_downgrade_0005_preserves_users(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+        maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with maker() as db:
+            db.add(User(seerr_user_id=8, display_name="member", auth_type="local"))
+            await db.commit()
+
+        async with engine.begin() as connection:
+            await connection.run_sync(_downgrade, "0004")
+
+        async with engine.connect() as connection:
+            columns = await connection.execute(text("pragma table_info(users)"))
+            assert "taste_onboarding_seen" not in {row[1] for row in columns}
+            count = await connection.execute(text("select count(*) from users"))
+            assert count.scalar_one() == 1
     finally:
         await engine.dispose()
 

@@ -6,12 +6,12 @@ TBD - created by archiving change m4-taste. Update Purpose after archive.
 ### Requirement: In-app interaction signals are recorded per user
 
 `POST /api/v1/signals` SHALL record an interaction signal for the authenticated
-user with a validated body: `media_type` constrained to `movie` or `tv`, a
-positive integer `tmdb_id`, and `kind` constrained to the client-recordable
-kinds — `detail_open`, `watchlist`, `not_interested`. Each stored signal SHALL
-carry its kind's fixed weight and a creation timestamp. Signals SHALL be scoped
-to the authenticated user only: a signal is attributed to the session user, and
-no endpoint SHALL expose one user's signals to another.
+user with a validated body: `media_type` constrained to `movie` or `tv`, an
+integer `tmdb_id` between 1 and 2,147,483,647 inclusive, and `kind` constrained
+to the client-recordable kinds — `detail_open`, `watchlist`, `not_interested`.
+Each stored signal SHALL carry its kind's fixed weight and a creation timestamp.
+Signals SHALL be scoped to the authenticated user only: a signal is attributed
+to the session user, and no endpoint SHALL expose one user's signals to another.
 
 #### Scenario: Detail open recorded
 
@@ -28,6 +28,11 @@ no endpoint SHALL expose one user's signals to another.
 
 - **WHEN** a signal is posted on a valid session
 - **THEN** it is stored against that session's user and no other
+
+#### Scenario: Out-of-range title id rejected
+
+- **WHEN** the posted `tmdb_id` is outside the supported range
+- **THEN** input validation rejects it before any signal or profile side effect
 
 ### Requirement: Server-recorded kinds are not accepted from the client
 

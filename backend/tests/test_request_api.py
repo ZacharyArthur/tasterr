@@ -138,6 +138,27 @@ def test_cross_origin_request_is_rejected(tmp_path: Path) -> None:
     assert calls == []  # rejected before any Seerr call
 
 
+def test_out_of_range_request_is_rejected_before_upstream_or_taste_write(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(201, json={"media": {"status": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path)
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json=_body(tmdb_id=2_147_483_648))
+
+    assert response.status_code == 422
+    assert calls == []
+    assert _stored_taste_signals(db_path) == []
+
+
 def test_rate_limited_request_has_no_upstream_or_taste_side_effect(tmp_path: Path) -> None:
     calls: list[str] = []
 
@@ -182,7 +203,7 @@ def test_successful_request_returns_status_and_fallback(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "availability": {"status": "pending", "known": True},
+        "availability": {"status": "pending", "known": True, "playback": None},
         "seerr_url": "https://requests.example/movie/42",
     }
     assert seen == [SEED_COOKIE]  # attributed via the member's own cookie

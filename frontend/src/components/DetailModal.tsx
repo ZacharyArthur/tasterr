@@ -170,11 +170,14 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 					<h3 className="text-sm font-semibold text-app-text">
 						Where &amp; how to watch
 					</h3>
-					<RequestButton
-						type={detail.media_type}
-						id={detail.id}
-						availability={detail.availability}
-					/>
+					<div className="flex flex-wrap items-start gap-3">
+						<PlexPlaybackLinks availability={detail.availability} />
+						<RequestButton
+							type={detail.media_type}
+							id={detail.id}
+							availability={detail.availability}
+						/>
+					</div>
 					{providers.length > 0 && (
 						<ul className="flex flex-wrap gap-3">
 							{providers.map((provider) => (
@@ -251,6 +254,54 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 
 				<WhyThis type={detail.media_type} id={detail.id} />
 			</div>
+		</div>
+	);
+}
+
+function PlexPlaybackLinks({
+	availability,
+}: {
+	availability: MediaDetail["availability"];
+}) {
+	const variant =
+		availability?.playback?.regular ?? availability?.playback?.four_k;
+	if (!variant) {
+		return null;
+	}
+	const android = /Android/i.test(navigator.userAgent);
+	const appHref = android ? variant.android_intent_url : variant.app_url;
+	return (
+		<div className="flex flex-col items-start gap-1">
+			<div className="flex flex-wrap items-center gap-3">
+				<a
+					href={variant.web_url}
+					target="_blank"
+					rel="noopener noreferrer"
+					aria-label="Play in Plex Web (opens in a new tab)"
+					aria-describedby="plex-playback-experimental"
+					className="inline-flex min-h-11 items-center rounded bg-app-accent px-4 py-1.5 text-sm font-semibold text-white hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text"
+				>
+					<span aria-hidden="true">▶</span>&nbsp; Plex Web
+				</a>
+				{appHref && (
+					<a
+						href={appHref}
+						rel="noreferrer"
+						aria-label="Play in Plex App"
+						aria-describedby="plex-playback-experimental"
+						className="inline-flex min-h-11 items-center rounded border border-app-border px-4 py-1.5 text-sm font-semibold text-app-text hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent"
+					>
+						Plex App
+					</a>
+				)}
+			</div>
+			<p
+				id="plex-playback-experimental"
+				className="text-xs text-app-muted-text"
+			>
+				Experimental. Plex Web may need a second try after sign-in or switching
+				users. Plex App may open Home instead.
+			</p>
 		</div>
 	);
 }

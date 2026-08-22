@@ -22,6 +22,10 @@ EXPECTED_GUARDS = {
     ("POST", "/api/v1/connection-test"): {"require_same_origin", "admin_rate_limit"},
     ("POST", "/api/v1/request"): {"require_same_origin", "mutation_rate_limit"},
     ("POST", "/api/v1/signals"): {"require_same_origin", "mutation_rate_limit"},
+    ("POST", "/api/v1/taste-onboarding"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+    },
     ("POST", "/api/v1/recommendations/reset"): {
         "require_same_origin",
         "mutation_rate_limit",

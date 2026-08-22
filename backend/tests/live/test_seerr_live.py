@@ -43,7 +43,7 @@ import httpx
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from tasterr.catalog.availability import NOT_REQUESTED, to_availability
+from tasterr.catalog.availability import to_availability
 from tasterr.clients.errors import UpstreamRejected
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 
@@ -212,19 +212,25 @@ async def test_availability_read_smoke_and_not_in_library() -> None:
             assert isinstance(info.status, int)
 
         unrequested = await client.media_status("movie", int(REQUEST_TMDB_ID))
-        assert to_availability(unrequested) == NOT_REQUESTED
+        availability = to_availability(unrequested)
+        assert availability.status == "not_requested"
+        assert availability.known
 
 
 @requires_available
 async def test_available_title_has_a_media_record() -> None:
-    """Proves the available-title contract: an operator-supplied in-library id
-    returns a real `mediaInfo` whose MediaStatus maps to available."""
+    """Proves the playback-link contract when the operator supplies a Plex-backed
+    in-library title; other media-server backends skip without exposing links."""
     tmdb_id = int(AVAILABLE_TMDB_ID)
     async with httpx.AsyncClient(timeout=10.0) as http:
         info = await SeerrClient(http, URL, API_KEY).media_status("movie", tmdb_id)
 
         assert info is not None, "expected a media record for the supplied available id"
-        assert to_availability(info).status == "available"
+        availability = to_availability(info)
+        assert availability.status in ("partial", "available")
+        if availability.playback is None:
+            pytest.skip("available title has no Plex playback links")
+        assert availability.playback.regular is not None or availability.playback.four_k is not None
 
 
 @requires_history
@@ -300,7 +306,9 @@ async def test_request_as_user_attribution_and_cleanup() -> None:
     async with httpx.AsyncClient(timeout=10.0) as http:
         login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
         info = await SeerrClient(http, URL, API_KEY).media_status("movie", tmdb_id)
-        assert to_availability(info) == NOT_REQUESTED
+        availability = to_availability(info)
+        assert availability.status == "not_requested"
+        assert availability.known
 
         created_may_have_succeeded = False
         request_id: int | None = None

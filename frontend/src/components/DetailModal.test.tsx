@@ -16,6 +16,7 @@ afterEach(() => {
 	cleanup();
 	document.body.style.overflow = "";
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 const DETAIL = {
@@ -76,7 +77,7 @@ function renderModal(
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
-	render(
+	return render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter initialEntries={initialEntries}>
 				<Routes>
@@ -117,6 +118,174 @@ test("renders the title detail sections", async () => {
 	);
 	expect(external.getAttribute("target")).toBe("_blank");
 	expect(external.getAttribute("rel")).toBe("noopener noreferrer");
+});
+
+test("available titles expose separate focusable Plex web and app links", async () => {
+	stubTasteFetch({
+		"/api/v1/title/": {
+			...DETAIL,
+			availability: {
+				status: "available",
+				known: true,
+				playback: {
+					regular: {
+						web_url: "https://app.plex.tv/desktop/#!/details",
+						app_url: "plex://preplay/?metadataKey=x",
+						android_intent_url: "intent://preplay/#Intent;end",
+					},
+					four_k: null,
+				},
+			},
+		},
+		"/api/v1/signals": { recorded: true },
+	});
+	vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
+	renderModal();
+
+	const web = await screen.findByRole("link", {
+		name: "Play in Plex Web (opens in a new tab)",
+	});
+	const app = screen.getByRole("link", { name: "Play in Plex App" });
+	expect(web.getAttribute("href")).toBe(
+		"https://app.plex.tv/desktop/#!/details",
+	);
+	expect(app.getAttribute("href")).toBe("plex://preplay/?metadataKey=x");
+	expect(web.getAttribute("target")).toBe("_blank");
+	expect(web.getAttribute("rel")).toBe("noopener noreferrer");
+	expect(app.getAttribute("rel")).toBe("noreferrer");
+	const guidance = screen.getByText(
+		"Experimental. Plex Web may need a second try after sign-in or switching users. Plex App may open Home instead.",
+	);
+	expect(guidance.getAttribute("id")).toBe("plex-playback-experimental");
+	expect(web.getAttribute("aria-describedby")).toBe(
+		"plex-playback-experimental",
+	);
+	expect(app.getAttribute("aria-describedby")).toBe(
+		"plex-playback-experimental",
+	);
+	web.focus();
+	expect(document.activeElement).toBe(web);
+	app.focus();
+	expect(document.activeElement).toBe(app);
+});
+
+test("Android keeps Plex Web and uses the server-provided app intent", async () => {
+	stubTasteFetch({
+		"/api/v1/title/": {
+			...DETAIL,
+			availability: {
+				status: "available",
+				known: true,
+				playback: {
+					regular: {
+						web_url: "https://app.plex.tv/desktop/#!/details",
+						app_url: "plex://preplay/?metadataKey=x",
+						android_intent_url:
+							"intent://preplay/#Intent;package=com.plexapp.android;S.browser_fallback_url=https%3A%2F%2Fapp.plex.tv;end",
+					},
+					four_k: null,
+				},
+			},
+		},
+		"/api/v1/signals": { recorded: true },
+	});
+	vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Linux; Android 16)" });
+	renderModal();
+
+	expect(
+		(
+			await screen.findByRole("link", {
+				name: "Play in Plex Web (opens in a new tab)",
+			})
+		).getAttribute("href"),
+	).toBe("https://app.plex.tv/desktop/#!/details");
+	expect(
+		screen.getByRole("link", { name: "Play in Plex App" }).getAttribute("href"),
+	).toContain("package=com.plexapp.android");
+});
+
+test("partially available regular playback is preferred over playable 4K", async () => {
+	stubTasteFetch({
+		"/api/v1/title/": {
+			...DETAIL,
+			availability: {
+				status: "partial",
+				known: true,
+				playback: {
+					regular: {
+						web_url: "https://app.plex.tv/desktop#!/partial",
+						app_url: "plex://preplay/?metadataKey=partial",
+						android_intent_url: null,
+					},
+					four_k: {
+						web_url: "https://app.plex.tv/desktop#!/4k",
+						app_url: "plex://preplay/?metadataKey=4k",
+						android_intent_url: null,
+					},
+				},
+			},
+		},
+		"/api/v1/signals": { recorded: true },
+	});
+	vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" });
+	renderModal();
+
+	const web = await screen.findByRole("link", {
+		name: "Play in Plex Web (opens in a new tab)",
+	});
+	const app = screen.getByRole("link", { name: "Play in Plex App" });
+	expect(web.getAttribute("href")).toBe(
+		"https://app.plex.tv/desktop#!/partial",
+	);
+	expect(app.getAttribute("href")).toBe("plex://preplay/?metadataKey=partial");
+});
+
+test("playback links fall back to 4K and omit an unavailable app target", async () => {
+	stubTasteFetch({
+		"/api/v1/title/": {
+			...DETAIL,
+			availability: {
+				status: "available",
+				known: true,
+				playback: {
+					regular: null,
+					four_k: {
+						web_url: "https://app.plex.tv/desktop/#!/4k",
+						app_url: null,
+						android_intent_url: null,
+					},
+				},
+			},
+		},
+		"/api/v1/signals": { recorded: true },
+	});
+	renderModal();
+
+	expect(
+		(
+			await screen.findByRole("link", {
+				name: "Play in Plex Web (opens in a new tab)",
+			})
+		).getAttribute("href"),
+	).toBe("https://app.plex.tv/desktop/#!/4k");
+	expect(screen.queryByRole("link", { name: "Play in Plex App" })).toBeNull();
+
+	cleanup();
+	stubTasteFetch({
+		"/api/v1/title/": {
+			...DETAIL,
+			availability: { status: "available", known: true, playback: null },
+		},
+		"/api/v1/signals": { recorded: true },
+	});
+	renderModal();
+	await screen.findByRole("heading", { name: "Deep Movie" });
+	expect(
+		screen.queryByRole("link", {
+			name: "Play in Plex Web (opens in a new tab)",
+		}),
+	).toBeNull();
+	expect(screen.queryByRole("link", { name: "Play in Plex App" })).toBeNull();
 });
 
 test("traps focus, marks the browse shell inert, and cleans up on Escape", async () => {

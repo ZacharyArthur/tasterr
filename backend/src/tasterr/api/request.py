@@ -26,6 +26,7 @@ from tasterr.catalog.availability import Availability, availability_from_code
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.seerr import MediaType, SeerrAuthClient, SeerrClient
 from tasterr.recommend import store
+from tasterr.recommend.signals import MAX_TMDB_ID
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings, get_settings
 
@@ -37,7 +38,7 @@ RequestStatus = Literal["ok", "re_auth_required", "unavailable", "failed"]
 
 class RequestBody(BaseModel):
     media_type: Literal["movie", "tv"]
-    tmdb_id: int = Field(ge=1)
+    tmdb_id: int = Field(ge=1, le=MAX_TMDB_ID)
 
 
 class RequestResponse(BaseModel):
