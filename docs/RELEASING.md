@@ -1,7 +1,7 @@
 # Releasing
 
 This procedure is for stable v1 releases. The current package version is
-`1.0.2`, its Git tag is `v1.0.2`, and its image is published by the `image` workflow
+`1.1.0`, its Git tag is `v1.1.0`, and its image is published by the `image` workflow
 only after all release changes are squash-merged to protected `main`. The published
 `v1.0.0` tag is retained for provenance, but no GitHub Release was announced for it;
 `v1.0.1` is the immutable-tag fix-forward and first announced release.
@@ -46,7 +46,7 @@ native image/Compose smoke sequentially. Any failure blocks the release.
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-Record the date and result in `docs/releases/v1.0.2.md`. This command intentionally
+Record the date and result in `docs/releases/v1.1.0.md`. This command intentionally
 does not imply that audits, security review, or live contracts passed.
 
 For subsequent releases, the committed evidence file is the pre-tag record. Write
@@ -195,16 +195,16 @@ pushes.
 After every pre-tag release-record field is final, create and push the annotated tag:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . git tag -a v1.0.2 -m "v1.0.2"
-npx @devcontainers/cli exec --workspace-folder . git push origin v1.0.2
+npx @devcontainers/cli exec --workspace-folder . git tag -a v1.1.0 -m "v1.1.0"
+npx @devcontainers/cli exec --workspace-folder . git push origin v1.1.0
 ```
 
-Wait for the image workflow. It must publish `1.0.2`, `1.0`, `1`, and `latest`, and
+Wait for the image workflow. It must publish `1.1.0`, `1.1`, `1`, and `latest`, and
 leave the existing `sha-<full-commit>` candidate unchanged. Inspect the stable
 manifest and confirm both platforms:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.0.2
+npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.1.0
 ```
 
 The historical v1.0.1 image has no attestation. For subsequent releases, substitute
@@ -216,15 +216,15 @@ gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:<version> -R ZacharyAr
 
 Perform a fresh install in an empty directory with a new external network, disposable
 `.env`, and new Compose project. Set
-`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:1.0.2`, run `docker compose pull` and
+`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:1.1.0`, run `docker compose pull` and
 `docker compose up -d --no-build`, then verify health, SPA serving, non-root uid, and
 named-volume persistence. Delete every disposable resource after verification.
 
 Publish release notes only after the applicable manifest, attestation, and fresh
 install checks pass. Summarize user-visible changes, upgrade steps, and known
-limitations; then pin the `1.0.2` digest as the released artifact without reproducing
-private evidence. The historical v1.0.1 GitHub Release is mutable. Publish v1.0.2
-with repository immutability enabled only after `1.0.2`, `1.0`, `1`, and `latest`
+limitations; then pin the `1.1.0` digest as the released artifact without reproducing
+private evidence. The historical v1.0.1 GitHub Release is mutable. Publish v1.1.0
+with repository immutability enabled only after `1.1.0`, `1.1`, `1`, and `latest`
 resolve to the expected release commit, the `sha-<full-commit>` candidate retains its
 recorded pre-tag digest, and the tagged clean-install smoke passes.
 
