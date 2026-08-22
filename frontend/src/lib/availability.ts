@@ -15,6 +15,7 @@ import {
 	type MediaType,
 	postAvailability,
 } from "./api";
+import { captureSession, isSessionCurrent } from "./auth";
 
 export function availabilityKey(mediaType: MediaType, id: number): string {
 	return `${mediaType}:${id}`;
@@ -81,7 +82,9 @@ export function useRequest(type: MediaType, id: number) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: () => createRequest(type, id),
-		onSuccess: (response) => {
+		onMutate: () => captureSession(queryClient),
+		onSuccess: (response, _variables, sessionEpoch) => {
+			if (!isSessionCurrent(queryClient, sessionEpoch)) return;
 			if (response.status === "ok" && response.availability) {
 				const next = response.availability;
 				// Flip this title's detail badge immediately, and let card badges
