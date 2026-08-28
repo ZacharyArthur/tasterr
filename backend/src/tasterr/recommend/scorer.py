@@ -57,6 +57,35 @@ def rank(profile: dict[str, float], candidates: list[Candidate], limit: int) -> 
     Precondition: callers bound `candidates` (the service's CANDIDATE_CAP);
     the greedy loop is O(n²·k) and does no truncation of its own."""
     base = {id(candidate): score(profile, candidate) for candidate in candidates}
+    return _diverse_rank(candidates, base, limit)
+
+
+def rank_exploration(
+    profile: dict[str, float], candidates: list[Candidate], limit: int
+) -> list[Candidate]:
+    """Rank the lowest non-negative similarity quarter by quality and availability."""
+    unique = {candidate.key: candidate for candidate in candidates}
+    by_similarity = sorted(
+        (
+            (similarity, candidate)
+            for candidate in unique.values()
+            if (similarity := dot(profile, candidate.record.vector)) >= 0.0
+        ),
+        key=lambda pair: (pair[0], pair[1].key[0], pair[1].key[1]),
+    )
+    fringe = [candidate for _, candidate in by_similarity[: (len(by_similarity) + 3) // 4]]
+    base = {
+        id(candidate): BETA_QUALITY
+        * quality_prior(candidate.record.vote_average, candidate.record.vote_count)
+        + GAMMA_AVAILABILITY * (1.0 if candidate.available else 0.0)
+        for candidate in fringe
+    }
+    return _diverse_rank(fringe, base, limit)
+
+
+def _diverse_rank(
+    candidates: list[Candidate], base: dict[int, float], limit: int
+) -> list[Candidate]:
     remaining = sorted(candidates, key=lambda c: base[id(c)], reverse=True)
     picked: list[Candidate] = []
     while remaining and len(picked) < limit:

@@ -13,7 +13,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from pydantic import SecretStr
+
 from tasterr.catalog.models import MediaSummary, MediaType, RailKind, ServiceOption
+from tasterr.catalog.plex import PlexCatalogService
 from tasterr.catalog.service import CatalogService
 from tasterr.db.models import User
 from tasterr.recommend.service import TasteService
@@ -25,26 +28,10 @@ MIN_RAIL_ITEMS = 4
 # A one-title watchlist is still the user's list — never omit it as "thin".
 MY_LIST_MIN_ITEMS = 1
 HERO_SIZE = 5
-HOME_GENRE_COUNT = 4
 EXTRA_PAGE_SIZE = 4
 HERO_GENRE_LABELS = 3
 SERVICE_RAIL_LIMIT = 4
 
-# Curated, ordered genre labels surfaced first (rest flow into infinite scroll).
-GENRE_PICKS = (
-    "Action",
-    "Comedy",
-    "Drama",
-    "Science Fiction",
-    "Thriller",
-    "Animation",
-    "Horror",
-    "Romance",
-    "Adventure",
-    "Mystery",
-    "Fantasy",
-    "Family",
-)
 DECADES = (2020, 2010, 2000, 1990, 1980)
 _GENRE_MIN_VOTES = {"movie": 50, "tv": 30}
 
@@ -54,6 +41,8 @@ class RailContext:
     catalog: CatalogService
     user: User | None = None  # None → non-personalized compose (extra pages, tests)
     taste: TasteService | None = None
+    plex: PlexCatalogService | None = None
+    plex_account_token: SecretStr | None = None
     disabled_rail_types: frozenset[RailType] = frozenset()
 
     def enabled(self, rail_type: RailType) -> bool:
@@ -106,13 +95,14 @@ def personalized_home_providers(
         try:
             result = await taste.more_like(user_id)
         except Exception:  # engine failure → no rail, never a failed home
-            logger.exception("rails: more-like failed")
+            logger.error("rails: more-like failed")
             await _quiet_rollback(taste)
             return []
         if result is None:
             return []
-        source_title, items = result
-        more_like.title = f"More like {source_title}"  # resolved with the fetch
+        source_title, is_plex_watch, items = result
+        prefix = "Because You Watched" if is_plex_watch else "More Like"
+        more_like.title = f"{prefix} {source_title}"  # resolved with the fetch
         return items
 
     my_list = RailProvider(
@@ -143,13 +133,54 @@ def personalized_home_providers(
     return [my_list, recommended], [more_like]
 
 
+def continue_watching_provider(ctx: RailContext) -> RailProvider | None:
+    """Caller-scoped live Plex provider; no request DB session is involved."""
+    if ctx.user is None or ctx.plex is None or ctx.plex_account_token is None:
+        return None
+    plex = ctx.plex
+    user_id = ctx.user.id
+    account_token = ctx.plex_account_token
+
+    async def fetch(_: RailContext) -> list[MediaSummary]:
+        return await plex.continue_watching(user_id, account_token.get_secret_value())
+
+    return RailProvider(
+        "continue-watching",
+        "Continue Watching",
+        "standard",
+        fetch,
+        RailType.CONTINUE_WATCHING,
+    )
+
+
+def unexpected_picks_provider(ctx: RailContext) -> RailProvider | None:
+    if ctx.user is None or ctx.taste is None:
+        return None
+    taste = ctx.taste
+    user_id = ctx.user.id
+
+    async def fetch(_: RailContext) -> list[MediaSummary]:
+        return await _engine_safe(
+            taste, taste.unexpected_picks(user_id), "unexpected-picks", user_id
+        )
+
+    return RailProvider(
+        "unexpected-picks",
+        "Picks You Wouldn't Usually Watch",
+        "standard",
+        fetch,
+        RailType.UNEXPECTED_PICKS,
+        exclusive=True,
+    )
+
+
 async def _engine_safe(
     taste: TasteService, call: Awaitable[list[MediaSummary]], rail_id: str, user_id: int
 ) -> list[MediaSummary]:
     try:
         return await call
     except Exception:  # engine failure → no rail, never a failed home
-        logger.exception("rails: %s failed", rail_id)
+        logger.error("rails: %s failed", rail_id)
         await _quiet_rollback(taste)
         return []
 
@@ -160,7 +191,7 @@ async def _quiet_rollback(taste: TasteService) -> None:
     try:
         await taste.rollback()
     except Exception:
-        logger.exception("rails: session rollback after degrade failed")
+        logger.error("rails: session rollback after degrade failed")
 
 
 def home_providers() -> list[RailProvider]:
@@ -180,6 +211,13 @@ def home_providers() -> list[RailProvider]:
             "Popular Movies",
             "standard",
             lambda ctx: ctx.catalog.discover("movie", sort_by="popularity.desc", min_votes=50),
+            RailType.POPULAR,
+        ),
+        RailProvider(
+            "popular-tv",
+            "Popular TV",
+            "standard",
+            lambda ctx: ctx.catalog.discover("tv", sort_by="popularity.desc", min_votes=30),
             RailType.POPULAR,
         ),
         RailProvider(
@@ -208,7 +246,7 @@ def top_rated_providers() -> list[RailProvider]:
         ),
         RailProvider(
             "top-rated-tv",
-            "Top Rated Shows",
+            "Top Rated TV",
             "standard",
             lambda ctx: ctx.catalog.discover("tv", sort_by="vote_average.desc", min_votes=300),
             RailType.TOP_RATED,
@@ -222,7 +260,7 @@ def genre_provider(genre_id: int, name: str, media: MediaType) -> RailProvider:
             media, genres=[genre_id], min_votes=_GENRE_MIN_VOTES[media]
         )
 
-    label = name if media == "movie" else f"{name} · TV"
+    label = f"{name} · {'Movies' if media == 'movie' else 'TV'}"
     return RailProvider(f"genre-{media}-{genre_id}", label, "genre", fetch, RailType.GENRES)
 
 

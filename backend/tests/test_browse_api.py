@@ -6,10 +6,11 @@
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Never, cast
 
 import httpx
 import pytest
+from cryptography.fernet import InvalidToken
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -18,11 +19,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from tasterr.api.availability import get_availability
 from tasterr.api.catalog import get_catalog
+from tasterr.api.runtime_settings import get_runtime_settings
+from tasterr.auth.crypto import encrypt_token
 from tasterr.auth.sessions import mint_session
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.facts import TitleFacts
-from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, WatchProviders
+from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, RailsPage, WatchProviders
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.seerr import SeerrClient
@@ -30,8 +33,10 @@ from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import User
 from tasterr.main import create_app
+from tasterr.rails.registry import RailContext
 from tasterr.recommend.signals import SignalKind
 from tasterr.recommend.store import record_signal
+from tasterr.runtime_settings import RailType, RuntimeSettings
 from tasterr.settings import Settings
 
 SECRET = "test-secret-key"
@@ -141,7 +146,7 @@ def _app(tmp_path: Path, *, tmdb: bool = True) -> FastAPI:
     return app
 
 
-def _seed_session(db_path: Path) -> str:
+def _seed_session(db_path: Path, *, plex: bool = False) -> str:
     async def _run() -> str:
         engine = create_engine(db_path)
         try:
@@ -152,12 +157,13 @@ def _seed_session(db_path: Path) -> str:
                     seerr_user_id=99,
                     display_name="Seeded",
                     avatar_url=None,
-                    auth_type="local",
+                    auth_type="plex" if plex else "local",
                     is_admin=False,
                 )
                 db.add(user)
                 await db.flush()
-                return await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+                plex_token = encrypt_token(SECRET, "plex-token") if plex else None
+                return await mint_session(db, user.id, "connect.sid=s%3Aseed", plex_token)
         finally:
             await engine.dispose()
 
@@ -169,6 +175,65 @@ def _authed_client(app: FastAPI, db_path: Path) -> TestClient:
     client = TestClient(app)
     client.cookies.set("tasterr_session", token)
     return client
+
+
+def test_plex_backed_home_evaluates_history_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = _app(tmp_path)
+    app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
+    captured: list[tuple[int, bool]] = []
+
+    def recorder(
+        request: object,
+        settings: object,
+        user_id: int,
+        attempted_at: object,
+        plex_token_enc: str | None,
+    ) -> None:
+        captured.append((user_id, plex_token_enc is not None))
+
+    monkeypatch.setattr("tasterr.api.home.schedule_plex_history", recorder)
+
+    def unreadable(_secret_key: str, _ciphertext: str) -> Never:
+        raise InvalidToken
+
+    monkeypatch.setattr("tasterr.api.home.decrypt_token", unreadable)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path, plex=True)
+    with TestClient(app) as client:
+        client.cookies.set("tasterr_session", token)
+        response = client.get("/api/v1/home")
+
+    assert response.status_code == 200
+    assert captured == [(1, True)]
+
+
+def test_disabled_continue_watching_does_not_decrypt_account_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = _app(tmp_path)
+    app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
+    app.dependency_overrides[get_runtime_settings] = lambda: RuntimeSettings(
+        disabled_rail_types=[RailType.CONTINUE_WATCHING]
+    )
+
+    def ignore_schedule(*_args: object) -> None:
+        pass
+
+    monkeypatch.setattr("tasterr.api.home.schedule_plex_history", ignore_schedule)
+
+    def unexpected_decrypt(_secret_key: str, _ciphertext: str) -> Never:
+        raise AssertionError("disabled Continue Watching decrypted its token")
+
+    monkeypatch.setattr("tasterr.api.home.decrypt_token", unexpected_decrypt)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path, plex=True)
+    with TestClient(app) as client:
+        client.cookies.set("tasterr_session", token)
+        response = client.get("/api/v1/home")
+
+    assert response.status_code == 200
 
 
 # ── Session gating (4.1-4.3) ─────────────────────────────────────────────────
@@ -221,10 +286,30 @@ def test_rails_paginate_with_cursor(tmp_path: Path) -> None:
     db_path = tmp_path / "tasterr.db"
     with _authed_client(app, db_path) as client:
         first = client.get("/api/v1/rails?cursor=0").json()
-        deep = client.get("/api/v1/rails?cursor=8").json()
+        deep = client.get("/api/v1/rails?cursor=12").json()
 
     assert first["next_cursor"] == 4
     assert deep["next_cursor"] is None  # catalogue exhausted
+
+
+def test_rails_pass_the_signed_in_user_to_daily_ordering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[int | None] = []
+
+    async def capture(ctx: RailContext, _cursor: int) -> RailsPage:
+        captured.append(ctx.user.id if ctx.user is not None else None)
+        return RailsPage()
+
+    monkeypatch.setattr("tasterr.api.home.build_extra_rails", capture)
+    app = _app(tmp_path)
+    app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
+    db_path = tmp_path / "tasterr.db"
+    with _authed_client(app, db_path) as client:
+        response = client.get("/api/v1/rails")
+
+    assert response.status_code == 200
+    assert captured == [1]
 
 
 # ── Title detail (4.2) ───────────────────────────────────────────────────────

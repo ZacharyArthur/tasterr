@@ -48,10 +48,11 @@ async def complete_login(
     login: SeerrLogin,
     auth_type: str,
     plex_token: str | None,
-) -> tuple[User, str]:
-    """Both login paths converge here. Returns the user and the raw session
-    token — it exists nowhere else but the caller's Set-Cookie header."""
+) -> tuple[User, str, str | None]:
+    """Both login paths converge here. The raw session token exists nowhere
+    else but the caller's Set-Cookie header; the encrypted Plex token is
+    returned only for immediate server-side background scheduling."""
     user = await upsert_user(db, login, auth_type)
     plex_token_enc = encrypt_token(secret_key, plex_token) if plex_token is not None else None
     token = await mint_session(db, user.id, login.cookie, plex_token_enc)
-    return user, token
+    return user, token, plex_token_enc

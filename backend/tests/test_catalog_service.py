@@ -3,7 +3,9 @@
 from typing import cast
 
 import pytest
+from pydantic import ValidationError
 
+from tasterr.catalog.models import MediaSummary
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.tmdb import (
     CatalogNotConfigured,
@@ -146,3 +148,19 @@ async def test_probe_delegates_to_client() -> None:
     fake = FakeTmdb()
     await _service(fake).probe()
     assert fake.calls == 1
+
+
+@pytest.mark.parametrize("progress", [0, 100])
+def test_media_summary_rejects_non_resumable_progress(progress: int) -> None:
+    with pytest.raises(ValidationError):
+        MediaSummary(
+            id=1,
+            media_type="movie",
+            title="Title",
+            overview="",
+            poster_path=None,
+            backdrop_path=None,
+            year=None,
+            vote_average=0,
+            progress_percent=progress,
+        )

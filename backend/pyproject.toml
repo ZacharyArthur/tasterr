@@ -56,7 +56,7 @@ asyncio_default_fixture_loop_scope = "function"
 # `just check` stays hermetic and offline; run the live suite via `just test-live`.
 addopts = "-m 'not live'"
 markers = [
-    "live: hits the real Seerr instance (excluded by default; see just test-live)",
+    "live: hits real upstream contracts (excluded by default; see just test-live)",
 ]
 
 [tool.importlinter]

@@ -8,8 +8,10 @@ raise upstream/storage errors; the rail seam degrades them to an omitted rail
 
 import asyncio
 import logging
+from collections.abc import Awaitable
 from contextlib import suppress
-from datetime import timedelta
+from datetime import date, timedelta
+from random import Random
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,8 +23,14 @@ from tasterr.db.models import Signal, utcnow
 from tasterr.recommend import store
 from tasterr.recommend.explain import Explanation, explain
 from tasterr.recommend.features import FeatureRecord, build_record
-from tasterr.recommend.profile import SignalInput, compute_profile
-from tasterr.recommend.scorer import Candidate, engaged_titles, hidden_titles, rank
+from tasterr.recommend.profile import SignalInput, blend_profiles, compute_profile
+from tasterr.recommend.scorer import (
+    Candidate,
+    engaged_titles,
+    hidden_titles,
+    rank,
+    rank_exploration,
+)
 from tasterr.recommend.signals import STRONG_POSITIVE_KINDS, MediaType, TitleKey
 
 logger = logging.getLogger("tasterr.recommend")
@@ -32,6 +40,9 @@ PROFILE_MAX_AGE = timedelta(hours=24)
 BUILD_CONCURRENCY = 8
 CANDIDATE_CAP = 150
 RAIL_SIZE = 20
+MIN_HOUSEHOLD_MEMBERS = 2
+MAX_HOUSEHOLD_MEMBERS = 6
+EXPLORATION_MIN_VOTES: dict[MediaType, int] = {"movie": 50, "tv": 30}
 TOP_SOURCE_TITLES = 3  # strong-positive titles whose recs/similar seed the pool
 TOP_GENRES = 2
 # In-library statuses that earn the availability boost ("watch tonight").
@@ -136,32 +147,85 @@ class TasteService:
         ranked = rank(profile, candidates, RAIL_SIZE)
         return [pool[candidate.key] for candidate in ranked]
 
-    async def more_like(self, user_id: int) -> tuple[str, list[MediaSummary]] | None:
+    async def more_like(self, user_id: int) -> tuple[str, bool, list[MediaSummary]] | None:
         """Candidates related to the user's most recent strong-positive title,
-        re-ranked by their profile. Returns (source title, items)."""
+        re-ranked by their profile. Returns (source title, is Plex watch, items)."""
         profile = await self.profile_vector(user_id)
         if not profile:
             return None
         signals = await store.load_signals(self._db, user_id)
         hidden = hidden_titles((_key(s), _kind(s)) for s in signals)
-        source = next(
-            (s for s in signals if _kind(s) in STRONG_POSITIVE_KINDS and _key(s) not in hidden),
-            None,
-        )
-        if source is None:
-            return None
-        detail = await self._catalog.detail(*_key(source))
-        pool: dict[TitleKey, MediaSummary] = {}
-        for summary in detail.recommendations + detail.similar:
-            key: TitleKey = (summary.media_type, summary.id)
-            if key == _key(source) or key in hidden or key in pool:
+        source_keys = self._source_titles(signals, hidden)
+        Random(f"more-like:{user_id}:{date.today().isoformat()}").shuffle(source_keys)
+        for source_key in source_keys:
+            source = next(
+                signal
+                for signal in signals
+                if _key(signal) == source_key and _kind(signal) in STRONG_POSITIVE_KINDS
+            )
+            try:
+                detail = await self._catalog.detail(*source_key)
+            except UpstreamError:
                 continue
-            pool[key] = summary
-        if not pool:
-            return None
+            pool: dict[TitleKey, MediaSummary] = {}
+            for summary in detail.recommendations + detail.similar:
+                key: TitleKey = (summary.media_type, summary.id)
+                if key == source_key or key in hidden or key in pool:
+                    continue
+                pool[key] = summary
+            candidates = await self._to_candidates(list(pool))
+            ranked = rank(profile, candidates, RAIL_SIZE)
+            items = [pool[candidate.key] for candidate in ranked]
+            if items:
+                return detail.title, _kind(source) == "watched_plex", items
+        return None
+
+    async def unexpected_picks(self, user_id: int) -> list[MediaSummary]:
+        profile = await self.profile_vector(user_id)
+        if not profile:
+            return []
+        signals = await store.load_signals(self._db, user_id)
+        kinds = [(_key(signal), _kind(signal)) for signal in signals]
+        pool = await self._exploration_pool(profile, hidden_titles(kinds) | engaged_titles(kinds))
         candidates = await self._to_candidates(list(pool))
-        ranked = rank(profile, candidates, RAIL_SIZE)
-        return detail.title, [pool[candidate.key] for candidate in ranked]
+        return [
+            pool[candidate.key] for candidate in rank_exploration(profile, candidates, RAIL_SIZE)
+        ]
+
+    async def household_blend(self, user_ids: list[int]) -> list[MediaSummary]:
+        if not MIN_HOUSEHOLD_MEMBERS <= len(user_ids) <= MAX_HOUSEHOLD_MEMBERS or len(
+            user_ids
+        ) != len(set(user_ids)):
+            raise ValueError("invalid household audience")
+        members: list[tuple[dict[str, float], list[Signal], set[TitleKey]]] = []
+        vetoed: set[TitleKey] = set()
+        for user_id in sorted(user_ids):
+            profile = await self.profile_vector(user_id)
+            if not profile:
+                raise ValueError("household profile unavailable")
+            signals = await store.load_signals(self._db, user_id)
+            kinds = [(_key(signal), _kind(signal)) for signal in signals]
+            hidden = hidden_titles(kinds)
+            vetoed.update(hidden | engaged_titles(kinds))
+            members.append((profile, signals, hidden))
+
+        profile = blend_profiles(member_profile for member_profile, _, _ in members)
+        if not profile:
+            raise ValueError("household profile unavailable")
+        pool: dict[TitleKey, MediaSummary] = {}
+        for member_profile, signals, hidden in members:
+            member_pool = await self._candidate_pool(
+                member_profile,
+                signals,
+                hidden,
+                vetoed | set(pool),
+                limit=CANDIDATE_CAP - len(pool),
+            )
+            pool.update(member_pool)
+            if len(pool) >= CANDIDATE_CAP:
+                break
+        candidates = await self._to_candidates(list(pool))
+        return [pool[candidate.key] for candidate in rank(profile, candidates, RAIL_SIZE)]
 
     async def my_list(self, user_id: int) -> list[MediaSummary]:
         """The user's active watchlist, newest first, minus anything they've
@@ -203,10 +267,15 @@ class TasteService:
         signals: list[Signal],
         hidden: set[TitleKey],
         excluded: set[TitleKey],
+        *,
+        limit: int | None = None,
     ) -> dict[TitleKey, MediaSummary]:
         """Recs+similar for recent strong titles + top-genre discover +
         trending — all already-cached TMDB surfaces — capped, exclusions
         applied. Each source degrades independently."""
+        cap = CANDIDATE_CAP if limit is None else max(0, limit)
+        if cap == 0:
+            return {}
         sources: list[list[MediaSummary]] = []
         for key in self._source_titles(signals, hidden):
             try:
@@ -228,7 +297,70 @@ class TasteService:
                 if key in excluded or key in pool:
                     continue
                 pool[key] = summary
+                if len(pool) >= cap:
+                    return pool
+        return pool
+
+    async def _exploration_pool(
+        self, profile: dict[str, float], excluded: set[TitleKey]
+    ) -> dict[TitleKey, MediaSummary]:
+        pool: dict[TitleKey, MediaSummary] = {}
+
+        async def add(source: Awaitable[list[MediaSummary]]) -> bool:
+            try:
+                summaries = await source
+            except UpstreamError:
+                return False
+            for summary in summaries:
+                key: TitleKey = (summary.media_type, summary.id)
+                if key in excluded or key in pool:
+                    continue
+                pool[key] = summary
                 if len(pool) >= CANDIDATE_CAP:
+                    return True
+            return False
+
+        if await add(self._catalog.trending()):
+            return pool
+        for media in ("movie", "tv"):
+            if await add(
+                self._catalog.discover(
+                    media,
+                    sort_by="popularity.desc",
+                    min_votes=EXPLORATION_MIN_VOTES[media],
+                )
+            ):
+                return pool
+        if await add(
+            self._catalog.discover(
+                "movie",
+                sort_by="primary_release_date.desc",
+                release_lte=date.today().isoformat(),
+                min_votes=5,
+            )
+        ):
+            return pool
+
+        leading = {
+            dimension.removeprefix("genre:")
+            for dimension, weight in profile.items()
+            if dimension.startswith("genre:") and weight > 0.0
+        }
+        for media in ("movie", "tv"):
+            try:
+                genres = await self._catalog.genre_map(media)
+            except UpstreamError:
+                continue
+            for name, genre_id in genres.items():
+                if name.lower() in leading:
+                    continue
+                if await add(
+                    self._catalog.discover(
+                        media,
+                        genres=[genre_id],
+                        min_votes=EXPLORATION_MIN_VOTES[media],
+                    )
+                ):
                     return pool
         return pool
 

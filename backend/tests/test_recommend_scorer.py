@@ -1,5 +1,7 @@
 """Pure scoring math: ordering properties, boosts, exclusions, MMR (no I/O)."""
 
+import math
+
 from tasterr.recommend.features import FeatureRecord, l2_normalize
 from tasterr.recommend.scorer import (
     Candidate,
@@ -8,6 +10,7 @@ from tasterr.recommend.scorer import (
     hidden_titles,
     quality_prior,
     rank,
+    rank_exploration,
     score,
 )
 from tasterr.recommend.signals import SignalKind, TitleKey
@@ -27,6 +30,13 @@ def _candidate(
         vector=l2_normalize(vector), vote_average=vote_average, vote_count=vote_count
     )
     return Candidate(key=key, record=record, available=available)
+
+
+def _at_similarity(tmdb_id: int, similarity: float) -> Candidate:
+    return _candidate(
+        ("movie", tmdb_id),
+        {"profile": similarity, "other": math.sqrt(1.0 - similarity * similarity)},
+    )
 
 
 def test_similar_title_outranks_dissimilar_popular_title() -> None:
@@ -81,13 +91,86 @@ def test_hidden_and_engaged_exclusion_sets() -> None:
         (("movie", 2), "request"),
         (("movie", 3), "watchlist"),
         (("movie", 4), "seed_request_history"),
-        (("movie", 5), "detail_open"),
+        (("movie", 5), "watched_plex"),
+        (("movie", 6), "detail_open"),
     ]
 
     assert hidden_titles(signals) == {("movie", 1)}
-    assert engaged_titles(signals) == {("movie", 2), ("movie", 3), ("movie", 4)}
+    assert engaged_titles(signals) == {
+        ("movie", 2),
+        ("movie", 3),
+        ("movie", 4),
+        ("movie", 5),
+    }
 
 
 def test_dot_ignores_disjoint_dimensions() -> None:
     assert dot({"a": 1.0}, {"b": 1.0}) == 0.0
     assert dot({"a": 0.5, "b": 0.5}, {"a": 0.5}) == 0.25
+
+
+def test_exploration_admits_only_lowest_quarter_then_orders_by_quality() -> None:
+    profile = {"profile": 1.0}
+    low = _candidate(("movie", 1), {"other": 1.0}, vote_average=6.0)
+    quality = _candidate(("movie", 2), {"different": 1.0}, vote_average=9.0)
+    obvious = [_candidate(("movie", tmdb_id), {"profile": 1.0}) for tmdb_id in range(3, 9)]
+
+    assert [
+        candidate.key for candidate in rank_exploration(profile, [*obvious, quality, low], limit=20)
+    ] == [("movie", 2), ("movie", 1)]
+
+
+def test_exploration_quarter_is_relative_for_broad_narrow_and_uniform_pools() -> None:
+    profile = {"profile": 1.0}
+    broad = [
+        _at_similarity(index, similarity)
+        for index, similarity in enumerate((0.0, 0.2, 0.4, 0.6, 0.8, 0.9, 0.95, 1.0), start=1)
+    ]
+    narrow = [
+        _at_similarity(index, similarity)
+        for index, similarity in enumerate((0.70, 0.72, 0.74, 0.76), start=20)
+    ]
+    uniform = [_at_similarity(index, 0.5) for index in reversed(range(30, 35))]
+
+    assert [candidate.key for candidate in rank_exploration(profile, broad, 20)] == [
+        ("movie", 1),
+        ("movie", 2),
+    ]
+    assert [candidate.key for candidate in rank_exploration(profile, narrow, 20)] == [("movie", 20)]
+    assert [candidate.key for candidate in rank_exploration(profile, uniform, 20)] == [
+        ("movie", 30),
+        ("movie", 31),
+    ]
+
+
+def test_exploration_is_relative_negative_safe_unique_and_deterministic() -> None:
+    profile = {"profile": 1.0}
+    candidates = [
+        _candidate(("tv", 4), {"other": 1.0}),
+        _candidate(("movie", 2), {"other": 1.0}),
+        _candidate(("movie", 1), {"profile": -1.0}),
+        _candidate(("movie", 2), {"other": 1.0}),
+        _candidate(("movie", 3), {"profile": 1.0}),
+    ]
+
+    first = rank_exploration(profile, candidates, limit=20)
+    second = rank_exploration(profile, list(reversed(candidates)), limit=20)
+
+    assert [candidate.key for candidate in first] == [("movie", 2)]
+    assert [candidate.key for candidate in second] == [("movie", 2)]
+
+
+def test_exploration_reuses_availability_and_diversity_ranking() -> None:
+    profile = {"profile": 1.0}
+    lead = _candidate(("movie", 1), {"genre:drama": 1.0}, available=True)
+    clone = _candidate(("movie", 2), {"genre:drama": 1.0})
+    fresh = _candidate(("movie", 3), {"genre:comedy": 1.0})
+    obvious = [_candidate(("movie", tmdb_id), {"profile": 1.0}) for tmdb_id in range(4, 13)]
+
+    picked = rank_exploration(profile, [*obvious, clone, fresh, lead], limit=3)
+
+    assert [candidate.key for candidate in picked] == [
+        ("movie", 1),
+        ("movie", 3),
+        ("movie", 2),
+    ]

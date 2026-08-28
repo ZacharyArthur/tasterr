@@ -25,6 +25,8 @@ class User(Base):
     auth_type: Mapped[str] = mapped_column(String(8))  # 'plex' | 'local'
     is_admin: Mapped[bool] = mapped_column(default=False)
     taste_onboarding_seen: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
+    plex_history_attempted_at: Mapped[datetime | None] = mapped_column(DateTime())
+    plex_history_synced_at: Mapped[datetime | None] = mapped_column(DateTime())
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     last_login_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
 
@@ -60,7 +62,9 @@ class Signal(Base):
             "tmdb_id",
             "kind",
             unique=True,
-            sqlite_where=text("kind IN ('watchlist', 'not_interested', 'seed_request_history')"),
+            sqlite_where=text(
+                "kind IN ('watchlist', 'not_interested', 'seed_request_history', 'watched_plex')"
+            ),
         ),
     )
 
@@ -68,7 +72,8 @@ class Signal(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     tmdb_id: Mapped[int]
     media_type: Mapped[str] = mapped_column(String(8))  # 'movie' | 'tv'
-    # 'request' | 'watchlist' | 'detail_open' | 'not_interested' | 'seed_request_history'
+    # 'request' | 'watchlist' | 'detail_open' | 'not_interested' |
+    # 'seed_request_history' | 'watched_plex'
     kind: Mapped[str] = mapped_column(String(24))
     weight: Mapped[float]
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)

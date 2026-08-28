@@ -125,6 +125,15 @@ def test_admin_settings_default_and_round_trip(tmp_path: Path) -> None:
     assert {item["id"]: item["label"] for item in default.json()["rail_types"]}["recent"] == (
         "Recent releases"
     )
+    labels = {item["id"]: item["label"] for item in default.json()["rail_types"]}
+    assert {
+        rail_id: labels[rail_id]
+        for rail_id in ("continue-watching", "unexpected-picks", "household-blend")
+    } == {
+        "continue-watching": "Continue Watching",
+        "unexpected-picks": "Picks You Wouldn't Usually Watch",
+        "household-blend": "Something for Everyone Tonight",
+    }
     assert saved.status_code == 200
     assert saved.json()["settings"] == reread.json()["settings"]
     assert reread.json()["settings"]["region"] == "GB"
@@ -277,9 +286,11 @@ def test_saved_settings_change_later_browse_requests_without_restart(tmp_path: P
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url)
-        if request.url.path == "/3/discover/movie":
+        if request.url.path.startswith("/3/discover/"):
             assert request.url.params["watch_region"] == "GB"
             assert request.url.params["with_watch_providers"] == "8"
+            is_tv = request.url.path.endswith("/tv")
+            start = 101 if is_tv else 1
             return httpx.Response(
                 200,
                 json={
@@ -287,9 +298,10 @@ def test_saved_settings_change_later_browse_requests_without_restart(tmp_path: P
                         {
                             "id": item,
                             "title": f"Title {item}",
+                            "name": f"Title {item}",
                             "backdrop_path": f"/b{item}.jpg",
                         }
-                        for item in range(1, 8)
+                        for item in range(start, start + 7)
                     ]
                 },
             )
@@ -342,7 +354,7 @@ def test_saved_settings_change_later_browse_requests_without_restart(tmp_path: P
         detail = client.get("/api/v1/title/movie/1")
 
     assert saved.status_code == 200
-    assert [rail["id"] for rail in home.json()["rails"]] == ["popular"]
+    assert [rail["id"] for rail in home.json()["rails"]] == ["popular", "popular-tv"]
     assert extra.json() == {"rails": [], "next_cursor": None}
     assert detail.json()["certification"] == "12"
     assert any(url.path == "/3/discover/movie" for url in seen)

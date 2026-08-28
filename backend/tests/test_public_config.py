@@ -5,6 +5,7 @@ from typing import cast
 
 from pydantic import SecretStr
 
+from tasterr.main import create_app
 from tasterr.runtime_settings import Accent, Appearance, RuntimeSettings, Theme
 from tasterr.settings import PublicConfig, Settings
 
@@ -100,3 +101,24 @@ def test_public_config_has_no_secretstr_fields() -> None:
 def test_forwarded_allowlist_has_no_client_or_runtime_projection() -> None:
     assert "tasterr_forwarded_allow_ips" not in PublicConfig.model_fields
     assert "tasterr_forwarded_allow_ips" not in RuntimeSettings.model_fields
+
+
+def test_v2_private_fields_are_absent_from_browser_contracts() -> None:
+    fields = _property_names(create_app(Settings()).openapi())
+    assert fields.isdisjoint(
+        {
+            "plex_token",
+            "plex_token_enc",
+            "access_token",
+            "account_id",
+            "server_url",
+            "base_url",
+            "machine_identifier",
+            "rating_key",
+            "profile",
+            "profiles",
+            "similarity",
+            "score",
+            "scores",
+        }
+    )

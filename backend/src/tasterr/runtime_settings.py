@@ -28,11 +28,14 @@ class Accent(StrEnum):
 
 class RailType(StrEnum):
     HERO = "hero"
+    CONTINUE_WATCHING = "continue-watching"
     MY_LIST = "my-list"
     TRENDING = "trending"
     MORE_LIKE = "more-like"
     POPULAR = "popular"
     RECOMMENDED = "recommended"
+    UNEXPECTED_PICKS = "unexpected-picks"
+    HOUSEHOLD_BLEND = "household-blend"
     SERVICES = "services"
     GENRES = "genres"
     RECENT = "recent"
@@ -42,11 +45,14 @@ class RailType(StrEnum):
 
 RAIL_TYPE_LABELS: dict[RailType, str] = {
     RailType.HERO: "Featured hero",
+    RailType.CONTINUE_WATCHING: "Continue Watching",
     RailType.MY_LIST: "My List",
     RailType.TRENDING: "Trending",
     RailType.MORE_LIKE: "More like your favorites",
     RailType.POPULAR: "Popular in your region",
     RailType.RECOMMENDED: "Recommended for you",
+    RailType.UNEXPECTED_PICKS: "Picks You Wouldn't Usually Watch",
+    RailType.HOUSEHOLD_BLEND: "Something for Everyone Tonight",
     RailType.SERVICES: "Selected services",
     RailType.GENRES: "Genres",
     RailType.RECENT: "Recent releases",

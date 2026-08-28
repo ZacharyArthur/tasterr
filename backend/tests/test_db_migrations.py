@@ -3,7 +3,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, delete, select, text
+from sqlalchemy import Connection, delete, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from tasterr.db.engine import create_engine
@@ -193,6 +193,169 @@ async def test_downgrade_0005_preserves_users(tmp_path: Path) -> None:
             assert "taste_onboarding_seen" not in {row[1] for row in columns}
             count = await connection.execute(text("select count(*) from users"))
             assert count.scalar_one() == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_migration_0006_preserves_data_and_matches_user_model(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(_upgrade, "0005")
+            await connection.execute(
+                text(
+                    "insert into users "
+                    "(seerr_user_id, display_name, auth_type, is_admin, taste_onboarding_seen, "
+                    "created_at, last_login_at) values "
+                    "(8, 'member', 'plex', 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await connection.execute(
+                text(
+                    "insert into signals "
+                    "(user_id, tmdb_id, media_type, kind, weight, created_at) "
+                    "values (1, 10, 'movie', 'request', 3.0, CURRENT_TIMESTAMP)"
+                )
+            )
+            await connection.execute(
+                text(
+                    "insert into settings (key, value, updated_at) "
+                    "values ('global', '{\"region\":\"GB\"}', CURRENT_TIMESTAMP)"
+                )
+            )
+
+        await upgrade_to_head(engine)
+
+        async with engine.connect() as connection:
+            columns = await connection.run_sync(
+                lambda sync: {column["name"] for column in inspect(sync).get_columns("users")}
+            )
+            user = (
+                await connection.execute(
+                    text(
+                        "select display_name, plex_history_attempted_at, "
+                        "plex_history_synced_at from users"
+                    )
+                )
+            ).one()
+            assert user == ("member", None, None)
+            assert (
+                await connection.execute(text("select count(*) from signals"))
+            ).scalar_one() == 1
+            assert (
+                await connection.execute(text("select value from settings where key = 'global'"))
+            ).scalar_one() == '{"region":"GB"}'
+        model_columns = set(User.__table__.columns.keys())
+        assert {"plex_history_attempted_at", "plex_history_synced_at"} <= columns
+        assert columns == model_columns
+    finally:
+        await engine.dispose()
+
+
+async def test_migration_0006_unique_index_includes_watched_plex(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+        async with engine.connect() as connection:
+            sql = (
+                await connection.execute(
+                    text(
+                        "select sql from sqlite_master "
+                        "where type = 'index' and name = 'ux_signals_unique_per_title'"
+                    )
+                )
+            ).scalar_one()
+        assert "watched_plex" in sql
+    finally:
+        await engine.dispose()
+
+
+async def test_downgrade_0006_restores_v11_data_and_settings(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "tasterr.db")
+    try:
+        await upgrade_to_head(engine)
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "insert into users "
+                    "(seerr_user_id, display_name, auth_type, is_admin, taste_onboarding_seen, "
+                    "created_at, last_login_at) values "
+                    "(8, 'member', 'plex', 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await connection.execute(
+                text(
+                    "insert into users "
+                    "(seerr_user_id, display_name, auth_type, is_admin, taste_onboarding_seen, "
+                    "created_at, last_login_at) values "
+                    "(9, 'other', 'local', 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            for kind in ("request", "watched_plex"):
+                await connection.execute(
+                    text(
+                        "insert into signals "
+                        "(user_id, tmdb_id, media_type, kind, weight, created_at) "
+                        "values (1, 10, 'movie', :kind, 2.5, CURRENT_TIMESTAMP)"
+                    ),
+                    {"kind": kind},
+                )
+            await connection.execute(
+                text(
+                    "insert into profiles (user_id, vector, computed_at) values "
+                    "(1, '{}', CURRENT_TIMESTAMP), (2, '{}', CURRENT_TIMESTAMP)"
+                )
+            )
+            values = {
+                "global": (
+                    '{"region":"GB","disabled_rail_types":['
+                    '"hero","continue-watching","unexpected-picks","household-blend"]}'
+                ),
+                "malformed": "not-json",
+                "compatible": '{"disabled_rail_types":["hero"]}',
+                "missing-list": '{"region":"US"}',
+                "wrong-list-type": '{"disabled_rail_types":"hero"}',
+            }
+            for key, value in values.items():
+                await connection.execute(
+                    text(
+                        "insert into settings (key, value, updated_at) "
+                        "values (:key, :value, CURRENT_TIMESTAMP)"
+                    ),
+                    {"key": key, "value": value},
+                )
+
+        async with engine.begin() as connection:
+            await connection.run_sync(_downgrade, "0005")
+
+        async with engine.connect() as connection:
+            columns = await connection.execute(text("pragma table_info(users)"))
+            assert {"plex_history_attempted_at", "plex_history_synced_at"}.isdisjoint(
+                {row[1] for row in columns}
+            )
+            kinds = await connection.execute(text("select kind from signals"))
+            assert [row[0] for row in kinds] == ["request"]
+            profiles = await connection.execute(text("select user_id from profiles"))
+            assert [row[0] for row in profiles] == [2]
+            settings: dict[str, str] = {
+                str(row[0]): str(row[1])
+                for row in (await connection.execute(text("select key, value from settings"))).all()
+            }
+            sql = (
+                await connection.execute(
+                    text(
+                        "select sql from sqlite_master "
+                        "where type = 'index' and name = 'ux_signals_unique_per_title'"
+                    )
+                )
+            ).scalar_one()
+        assert settings["global"] == '{"region":"GB","disabled_rail_types":["hero"]}'
+        assert settings["malformed"] == "not-json"
+        assert settings["compatible"] == '{"disabled_rail_types":["hero"]}'
+        assert settings["missing-list"] == '{"region":"US"}'
+        assert settings["wrong-list-type"] == '{"disabled_rail_types":"hero"}'
+        assert "watched_plex" not in sql
+        assert "seed_request_history" in sql
     finally:
         await engine.dispose()
 

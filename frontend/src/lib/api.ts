@@ -25,6 +25,7 @@ export type SignalKind = components["schemas"]["SignalBody"]["kind"];
 export type SignalResponse = components["schemas"]["SignalResponse"];
 export type ExplainResponse = components["schemas"]["ExplainResponse"];
 export type ResetResponse = components["schemas"]["ResetResponse"];
+export type HouseholdMember = components["schemas"]["HouseholdMember"];
 export type TasteFlags = components["schemas"]["TasteFlags"];
 export type TasteOnboardingSelection =
 	components["schemas"]["TasteOnboardingSelection"];
@@ -240,6 +241,18 @@ export function getExplain(
 /** Wipe the caller's signals + profile and re-seed from Seerr history. */
 export function resetRecommendations(): Promise<ResetResponse> {
 	return postJson<ResetResponse>("/api/v1/recommendations/reset");
+}
+
+export function getHouseholdMembers(): Promise<HouseholdMember[]> {
+	return request<HouseholdMember[]>(
+		"/api/v1/recommendations/household-members",
+	);
+}
+
+export function createHouseholdBlend(userIds: number[]): Promise<Rail | null> {
+	return postJson<Rail | null>("/api/v1/recommendations/household-blend", {
+		user_ids: userIds,
+	});
 }
 
 export function getTasteOnboarding(): Promise<TasteOnboardingStateResponse> {

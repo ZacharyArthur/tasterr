@@ -329,6 +329,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recommendations/household-members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Household Members */
+        get: operations["household_members_api_v1_recommendations_household_members_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recommendations/household-blend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Household Blend */
+        post: operations["household_blend_api_v1_recommendations_household_blend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recommendations/explain": {
         parameters: {
             query?: never;
@@ -492,6 +526,22 @@ export interface components {
              */
             rails: components["schemas"]["Rail"][];
         };
+        /** HouseholdBlendRequest */
+        HouseholdBlendRequest: {
+            /** User Ids */
+            user_ids: number[];
+        };
+        /** HouseholdMember */
+        HouseholdMember: {
+            /** Id */
+            id: number;
+            /** Display Name */
+            display_name: string;
+            /** Avatar Url */
+            avatar_url: string | null;
+            /** Has Taste Signals */
+            has_taste_signals: boolean;
+        };
         /** LocalLoginRequest */
         LocalLoginRequest: {
             /** Email */
@@ -520,6 +570,10 @@ export interface components {
             year: number | null;
             /** Vote Average */
             vote_average: number;
+            /** Progress Percent */
+            progress_percent?: number | null;
+            /** Context */
+            context?: string | null;
             /** Tagline */
             tagline: string;
             /** External Url */
@@ -590,6 +644,10 @@ export interface components {
             year: number | null;
             /** Vote Average */
             vote_average: number;
+            /** Progress Percent */
+            progress_percent?: number | null;
+            /** Context */
+            context?: string | null;
         };
         /** Person */
         Person: {
@@ -682,7 +740,7 @@ export interface components {
          * RailType
          * @enum {string}
          */
-        RailType: "hero" | "my-list" | "trending" | "more-like" | "popular" | "recommended" | "services" | "genres" | "recent" | "top-rated" | "decades";
+        RailType: "hero" | "continue-watching" | "my-list" | "trending" | "more-like" | "popular" | "recommended" | "unexpected-picks" | "household-blend" | "services" | "genres" | "recent" | "top-rated" | "decades";
         /** RailTypeDescriptor */
         RailTypeDescriptor: {
             id: components["schemas"]["RailType"];
@@ -1515,6 +1573,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TasteOnboardingSubmitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    household_members_api_v1_recommendations_household_members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HouseholdMember"][];
+                };
+            };
+        };
+    };
+    household_blend_api_v1_recommendations_household_blend_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HouseholdBlendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Rail"] | null;
                 };
             };
             /** @description Validation Error */

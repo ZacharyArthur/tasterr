@@ -14,6 +14,7 @@ flowchart LR
     U --> C
     C --> T["TMDB"]
     C --> S["Seerr"]
+    C --> P["plex.tv + verified Plex Media Servers"]
     A --> Q[("SQLite")]
     D --> Q
     U --> Q
@@ -46,8 +47,10 @@ and no retry storm.
 
 ## Identity, sessions, and requests
 
-Local credentials or a Plex token are forwarded directly to Seerr and never stored.
-On success, Tasterr upserts the Seerr user and mints a fresh opaque browser session.
+Local credentials are forwarded directly to Seerr and never stored. A Plex login
+token is used for Seerr authentication and then retained only as Fernet ciphertext
+for bounded caller-scoped Plex reads and silent Seerr re-authentication. On success,
+Tasterr upserts the Seerr user and mints a fresh opaque browser session.
 Only a SHA-256 hash of the browser token is stored. The browser receives the raw
 token once in an HttpOnly, SameSite=Lax cookie, marked Secure when the trusted request
 scheme is HTTPS.
@@ -76,6 +79,24 @@ After a first login, bounded background work may seed signals from that user's S
 request history. Per-user single-flight bookkeeping prevents duplicate seeds. A
 failure rolls back/degrades and never prevents ordinary browsing.
 
+For a Plex-backed session, a separate six-hour, per-user single-flight path validates
+the cloud account, discovers at most four advertised servers, resolves that caller's
+PMS-local account row independently on each server, and imports bounded canonical
+`watched_plex` title facts. Account lists resolve owner/admin ids; an explicit 403
+uses the validated positive cloud id for Plex's self-only non-admin history path.
+Every history read explicitly filters by that id and rejects a page containing
+another id. Movies map only through a positive TMDB GUID; episodes collapse to their
+show's TMDB GUID. Raw rows, rating keys, account/server identifiers, URLs, and play
+counts are discarded. Only canonical watched signals and two attempt/success
+timestamps are durable.
+
+Continue Watching is live presentation data. It validates the same Plex capability,
+merges bounded per-server results by the caller's last-viewed time, resolves browser
+cards through TMDB, and caches only the final secret-free per-user result for five
+minutes. Progress is never stored. The unexpected-picks provider and caller-inclusive
+household blend reuse the existing profile/scoring/diversity pipeline. Household
+selection stays in component state; only the final standard rail crosses the API.
+
 ## SQLite and process lifecycle
 
 At lifespan startup the process opens one async SQLAlchemy engine, runs Alembic to
@@ -98,8 +119,9 @@ if the committed types drift, so browser contracts are never handwritten twice.
 
 TMDB failure removes catalog content with a generic error while health remains
 available. Seerr unconfigured/down yields Unknown availability and disables or
-degrades requests without blanking browse results. Personalization failures omit
-personalized rails and preserve generic discovery.
+degrades requests without blanking browse results. Plex/token/server failures omit
+live Plex rails and delay history retry without failing Home. Personalization or
+household-blend failures omit only their result and preserve generic discovery.
 
 The multi-stage image builds the SPA with the frozen npm lock, installs the backend
 with the frozen uv lock, runs as a non-root user, and serves both surfaces. Compose

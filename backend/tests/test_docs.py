@@ -121,6 +121,8 @@ def test_architecture_pins_enforced_boundaries_and_degradation() -> None:
         "in-process",
         "`just types`",
         "Seerr unconfigured/down",
+        "PMS-local account row",
+        "Continue Watching is live presentation data",
     ):
         assert term in architecture
 
@@ -154,3 +156,39 @@ def test_public_security_policy_is_private_and_actionable() -> None:
     assert "private vulnerability reporting" in engineering
     assert "Secret scanning" in engineering
     assert "Dependabot alerts" in engineering
+
+
+def test_plex_operator_docs_cover_privacy_recovery_and_release_order() -> None:
+    readme = _read(ROOT / "README.md")
+    configuration = _read(DOCS / "CONFIGURATION.md")
+    security = _read(DOCS / "SECURITY.md")
+    decisions = _read(DOCS / "DEFERRED.md") + _read(DOCS / "IGNORED.md")
+
+    for term in (
+        "need no Plex URL or token",
+        "Continue Watching",
+        "raw history",
+        "separate review steps",
+    ):
+        assert term in readme
+    for term in (
+        "No application environment variable is added",
+        "Upgrade Matching",
+        "Refresh All Metadata",
+        "Manage Library Access",
+        "downgrade to `0005`",
+        "TASTERR_LIVE_PLEX_OWNER_TOKEN",
+        "separate release change",
+    ):
+        assert term in configuration
+    for term in (
+        "plex.direct",
+        "verify=False",
+        "Never follow redirects",
+        "machineIdentifier",
+        "X-Plex-Token",
+        "per server",
+    ):
+        assert term in security
+    assert "Per-server Plex history watermarks" in decisions
+    assert "Fuzzy title/year fallback" in decisions

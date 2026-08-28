@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
 import { Home } from "./Home";
@@ -157,4 +163,84 @@ test("all-disabled empty state gives only admins a Settings recovery link", asyn
 	});
 	expect(await screen.findByText("Your home feed is empty")).toBeTruthy();
 	expect(screen.queryByRole("link", { name: "Open Settings" })).toBeNull();
+});
+
+test("household work does not block Home and its rail may repeat a Home title", async () => {
+	vi.stubGlobal("IntersectionObserver", FiringIntersectionObserver);
+	let resolveMembers!: (response: Response) => void;
+	const membersResponse = new Promise<Response>((resolve) => {
+		resolveMembers = resolve;
+	});
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "/api/v1/home") {
+				return jsonResponse({
+					hero: [],
+					rails: [rail("trending", "Trending Now")],
+				});
+			}
+			if (url === "/api/v1/rails?cursor=0") {
+				return jsonResponse({ rails: [], next_cursor: null });
+			}
+			if (url === "/api/v1/taste-onboarding") {
+				return jsonResponse({ state: "done" });
+			}
+			if (url === "/api/v1/recommendations/household-members") {
+				return membersResponse;
+			}
+			if (url === "/api/v1/recommendations/household-blend") {
+				return jsonResponse({
+					id: "household-blend",
+					title: "Something for Everyone Tonight",
+					kind: "standard",
+					items: [card(1), card(5), card(6), card(7)],
+				});
+			}
+			if (url === "/api/v1/availability") return jsonResponse({});
+			throw new Error(`unexpected fetch: ${url}`);
+		}),
+	);
+	renderHome({
+		id: 1,
+		display_name: "Viewer 1",
+		avatar_url: null,
+		is_admin: false,
+	});
+
+	expect(await screen.findByText("Trending Now")).toBeTruthy();
+	expect(screen.queryByRole("checkbox", { name: "Viewer 2" })).toBeNull();
+	resolveMembers(
+		jsonResponse([
+			{
+				id: 1,
+				display_name: "Viewer 1",
+				avatar_url: null,
+				has_taste_signals: true,
+			},
+			{
+				id: 2,
+				display_name: "Viewer 2",
+				avatar_url: null,
+				has_taste_signals: true,
+			},
+		]),
+	);
+	fireEvent.click(
+		await screen.findByRole("heading", {
+			name: "Something for Everyone Tonight",
+		}),
+	);
+	fireEvent.click(await screen.findByRole("checkbox", { name: "Viewer 2" }));
+	fireEvent.click(
+		screen.getByRole("button", { name: "Find something for us" }),
+	);
+
+	await screen.findByRole("region", { name: "Something for Everyone Tonight" });
+	expect(
+		screen
+			.getAllByRole("link")
+			.filter((link) => link.getAttribute("href") === "/title/movie/1"),
+	).toHaveLength(2);
 });

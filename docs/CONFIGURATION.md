@@ -96,6 +96,37 @@ Administrators manage these non-secret values in the Settings screen:
 They are stored in SQLite, returned through an explicit public response model, and
 never accept URLs, keys, tokens, cookies, or credentials.
 
+The rail list includes independent switches for **Continue Watching**, **Picks You
+Wouldn't Usually Watch**, and **Something for Everyone Tonight**. All three default
+enabled. No application environment variable is added for Plex personalization:
+Plex-backed sessions reuse their encrypted sign-in token, while local-login sessions
+perform no live Plex read.
+
+## Plex-aware operation
+
+Plex history sync is best-effort and never blocks sign-in or Home. Tasterr evaluates
+one bounded import per Plex-backed user at most every six hours. Continue Watching is
+live, caller-scoped presentation data cached for five minutes; raw history, progress,
+server URLs, account ids, rating keys, and resource tokens are not stored. Plex
+failure removes the affected rail/import only. TMDB or Seerr degradation keeps its
+existing independent behavior.
+
+Tasterr only joins Plex media to TMDB through canonical GUIDs. A legacy Plex metadata
+agent may therefore leave an otherwise valid watch unresolved. Upgrade movie
+libraries to **Plex Movie** and TV libraries to **Plex Series**, then run **Refresh
+All Metadata** for the affected library. Plex documents the movie upgrade under
+[`Manage Library > Upgrade Matching`](https://support.plex.tv/articles/upgrading-a-movie-library-to-the-use-the-new-plex-movie-agent/)
+and explains why a metadata-agent change needs a
+[`Refresh All Metadata`](https://support.plex.tv/articles/200289306-scanning-vs-refreshing-a-library/).
+Tasterr deliberately does not fall back to title/year guessing.
+
+If an inaccessible shared server remains in Plex resource discovery, remove that
+server's library access in Plex under **Settings > Manage Library Access** (unshare
+the server for the affected account). Tasterr has no server allow/deny list and will
+not persist one; usable sibling servers continue to work while the dead share is
+present. Plex's current access-removal flow is documented in
+[Managing Library Access](https://support.plex.tv/articles/201105738-creating-and-managing-server-shares/).
+
 ## HTTPS and trusted proxies
 
 Terminate TLS at a reverse proxy and prevent direct internet access to port 8000.
@@ -138,6 +169,13 @@ same headers as defense-in-depth but must not weaken them.
 - A local user's Seerr session expires: a request asks them to sign in again. A Plex
   user's request performs one silent re-authentication attempt with the encrypted
   stored token.
+- Plex token invalid, plex.tv down, or every advertised server unreachable: ordinary
+  Home rails remain available; Continue Watching is omitted and history retries only
+  after the attempt throttle.
+- One Plex server unreachable: successful siblings still contribute; the history
+  success watermark waits for a later all-server bounded pass.
+- Plex media without a canonical TMDB GUID: only that item is omitted; repair its
+  library metadata as described above.
 
 ## Backup and restore
 
@@ -182,7 +220,44 @@ home, detail, and one non-destructive request state check.
 For an image-only rollback, restore the prior digest and recreate the service while
 keeping the named volume. If a release introduced a migration that is not backward
 compatible, stop the writer and restore the matching pre-upgrade database before
-starting the old digest. Version 1.0's hardening release adds no migration.
+starting the old digest.
+
+V2 adds migration `0006`; do not start a V1.1 image on a V2 database. The supported
+order is: take and validate a backup, keep the V2 image selected, stop the writer,
+downgrade to `0005`, then select and start the V1.1 image. This removes rebuildable
+`watched_plex` signals and Plex sync timestamps and strips only V2 rail ids from
+settings. Run the downgrade against the named volume with the V2 image:
+
+```console
+docker compose stop tasterr
+docker compose run --rm --no-deps --entrypoint python tasterr -c "from alembic import command; from alembic.config import Config; c=Config(); c.set_main_option('script_location','/app/src/tasterr/db/alembic'); c.set_main_option('sqlalchemy.url','sqlite:////data/tasterr.db'); command.downgrade(c,'0005')"
+# Set TASTERR_IMAGE back to the pinned V1.1 digest.
+docker compose up -d --no-build
+```
+
+The implementation change does not publish `v2.0.0`; version metadata, image/tag
+publication, live release verification, and rollback rehearsal happen in a
+separate release change.
+
+## Live contract verification
+
+Live Plex/Seerr contracts are opt-in and excluded from `just check` and CI. Put the
+`TASTERR_LIVE_*` values named at the top of `backend/tests/live/` in a temporary file
+outside the repository, restrict that file to the current user, load it only into
+the devcontainer shell, and run `just test-live`. Owner, managed, and shared Plex
+tokens are supplied as `TASTERR_LIVE_PLEX_OWNER_TOKEN`,
+`TASTERR_LIVE_PLEX_MANAGED_TOKEN`, and `TASTERR_LIVE_PLEX_SHARED_TOKEN`; omit a role
+only when it is genuinely unavailable and record the skip generically.
+
+```console
+chmod 600 /tmp/tasterr-live.env
+npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/tasterr-live.env; set +a; just test-live'
+```
+
+Never put live values in `.env.example`, the repository, command output, test
+fixtures, or evidence. Record only versions and generic exercised/skipped/pass/fail
+results. The source implementation must pass its live contracts and full gate before
+archive; `v2.0.0` release verification remains a later step.
 
 ## Troubleshooting
 

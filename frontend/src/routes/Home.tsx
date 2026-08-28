@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router";
 import { Hero } from "../components/Hero";
+import { HouseholdPicker } from "../components/HouseholdPicker";
 import { Rail } from "../components/Rail";
 import { TastePicker } from "../components/TastePicker";
 import type { MediaSummary } from "../lib/api";
@@ -83,6 +84,7 @@ export function Home() {
 				)}
 				<Hero slides={home.data.hero} />
 				<TastePicker items={items} userId={me.data?.id} />
+				{me.data && <HouseholdPicker key={me.data.id} callerId={me.data.id} />}
 				<div className="flex flex-col gap-8">
 					{home.data.rails.map((rail) => (
 						<Rail key={rail.id} rail={rail} />

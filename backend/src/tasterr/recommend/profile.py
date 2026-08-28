@@ -51,3 +51,14 @@ def compute_profile(
         for dim, value in vector.items():
             profile[dim] = profile.get(dim, 0.0) + factor * value
     return l2_normalize(profile)
+
+
+def blend_profiles(profiles: Iterable[dict[str, float]]) -> dict[str, float]:
+    normalized = [l2_normalize(profile) for profile in profiles]
+    if not normalized or any(not profile for profile in normalized):
+        return {}
+    mean: dict[str, float] = {}
+    for profile in normalized:
+        for dimension, value in profile.items():
+            mean[dimension] = mean.get(dimension, 0.0) + value / len(normalized)
+    return l2_normalize(mean)

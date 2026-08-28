@@ -2,8 +2,10 @@
 
 The math stays in the pure sibling modules; this module owns storage
 semantics — toggle idempotence, retraction, detail-open day-dedup, JSON
-(de)serialization — and every read/write is keyed by the caller-supplied
-authenticated user id (privacy: signals are the household's viewing behavior).
+(de)serialization. Ordinary reads/writes are keyed by the authenticated user;
+the household blend path may make a caller-authorized, bounded read across its
+validated member ids, but only the final combined summaries leave the service
+(privacy: signals are the household's viewing behavior).
 Writes flush but never commit; the request boundary owns the transaction.
 """
 
@@ -12,7 +14,7 @@ from datetime import datetime
 from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import delete, select, tuple_
+from sqlalchemy import delete, select, text, tuple_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,8 +49,9 @@ async def record_signal(
 ) -> bool:
     """Record a signal honoring per-kind semantics; returns whether a row was
     written. Toggle/seed re-adds and same-day detail reopens are successful
-    no-ops. `created_at` backdates seed imports so decay prices them honestly
-    (only seeds may backdate — the detail-open dedup window derives from the
+    no-ops; Plex watches move their one title row only to a newer watch time.
+    `created_at` backdates server imports so decay prices them honestly
+    (only server imports may backdate — the detail-open dedup window derives from the
     incoming moment's calendar day, so a backdated detail_open would silently
     shift it). A written signal invalidates the materialized profile in the
     same transaction, so a failed best-effort recompute self-heals on the
@@ -58,18 +61,35 @@ async def record_signal(
         # The database decides (ux_signals_unique_per_title): there is no
         # check-then-insert to race, so concurrent sessions — a background
         # login-seed vs. an inline reset — cannot duplicate a title's row.
-        statement = (
-            sqlite_insert(Signal)
-            .values(
-                user_id=user_id,
-                tmdb_id=tmdb_id,
-                media_type=media_type,
-                kind=kind,
-                weight=SIGNAL_WEIGHTS[kind],
-                created_at=moment,
-            )
-            .on_conflict_do_nothing()
+        statement = sqlite_insert(Signal).values(
+            user_id=user_id,
+            tmdb_id=tmdb_id,
+            media_type=media_type,
+            kind=kind,
+            weight=SIGNAL_WEIGHTS[kind],
+            created_at=moment,
         )
+        if kind == "watched_plex":
+            statement = statement.on_conflict_do_update(
+                index_elements=[Signal.user_id, Signal.media_type, Signal.tmdb_id, Signal.kind],
+                index_where=text(
+                    "kind IN ('watchlist', 'not_interested', "
+                    "'seed_request_history', 'watched_plex')"
+                ),
+                set_={
+                    "weight": statement.excluded.weight,
+                    "created_at": statement.excluded.created_at,
+                },
+                where=statement.excluded.created_at > Signal.created_at,
+            )
+        else:
+            statement = statement.on_conflict_do_nothing(
+                index_elements=[Signal.user_id, Signal.media_type, Signal.tmdb_id, Signal.kind],
+                index_where=text(
+                    "kind IN ('watchlist', 'not_interested', "
+                    "'seed_request_history', 'watched_plex')"
+                ),
+            )
         result = await db.execute(statement)
         # DML through AsyncSession.execute is a CursorResult at runtime; the
         # Result[Any] annotation just doesn't know it.
