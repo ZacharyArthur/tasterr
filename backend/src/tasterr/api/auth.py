@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tasterr.api.taste import schedule_seed
+from tasterr.api.taste import schedule_plex_history, schedule_seed
 from tasterr.auth.cookies import clear_session_cookie, set_session_cookie
 from tasterr.auth.crypto import plex_client_identifier
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
@@ -168,10 +168,15 @@ async def poll_plex_pin(
     except UpstreamUnavailable as error:
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
 
-    user, token = await complete_login(db, ctx.secret_key, login, "plex", plex_token)
+    user, token, plex_token_enc = await complete_login(
+        db, ctx.secret_key, login, "plex", plex_token
+    )
     _set_cookie(request, response, token)
     logger.info("auth: plex login succeeded")
     schedule_seed(request, settings, user.id, user.seerr_user_id)
+    schedule_plex_history(
+        request, settings, user.id, user.plex_history_attempted_at, plex_token_enc
+    )
     return PinPollResponse(status="ok", user=UserResponse.from_user(user))
 
 
@@ -196,7 +201,7 @@ async def local_login(
     except UpstreamUnavailable as error:
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
 
-    user, token = await complete_login(db, ctx.secret_key, login, "local", None)
+    user, token, _plex_token_enc = await complete_login(db, ctx.secret_key, login, "local", None)
     _set_cookie(request, response, token)
     logger.info("auth: local login succeeded")
     schedule_seed(request, settings, user.id, user.seerr_user_id)

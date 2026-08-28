@@ -12,3 +12,6 @@ entries when they ship.
 | Browser-level long-detail modal scroll regression | jsdom cannot verify layout scrolling; the unchanged overlay scroll CSS and body-lock lifecycle have unit coverage | Browser interaction E2E expansion |
 | Direct-detail Close then browser Back reopens the last detail | This is pre-existing history behavior outside the feedback fix; Close still returns Home as specified | Route-history UX polish, with a browser Back regression |
 | Stable desktop scrollbar gutter while a modal is open | Locking body scroll can cause a small width shift; it is cosmetic and has not been reported by users | If layout shift is reported |
+| Per-server Plex history watermarks | One global success timestamp plus a six-hour attempt throttle is sufficient at household scale; successful siblings may be reread after one server fails | If repeated multi-server failures materially omit history beyond the bounded newest-first cap |
+| Plex JWT device-flow migration | The live gate proved current PIN-issued traditional tokens can perform every required read | A supported token can no longer satisfy the account/resource/PMS contracts |
+| Persisted household groups or blend weights | Ephemeral caller-inclusive selection avoids durable social state and keeps privacy review bounded | Repeated household use demonstrates a concrete need |

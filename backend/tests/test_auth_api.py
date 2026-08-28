@@ -816,11 +816,23 @@ def test_logins_schedule_the_cold_start_seed(
     response is assembled — the login itself never waits on (or fails with)
     the import, which is unit-tested in test_recommend_seed.py."""
     scheduled: list[tuple[int, int]] = []
+    plex_scheduled: list[tuple[int, bool]] = []
 
     def recorder(request: object, settings: object, user_id: int, seerr_user_id: int) -> None:
         scheduled.append((user_id, seerr_user_id))
 
+    def plex_recorder(
+        request: object,
+        settings: object,
+        user_id: int,
+        attempted_at: datetime | None,
+        plex_token_enc: str | None,
+    ) -> None:
+        assert attempted_at is None
+        plex_scheduled.append((user_id, plex_token_enc is not None))
+
     monkeypatch.setattr("tasterr.api.auth.schedule_seed", recorder)
+    monkeypatch.setattr("tasterr.api.auth.schedule_plex_history", plex_recorder)
     harness = _harness(tmp_path)
     with TestClient(harness.app) as client:
         local = client.post(
@@ -834,3 +846,4 @@ def test_logins_schedule_the_cold_start_seed(
     assert local.status_code == 200
     assert plex.status_code == 200
     assert scheduled == [(1, 7), (1, 7)]  # same Seerr user -> same Tasterr user row
+    assert plex_scheduled == [(1, True)]

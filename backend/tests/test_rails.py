@@ -1,26 +1,29 @@
 """Rail providers and the composer: degrade, de-dupe, drop, paginate (tasks 3.2, 3.3)."""
 
+import asyncio
 from datetime import date, timedelta
 from typing import cast
 
 import pytest
+from pydantic import SecretStr
 
 from tasterr.catalog.models import (
     Genre,
     MediaDetail,
     MediaSummary,
+    Rail,
     ServiceOption,
     WatchProviders,
 )
+from tasterr.catalog.plex import PlexCatalogService
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.rails.composer import build_extra_rails, build_home
 from tasterr.rails.registry import (
     EXTRA_PAGE_SIZE,
-    GENRE_PICKS,
     HERO_SIZE,
-    HOME_GENRE_COUNT,
     RailContext,
+    continue_watching_provider,
     decade_provider,
     genre_provider,
     home_providers,
@@ -78,6 +81,7 @@ class FakeCatalog:
         self.available_services: list[ServiceOption] = []
         self.trending_items = [_summary(i) for i in range(1, 7)]
         self.fixed_discover: list[MediaSummary] | None = None
+        self.service_results: dict[int, list[MediaSummary]] = {}
         self.genre_map_result = {"Action": 28, "Comedy": 35, "Drama": 18, "Thriller": 53}
         self.discover_calls: list[dict[str, object]] = []
         self.fail_trending = False
@@ -122,6 +126,8 @@ class FakeCatalog:
             raise UpstreamUnavailable("discover down")
         if self.fixed_discover is not None:
             return list(self.fixed_discover)
+        if service_ids and service_ids[0] in self.service_results:
+            return list(self.service_results[service_ids[0]])
         block = self._block
         self._block += 100
         return [_summary(block + i) for i in range(10)]
@@ -145,17 +151,163 @@ def _ctx(fake: FakeCatalog) -> RailContext:
     return RailContext(cast("CatalogService", fake))
 
 
+async def _all_extra_rails(ctx: RailContext) -> list[Rail]:
+    rails: list[Rail] = []
+    cursor: int | None = 0
+    while cursor is not None:
+        page = await build_extra_rails(ctx, cursor)
+        rails.extend(page.rails)
+        cursor = page.next_cursor
+    return rails
+
+
+class FakePlexCatalog:
+    def __init__(self, items: list[MediaSummary] | None = None) -> None:
+        self.items = items or []
+        self.calls = 0
+        self.fail = False
+
+    async def continue_watching(self, user_id: int, account_token: str) -> list[MediaSummary]:
+        self.calls += 1
+        assert user_id == 1
+        assert account_token == "account-token"
+        if self.fail:
+            raise UpstreamUnavailable("plex down")
+        return self.items
+
+
+def _resume(*ids: int) -> list[MediaSummary]:
+    return [_summary(tmdb_id).model_copy(update={"progress_percent": 50}) for tmdb_id in ids]
+
+
+def _plex_ctx(fake: FakeCatalog, plex: FakePlexCatalog) -> RailContext:
+    from tasterr.db.models import User
+
+    user = User(id=1, seerr_user_id=1, display_name="member", auth_type="plex")
+    return RailContext(
+        cast("CatalogService", fake),
+        user=user,
+        plex=cast("PlexCatalogService", plex),
+        plex_account_token=SecretStr("account-token"),
+    )
+
+
 # ── Providers (3.2) ──────────────────────────────────────────────────────────
 
 
 def test_home_provider_ids_and_kinds() -> None:
     providers = home_providers()
-    assert [p.id for p in providers] == ["trending", "popular", "recently-added"]
+    assert [p.id for p in providers] == [
+        "trending",
+        "popular",
+        "popular-tv",
+        "recently-added",
+    ]
     assert providers[1].kind == "standard"
-    assert providers[2].title == "Recent Releases"
+    assert providers[2].title == "Popular TV"
+    assert providers[3].title == "Recent Releases"
 
 
-async def test_top_region_provider_queries_popular_movies() -> None:
+def test_continue_watching_provider_is_capability_gated_and_nonexclusive() -> None:
+    fake = FakeCatalog()
+    plex = FakePlexCatalog(_resume(1, 2, 3, 4))
+    provider = continue_watching_provider(_plex_ctx(fake, plex))
+
+    assert provider is not None
+    assert provider.id == "continue-watching"
+    assert provider.title == "Continue Watching"
+    assert provider.exclusive is False
+    assert "account-token" not in repr(_plex_ctx(fake, plex))
+    assert continue_watching_provider(_ctx(fake)) is None
+
+
+async def test_continue_watching_token_is_unwrapped_only_during_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    original = SecretStr.get_secret_value
+
+    def tracked(secret: SecretStr) -> str:
+        nonlocal calls
+        calls += 1
+        return original(secret)
+
+    monkeypatch.setattr(SecretStr, "get_secret_value", tracked)
+    fake = FakeCatalog()
+    plex = FakePlexCatalog(_resume(1, 2, 3, 4))
+    ctx = _plex_ctx(fake, plex)
+    provider = continue_watching_provider(ctx)
+
+    assert provider is not None
+    assert calls == 0
+    await provider.fetch(ctx)
+    assert calls == 1
+
+
+async def test_continue_watching_is_first_and_owns_cross_rail_duplicates() -> None:
+    fake = FakeCatalog()
+    plex = FakePlexCatalog(_resume(1, 20, 21, 22))
+
+    feed = await build_home(_plex_ctx(fake, plex))
+
+    assert feed.rails[0].id == "continue-watching"
+    assert [item.id for item in feed.rails[0].items] == [1, 20, 21, 22]
+    trending = next(rail for rail in feed.rails if rail.id == "trending")
+    assert 1 not in [item.id for item in trending.items]
+
+
+async def test_disabled_thin_and_failed_continue_watching_do_no_harm() -> None:
+    fake = FakeCatalog()
+    plex = FakePlexCatalog(_resume(1, 2, 3))
+    thin = await build_home(_plex_ctx(fake, plex))
+    assert "continue-watching" not in [rail.id for rail in thin.rails]
+
+    plex.items = _resume(1, 2, 3, 4)
+    disabled_ctx = _plex_ctx(fake, plex)
+    disabled_ctx.disabled_rail_types = frozenset((RailType.CONTINUE_WATCHING,))
+    disabled = await build_home(disabled_ctx)
+    assert "continue-watching" not in [rail.id for rail in disabled.rails]
+    assert plex.calls == 1
+
+    plex.fail = True
+    degraded = await build_home(_plex_ctx(fake, plex))
+    assert "continue-watching" not in [rail.id for rail in degraded.rails]
+    assert "trending" in [rail.id for rail in degraded.rails]
+
+
+async def test_continue_watching_fetch_overlaps_but_keeps_response_priority() -> None:
+    started: set[str] = set()
+    gate = asyncio.Event()
+    fake = FakeCatalog()
+    plex = FakePlexCatalog(_resume(20, 21, 22, 23))
+
+    async def wait_for_peer(name: str) -> None:
+        started.add(name)
+        if len(started) == 2:
+            gate.set()
+        await gate.wait()
+
+    original_trending = fake.trending
+    original_continue = plex.continue_watching
+
+    async def trending() -> list[MediaSummary]:
+        await wait_for_peer("trending")
+        return await original_trending()
+
+    async def continue_watching(user_id: int, account_token: str) -> list[MediaSummary]:
+        await wait_for_peer("plex")
+        return await original_continue(user_id, account_token)
+
+    fake.trending = trending  # type: ignore[method-assign]
+    plex.continue_watching = continue_watching  # type: ignore[method-assign]
+
+    feed = await build_home(_plex_ctx(fake, plex))
+
+    assert started == {"plex", "trending"}
+    assert feed.rails[0].id == "continue-watching"
+
+
+async def test_popular_providers_query_movies_then_tv() -> None:
     fake = FakeCatalog()
     await home_providers()[1].fetch(_ctx(fake))
     assert fake.discover_calls[-1] == {
@@ -167,6 +319,9 @@ async def test_top_region_provider_queries_popular_movies() -> None:
         "release_lte": None,
         "service_ids": None,
     }
+    await home_providers()[2].fetch(_ctx(fake))
+    assert fake.discover_calls[-1]["media"] == "tv"
+    assert fake.discover_calls[-1]["min_votes"] == 30
 
 
 async def test_genre_provider_filters_and_labels_tv() -> None:
@@ -178,6 +333,7 @@ async def test_genre_provider_filters_and_labels_tv() -> None:
     await provider.fetch(_ctx(fake))
     assert fake.discover_calls[-1]["genres"] == [28]
     assert fake.discover_calls[-1]["min_votes"] == 30
+    assert genre_provider(28, "Action", "movie").title == "Action · Movies"
 
 
 async def test_decade_provider_bounds_release_window() -> None:
@@ -191,7 +347,9 @@ async def test_decade_provider_bounds_release_window() -> None:
 
 
 def test_top_rated_provider_ids() -> None:
-    assert [p.id for p in top_rated_providers()] == ["top-rated-movie", "top-rated-tv"]
+    providers = top_rated_providers()
+    assert [p.id for p in providers] == ["top-rated-movie", "top-rated-tv"]
+    assert providers[1].title == "Top Rated TV"
 
 
 async def test_service_provider_queries_recent_flatrate_movies() -> None:
@@ -257,9 +415,9 @@ async def test_selected_services_add_four_ordered_independent_rails() -> None:
         for index, provider_id in enumerate((350, 8, 337, 9, 15))
     ]
 
-    feed = await build_home(_ctx(fake))
+    rails = await _all_extra_rails(_ctx(fake))
 
-    service_rails = [rail for rail in feed.rails if rail.id.startswith("service-")]
+    service_rails = [rail for rail in rails if rail.id.startswith("service-")]
     assert [rail.id for rail in service_rails] == [
         "service-8",
         "service-337",
@@ -275,11 +433,11 @@ async def test_service_metadata_failure_omits_only_service_rails() -> None:
     fake.selected_service_ids = (8, 9)
     fake.fail_services = True
 
-    feed = await build_home(_ctx(fake))
+    rails = await _all_extra_rails(_ctx(fake))
 
-    ids = {rail.id for rail in feed.rails}
+    ids = {rail.id for rail in rails}
     assert not any(rail_id.startswith("service-") for rail_id in ids)
-    assert {"trending", "popular"} <= ids
+    assert {"top-rated-movie", "top-rated-tv"} <= ids
 
 
 async def test_one_failing_service_rail_does_not_drop_siblings() -> None:
@@ -296,12 +454,12 @@ async def test_one_failing_service_rail_does_not_drop_siblings() -> None:
     ]
     fake.failing_service_ids = {8}
 
-    feed = await build_home(_ctx(fake))
+    rails = await _all_extra_rails(_ctx(fake))
 
-    ids = {rail.id for rail in feed.rails}
+    ids = {rail.id for rail in rails}
     assert "service-8" not in ids
     assert "service-9" in ids
-    assert {"trending", "popular"} <= ids
+    assert {"top-rated-movie", "top-rated-tv"} <= ids
 
 
 # ── Composer: home (3.3) ─────────────────────────────────────────────────────
@@ -374,49 +532,57 @@ async def test_extra_rails_paginate_then_complete() -> None:
     assert pages >= 2  # catalogue spans multiple pages then ends
 
 
-async def test_curated_movie_genres_split_between_home_and_extra() -> None:
+async def test_cursor_grouping_does_not_underfill_an_overlapping_service_rail() -> None:
     fake = FakeCatalog()
-    genre_names = (
-        "Western",
-        "Comedy",
-        "Crime",
-        "Drama",
-        "Family",
-        "Fantasy",
-        "History",
-        "Horror",
-        "Music",
-        "Mystery",
-        "Romance",
-        "Science Fiction",
-        "TV Movie",
-        "Thriller",
-        "War",
-        "Adventure",
-        "Documentary",
+    service_ids = (8, 337, 9, 15)
+    fake.selected_service_ids = service_ids
+    fake.available_services = [
+        ServiceOption(
+            provider_id=provider_id,
+            name=f"Service {provider_id}",
+            logo_path=None,
+            display_priority=index,
+        )
+        for index, provider_id in enumerate(service_ids)
+    ]
+    fake.service_results[9] = [_summary(tmdb_id) for tmdb_id in range(1, 21)]
+    fake.service_results[15] = [
+        *[_summary(tmdb_id) for tmdb_id in range(1, 17)],
+        *[_summary(tmdb_id) for tmdb_id in range(21, 25)],
+    ]
+
+    page = await build_extra_rails(_ctx(fake), 4)
+    by_id = {rail.id: rail for rail in page.rails}
+
+    assert len(by_id["service-9"].items) == 20
+    assert len(by_id["service-15"].items) == 20
+
+
+async def test_extra_rails_order_services_decades_then_stable_mixed_genres() -> None:
+    fake = FakeCatalog()
+    fake.selected_service_ids = (8,)
+    fake.available_services = [
+        ServiceOption(provider_id=8, name="Netflix", logo_path=None, display_priority=1)
+    ]
+
+    rails = await _all_extra_rails(_ctx(fake))
+    ids = [rail.id for rail in rails]
+
+    assert ids[:3] == ["top-rated-movie", "top-rated-tv", "service-8"]
+    assert ids[3:8] == [f"decade-{decade}" for decade in (2020, 2010, 2000, 1990, 1980)]
+    genre_ids = ids[8:]
+    assert set(genre_ids) == {
+        *(f"genre-movie-{genre_id}" for genre_id in fake.genre_map_result.values()),
+        *(f"genre-tv-{genre_id}" for genre_id in fake.genre_map_result.values()),
+    }
+    assert all(
+        rail.title.endswith((" · Movies", " · TV"))
+        for rail in rails
+        if rail.id.startswith("genre-")
     )
-    fake.genre_map_result = {name: index for index, name in enumerate(genre_names, start=1)}
-    present_curated = [name for name in GENRE_PICKS if name in fake.genre_map_result]
 
-    home = await build_home(_ctx(fake))
-    home_genres = [rail.title for rail in home.rails if rail.id.startswith("genre-movie-")]
-
-    extra_genres: list[str] = []
-    cursor: int | None = 0
-    pages = 0
-    while cursor is not None:
-        page = await build_extra_rails(_ctx(fake), cursor)
-        extra_genres.extend(rail.title for rail in page.rails if rail.id.startswith("genre-movie-"))
-        cursor = page.next_cursor
-        pages += 1
-        assert pages < 20  # guard against a runaway cursor
-
-    extra_curated = [name for name in extra_genres if name in GENRE_PICKS]
-    combined = home_genres + extra_curated
-    assert home_genres == present_curated[:HOME_GENRE_COUNT]
-    assert set(home_genres).isdisjoint(extra_curated)
-    assert len(combined) == len(set(combined)) == len(present_curated)
-    assert set(combined) == set(present_curated)
+    repeated = await _all_extra_rails(_ctx(FakeCatalog()))
+    assert [rail.id for rail in repeated if rail.id.startswith("genre-")] == genre_ids
 
 
 async def test_all_disabled_extra_rails_are_terminal_without_catalog_work() -> None:
@@ -444,8 +610,11 @@ class FakeTaste:
     def __init__(self) -> None:
         self.my_list_items: list[MediaSummary] = []
         self.recommended_items: list[MediaSummary] = []
-        self.more_like_result: tuple[str, list[MediaSummary]] | None = None
+        self.more_like_result: tuple[str, bool, list[MediaSummary]] | None = None
+        self.unexpected_items: list[MediaSummary] = []
+        self.unexpected_calls = 0
         self.fail = False
+        self.fail_unexpected = False
 
     def _maybe_fail(self) -> None:
         if self.fail:
@@ -459,9 +628,16 @@ class FakeTaste:
         self._maybe_fail()
         return list(self.recommended_items)
 
-    async def more_like(self, user_id: int) -> tuple[str, list[MediaSummary]] | None:
+    async def more_like(self, user_id: int) -> tuple[str, bool, list[MediaSummary]] | None:
         self._maybe_fail()
         return self.more_like_result
+
+    async def unexpected_picks(self, user_id: int) -> list[MediaSummary]:
+        self.unexpected_calls += 1
+        if self.fail_unexpected:
+            raise RuntimeError("exploration failed")
+        self._maybe_fail()
+        return list(self.unexpected_items)
 
 
 def _personal_ctx(fake: FakeCatalog, taste: FakeTaste) -> RailContext:
@@ -476,18 +652,97 @@ async def test_personalized_home_orders_and_titles_rails() -> None:
     taste = FakeTaste()
     taste.my_list_items = [_summary(500)]  # a one-title list still renders
     taste.recommended_items = [_summary(600 + i) for i in range(6)]
-    taste.more_like_result = ("Dune", [_summary(700 + i) for i in range(6)])
+    taste.more_like_result = ("Dune", False, [_summary(700 + i) for i in range(6)])
+    taste.unexpected_items = [_summary(900 + i) for i in range(6)]
+    fake = FakeCatalog()
+    plex = FakePlexCatalog(_resume(800, 801, 802, 803))
+    ctx = _personal_ctx(fake, taste)
+    ctx.plex = cast("PlexCatalogService", plex)
+    ctx.plex_account_token = SecretStr("account-token")
+
+    feed = await build_home(ctx)
+
+    ids = [rail.id for rail in feed.rails]
+    assert ids == [
+        "continue-watching",
+        "my-list",
+        "recommended-for-you",
+        "trending",
+        "more-like",
+        "popular",
+        "popular-tv",
+        "recently-added",
+        "unexpected-picks",
+    ]
+    more_like = feed.rails[4]
+    assert more_like.title == "More Like Dune"  # resolved from the source title
+    my_list = feed.rails[1]
+    assert [item.id for item in my_list.items] == [500]
+
+
+async def test_plex_watch_source_uses_honest_more_like_title() -> None:
+    taste = FakeTaste()
+    taste.more_like_result = ("Top Gun", True, [_summary(700 + i) for i in range(6)])
+
+    feed = await build_home(_personal_ctx(FakeCatalog(), taste))
+
+    rail = next(rail for rail in feed.rails if rail.id == "more-like")
+    assert rail.title == "Because You Watched Top Gun"
+
+
+async def test_unexpected_picks_follows_principal_rails_and_keeps_their_priority() -> None:
+    taste = FakeTaste()
+    taste.unexpected_items = [_summary(1), _summary(101), *[_summary(900 + i) for i in range(5)]]
 
     feed = await build_home(_personal_ctx(FakeCatalog(), taste))
 
     ids = [rail.id for rail in feed.rails]
-    assert ids[:2] == ["my-list", "recommended-for-you"]
-    assert ids[2] == "trending"
-    assert ids[3] == "more-like"
-    more_like = feed.rails[3]
-    assert more_like.title == "More like Dune"  # resolved from the source title
-    my_list = feed.rails[0]
-    assert [item.id for item in my_list.items] == [500]
+    assert ids.index("unexpected-picks") > ids.index("recently-added")
+    rail = next(rail for rail in feed.rails if rail.id == "unexpected-picks")
+    assert rail.title == "Picks You Wouldn't Usually Watch"
+    assert [item.id for item in rail.items] == [900, 901, 902, 903, 904]
+
+
+async def test_thin_unexpected_picks_are_omitted() -> None:
+    taste = FakeTaste()
+    taste.unexpected_items = [_summary(900 + i) for i in range(3)]
+
+    feed = await build_home(_personal_ctx(FakeCatalog(), taste))
+
+    assert "unexpected-picks" not in [rail.id for rail in feed.rails]
+
+
+async def test_unexpected_picks_disable_and_failure_are_independent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake = FakeCatalog()
+    taste = FakeTaste()
+    taste.unexpected_items = [_summary(900 + i) for i in range(5)]
+    disabled = _personal_ctx(fake, taste)
+    disabled.disabled_rail_types = frozenset({RailType.UNEXPECTED_PICKS})
+
+    disabled_feed = await build_home(disabled)
+
+    assert "unexpected-picks" not in [rail.id for rail in disabled_feed.rails]
+    assert taste.unexpected_calls == 0
+
+    enabled = _personal_ctx(FakeCatalog(), taste)
+    enabled.disabled_rail_types = frozenset({RailType.TRENDING, RailType.RECENT})
+    source_disabled_feed = await build_home(enabled)
+
+    assert "unexpected-picks" in [rail.id for rail in source_disabled_feed.rails]
+    assert taste.unexpected_calls == 1
+
+    taste.fail_unexpected = True
+    caplog.set_level("ERROR", logger="tasterr.rails")
+    degraded_feed = await build_home(enabled)
+
+    assert "unexpected-picks" not in [rail.id for rail in degraded_feed.rails]
+    assert {"popular", "popular-tv"} <= {rail.id for rail in degraded_feed.rails}
+    assert taste.unexpected_calls == 2
+    assert "rails: unexpected-picks failed" in caplog.text
+    assert "exploration failed" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 async def test_signalless_user_gets_the_plain_home() -> None:
@@ -498,19 +753,28 @@ async def test_signalless_user_gets_the_plain_home() -> None:
 
     assert [rail.id for rail in feed.rails] == [rail.id for rail in plain.rails]
     assert not any(
-        rail.id in ("my-list", "recommended-for-you", "more-like") for rail in feed.rails
+        rail.id in ("my-list", "recommended-for-you", "more-like", "unexpected-picks")
+        for rail in feed.rails
     )
 
 
-async def test_engine_failure_degrades_to_the_plain_home() -> None:
+async def test_engine_failure_degrades_to_the_plain_home(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     taste = FakeTaste()
     taste.fail = True  # storage/engine errors, not upstream ones
+    caplog.set_level("ERROR", logger="tasterr.rails")
 
     feed = await build_home(_personal_ctx(FakeCatalog(), taste))
 
     ids = [rail.id for rail in feed.rails]
     assert "trending" in ids
-    assert not any(rail_id in ("my-list", "recommended-for-you", "more-like") for rail_id in ids)
+    assert not any(
+        rail_id in ("my-list", "recommended-for-you", "more-like", "unexpected-picks")
+        for rail_id in ids
+    )
+    assert "engine storage on fire" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 async def test_exclusive_providers_never_run_concurrently() -> None:
@@ -553,3 +817,84 @@ async def test_exclusive_providers_never_run_concurrently() -> None:
     rails = await _compose_rails(_ctx(FakeCatalog()), providers)
 
     assert [rail.id for rail in rails] == ["ex-a", "ex-b", "ex-c"]
+
+
+async def test_nonexclusive_work_overlaps_serial_exclusive_providers() -> None:
+    from tasterr.rails.composer import _compose_rails  # pyright: ignore[reportPrivateUsage]
+    from tasterr.rails.registry import RailProvider
+
+    nonexclusive_started = asyncio.Event()
+
+    async def exclusive(_: RailContext) -> list[MediaSummary]:
+        await nonexclusive_started.wait()
+        return [_summary(1000 + index) for index in range(4)]
+
+    async def nonexclusive(_: RailContext) -> list[MediaSummary]:
+        nonexclusive_started.set()
+        return [_summary(2000 + index) for index in range(4)]
+
+    providers = [
+        RailProvider(
+            "exclusive",
+            "exclusive",
+            "standard",
+            exclusive,
+            RailType.RECOMMENDED,
+            exclusive=True,
+        ),
+        RailProvider(
+            "nonexclusive",
+            "nonexclusive",
+            "standard",
+            nonexclusive,
+            RailType.TRENDING,
+        ),
+    ]
+
+    rails = await asyncio.wait_for(_compose_rails(_ctx(FakeCatalog()), providers), 0.5)
+
+    assert [rail.id for rail in rails] == ["exclusive", "nonexclusive"]
+
+
+async def test_exclusive_failure_cancels_started_nonexclusive_work() -> None:
+    from tasterr.rails.composer import _compose_rails  # pyright: ignore[reportPrivateUsage]
+    from tasterr.rails.registry import RailProvider
+
+    nonexclusive_started = asyncio.Event()
+    nonexclusive_cancelled = asyncio.Event()
+
+    async def exclusive(_: RailContext) -> list[MediaSummary]:
+        await nonexclusive_started.wait()
+        raise RuntimeError("exclusive failed")
+
+    async def nonexclusive(_: RailContext) -> list[MediaSummary]:
+        nonexclusive_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            nonexclusive_cancelled.set()
+            raise
+        raise AssertionError("unreachable")
+
+    providers = [
+        RailProvider(
+            "exclusive",
+            "exclusive",
+            "standard",
+            exclusive,
+            RailType.RECOMMENDED,
+            exclusive=True,
+        ),
+        RailProvider(
+            "nonexclusive",
+            "nonexclusive",
+            "standard",
+            nonexclusive,
+            RailType.TRENDING,
+        ),
+    ]
+
+    with pytest.raises(RuntimeError, match="exclusive failed"):
+        await _compose_rails(_ctx(FakeCatalog()), providers)
+
+    assert nonexclusive_cancelled.is_set()

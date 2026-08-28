@@ -30,6 +30,10 @@ EXPECTED_GUARDS = {
         "require_same_origin",
         "mutation_rate_limit",
     },
+    ("POST", "/api/v1/recommendations/household-blend"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+    },
 }
 AUTHENTICATED_MUTATIONS = {
     key
@@ -95,6 +99,11 @@ def test_every_state_changing_route_has_its_designated_guards() -> None:
         assert expected <= names, f"{key} is missing {sorted(expected - names)}"
         if key in AUTHENTICATED_MUTATIONS:
             assert "require_session" in names
+
+
+def test_every_response_bearing_api_route_has_an_explicit_model() -> None:
+    missing = {key for key, route in _api_routes().items() if route.response_model is None}
+    assert missing == {("POST", "/api/v1/auth/logout")}  # intentional 204 response
 
 
 def test_read_only_post_and_pin_poll_are_explicitly_exempt() -> None:

@@ -61,6 +61,29 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Browser headers are not forwarded upstream; upstream headers are not returned downstream.
 - [ ] Upstream JSON is untrusted: parse into typed models, drop unknown fields.
 
+#### Advertised Plex Media Server connections
+
+- [ ] Select at most four Plex Media Server resources, owned-first then by advertised
+      machine id; attempt at most six connections per resource in local HTTPS,
+      remote-direct, relay, then stable URI order.
+- [ ] Accept only `https://<host>.plex.direct:<explicit-port>` with port 1–65535,
+      empty or `/` path, and no username, password, query, or fragment. Reject plain
+      HTTP, missing/invalid ports, other hosts/schemes, and embedded credentials.
+- [ ] Keep normal certificate-chain and hostname verification enabled. Never add
+      `verify=False`, a custom trust bypass, or an arbitrary operator/server URL.
+- [ ] Probe unauthenticated `/identity` with redirects disabled; accept the connection
+      only when status/shape is valid and `machineIdentifier` exactly matches the
+      advertised resource. Never send a token during this probe.
+- [ ] After validation, send the resource token only in `X-Plex-Token`; never place it
+      in a URL, redirect, log, exception, cache key/value, response, or durable row.
+- [ ] Never follow redirects for plex.tv or PMS reads. A redirect is a failed
+      connection/read, not a new trust decision.
+- [ ] Resolve the caller's PMS-local account independently per server. Use the
+      validated cloud id only when `/accounts` explicitly returns 403 for the
+      self-only non-admin history path; every other account-list failure stays
+      closed. Explicitly filter history and reject the whole server page if any
+      row lacks or differs from that account id.
+
 ### Frontend
 
 - [ ] No `dangerouslySetInnerHTML`; render TMDB/Seerr text as text, always.
@@ -125,6 +148,9 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] `just audit` clean, or findings triaged with reasons in the PR.
 - [ ] Security review pass over the full diff since the last tag.
 - [ ] Live contract tests against the home Seerr instance pass; tested Seerr version recorded.
+- [ ] Opt-in Plex contracts pass for every available owner/managed/shared role with
+      standard TLS, machine identity, per-row history identity, account-scoped
+      Continue Watching, and TMDB GUID mapping; evidence is redacted.
 - [ ] `.env.example` contains placeholders only — no real values, no real hostnames.
 
 - [ ] `just release-check` passes in the devcontainer (ordinary gate + browser +

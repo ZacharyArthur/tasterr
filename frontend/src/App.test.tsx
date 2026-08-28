@@ -56,6 +56,7 @@ const USER_A_QUERY_DATA = [
 	[["availability", ["movie:7"]], { owner: "A" }],
 	[["explain", "movie", 7], { reasons: ["Viewer A's taste"] }],
 	[["taste-onboarding", USER.id], { state: "done" }],
+	[["household-members", USER.id], [{ id: USER.id, display_name: "Viewer A" }]],
 	[["admin", "settings"], { owner: "A" }],
 	[["admin", "regions"], { owner: "A" }],
 	[["admin", "services", "US"], { owner: "A" }],

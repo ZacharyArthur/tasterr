@@ -1,7 +1,8 @@
 """TasteService orchestration over faked catalog/availability + real store."""
 
+import asyncio
 from collections.abc import AsyncGenerator
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -61,10 +62,15 @@ class FakeCatalog:
         self.region = "US"
         self.selected_service_ids: tuple[int, ...] = ()
         self.facts_calls: list[TitleKey] = []
+        self.detail_calls: list[TitleKey] = []
         self.failing_facts: set[TitleKey] = set()
         self.details: dict[TitleKey, MediaDetail] = {}
         self.trending_items: list[MediaSummary] = []
         self.discover_items: list[MediaSummary] = []
+        self.discover_items_by_surface: dict[
+            tuple[MediaType, str, tuple[int, ...]], list[MediaSummary]
+        ] = {}
+        self.discover_calls: list[tuple[MediaType, str, tuple[int, ...]]] = []
         self.genres_by_title: dict[TitleKey, list[str]] = {}
         self.providers_by_title: dict[TitleKey, list[int]] = {}
 
@@ -84,6 +90,7 @@ class FakeCatalog:
         )
 
     async def detail(self, media: MediaType, tmdb_id: int) -> MediaDetail:
+        self.detail_calls.append((media, tmdb_id))
         detail = self.details.get((media, tmdb_id))
         if detail is None:
             raise UpstreamUnavailable("detail unavailable")
@@ -92,8 +99,17 @@ class FakeCatalog:
     async def trending(self) -> list[MediaSummary]:
         return self.trending_items
 
-    async def discover(self, media: MediaType, **_: object) -> list[MediaSummary]:
-        return self.discover_items
+    async def discover(
+        self,
+        media: MediaType,
+        *,
+        sort_by: str = "popularity.desc",
+        genres: list[int] | None = None,
+        **_: object,
+    ) -> list[MediaSummary]:
+        surface = (media, sort_by, tuple(genres or []))
+        self.discover_calls.append(surface)
+        return self.discover_items_by_surface.get(surface, self.discover_items)
 
     async def genre_map(self, media: MediaType) -> dict[str, int]:
         return {"Drama": 18, "Comedy": 35}
@@ -253,6 +269,250 @@ async def test_candidate_pool_respects_the_cap(
     assert len(catalog.facts_calls) <= 6
 
 
+async def test_unexpected_picks_uses_broad_sources_and_excludes_known_titles(
+    db: AsyncSession,
+) -> None:
+    user_id = await _user(db)
+    await store.record_signal(db, user_id, "movie", 1, "request")
+    await store.record_signal(db, user_id, "movie", 2, "not_interested")
+    await store.save_profile(db, user_id, {"genre:drama": 1.0})
+    catalog = FakeCatalog()
+    catalog.trending_items = [_summary(1), _summary(2), _summary(10), _summary(11)]
+    catalog.discover_items_by_surface = {
+        ("movie", "popularity.desc", ()): [_summary(10), _summary(12)],
+        ("tv", "popularity.desc", ()): [_summary(13, "tv")],
+        ("movie", "primary_release_date.desc", ()): [_summary(14)],
+        ("movie", "popularity.desc", (35,)): [_summary(15)],
+        ("tv", "popularity.desc", (35,)): [_summary(16, "tv")],
+    }
+    candidate_keys: list[TitleKey] = [
+        ("movie", 10),
+        ("movie", 11),
+        ("movie", 12),
+        ("tv", 13),
+        ("movie", 14),
+        ("movie", 15),
+        ("tv", 16),
+    ]
+    catalog.genres_by_title = {key: ["Comedy"] for key in candidate_keys}
+
+    items = await _service(db, catalog).unexpected_picks(user_id)
+
+    assert [item.id for item in items] == [10, 11]
+    assert set(catalog.facts_calls) == set(catalog.genres_by_title)
+    assert ("movie", "popularity.desc", (18,)) not in catalog.discover_calls
+    assert ("tv", "popularity.desc", (18,)) not in catalog.discover_calls
+    assert ("movie", "popularity.desc", (35,)) in catalog.discover_calls
+    assert ("tv", "popularity.desc", (35,)) in catalog.discover_calls
+
+
+async def test_realistic_profile_supplies_at_least_four_unexpected_picks(
+    db: AsyncSession,
+) -> None:
+    user_id = await _user(db)
+    await store.save_profile(
+        db,
+        user_id,
+        {"genre:action": 0.8, "genre:drama": 0.5, "lang:en": 0.3},
+    )
+    catalog = FakeCatalog()
+    catalog.trending_items = [_summary(tmdb_id) for tmdb_id in range(10, 30)]
+    catalog.genres_by_title = {("movie", tmdb_id): ["Comedy"] for tmdb_id in range(10, 30)}
+
+    items = await _service(db, catalog).unexpected_picks(user_id)
+
+    assert len(items) >= 4
+
+
+async def test_unexpected_picks_caps_before_vector_work(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service_mod, "CANDIDATE_CAP", 5)
+    user_id = await _user(db)
+    await store.record_signal(db, user_id, "movie", 1, "request")
+    await store.save_profile(db, user_id, {"genre:drama": 1.0})
+    catalog = FakeCatalog()
+    catalog.trending_items = [_summary(tmdb_id) for tmdb_id in range(10, 30)]
+    catalog.genres_by_title = {("movie", tmdb_id): ["Comedy"] for tmdb_id in range(10, 15)}
+
+    items = await _service(db, catalog).unexpected_picks(user_id)
+
+    assert len(items) == 2
+    assert len(catalog.facts_calls) == 5
+    assert catalog.discover_calls == []
+
+
+async def test_unexpected_picks_without_profile_does_no_catalog_work(db: AsyncSession) -> None:
+    user_id = await _user(db)
+    catalog = FakeCatalog()
+
+    assert await _service(db, catalog).unexpected_picks(user_id) == []
+    assert catalog.facts_calls == []
+    assert catalog.discover_calls == []
+
+
+async def test_unexpected_picks_are_user_specific(db: AsyncSession) -> None:
+    alice = await _user(db)
+    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
+    db.add(bob_user)
+    await db.flush()
+    bob = bob_user.id
+    await store.record_signal(db, alice, "movie", 1, "request")
+    await store.record_signal(db, bob, "movie", 2, "request")
+    await store.save_profile(db, alice, {"genre:drama": 1.0})
+    await store.save_profile(db, bob, {"genre:comedy": 1.0})
+    catalog = FakeCatalog()
+    catalog.trending_items = [_summary(tmdb_id) for tmdb_id in range(10, 18)]
+    candidate_keys: list[TitleKey] = [("movie", tmdb_id) for tmdb_id in range(10, 18)]
+    catalog.genres_by_title = {
+        key: ["Drama" if key[1] < 14 else "Comedy"] for key in candidate_keys
+    }
+    service = _service(db, catalog)
+
+    alice_items = await service.unexpected_picks(alice)
+    bob_items = await service.unexpected_picks(bob)
+
+    assert [item.id for item in alice_items] == [14, 15]
+    assert [item.id for item in bob_items] == [10, 11]
+
+
+async def test_household_blend_uses_mean_profile_and_any_member_vetoes(
+    db: AsyncSession,
+) -> None:
+    alice = await _user(db)
+    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
+    db.add(bob_user)
+    await db.flush()
+    bob = bob_user.id
+    await store.record_signal(db, alice, "movie", 1, "request")
+    await store.record_signal(db, alice, "movie", 21, "not_interested")
+    await store.record_signal(db, bob, "movie", 2, "request")
+    await store.record_signal(db, bob, "movie", 22, "watchlist")
+    await store.save_profile(db, alice, {"genre:drama": 1.0})
+    await store.save_profile(db, bob, {"genre:comedy": 1.0})
+    catalog = FakeCatalog()
+    catalog.details[("movie", 1)] = _detail(
+        1, [_summary(tmdb_id) for tmdb_id in (20, 21, 22, 23, 24)]
+    )
+    catalog.details[("movie", 2)] = _detail(2, [_summary(25)])
+    catalog.genres_by_title = {
+        ("movie", 20): ["Drama", "Comedy"],
+        ("movie", 23): ["Drama"],
+        ("movie", 24): ["Comedy"],
+        ("movie", 25): ["Action"],
+    }
+
+    items = await _service(db, catalog).household_blend([bob, alice])
+
+    assert items[0].id == 20
+    assert {item.id for item in items} == {20, 23, 24, 25}
+    assert ("movie", 21) not in catalog.facts_calls
+    assert ("movie", 22) not in catalog.facts_calls
+
+
+async def test_household_blend_rejects_the_whole_empty_profile_audience(
+    db: AsyncSession,
+) -> None:
+    alice = await _user(db)
+    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
+    db.add(bob_user)
+    await db.flush()
+    bob = bob_user.id
+    await store.record_signal(db, alice, "movie", 1, "request")
+    await store.record_signal(db, bob, "movie", 2, "request")
+    await store.save_profile(db, alice, {"genre:drama": 1.0})
+    catalog = FakeCatalog()
+    catalog.failing_facts.add(("movie", 2))
+
+    with pytest.raises(ValueError, match="profile unavailable"):
+        await _service(db, catalog).household_blend([alice, bob])
+
+    assert catalog.detail_calls == []
+    assert catalog.discover_calls == []
+
+
+async def test_household_blend_caps_the_shared_union_before_vector_work(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service_mod, "CANDIDATE_CAP", 5)
+    alice = await _user(db)
+    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
+    db.add(bob_user)
+    await db.flush()
+    bob = bob_user.id
+    await store.record_signal(db, alice, "movie", 1, "request")
+    await store.record_signal(db, bob, "movie", 2, "request")
+    await store.save_profile(db, alice, {"genre:drama": 1.0})
+    await store.save_profile(db, bob, {"genre:drama": 1.0})
+    catalog = FakeCatalog()
+    catalog.details[("movie", 1)] = _detail(1, [_summary(tmdb_id) for tmdb_id in range(100, 130)])
+    catalog.details[("movie", 2)] = _detail(2, [_summary(tmdb_id) for tmdb_id in range(200, 230)])
+
+    items = await _service(db, catalog).household_blend([alice, bob])
+
+    assert len(items) == 5
+    assert len(catalog.facts_calls) == 5
+    assert catalog.detail_calls == [("movie", 1)]
+
+
+async def test_household_blend_rejects_more_than_six_before_materialization(
+    db: AsyncSession,
+) -> None:
+    catalog = FakeCatalog()
+
+    with pytest.raises(ValueError, match="invalid household audience"):
+        await _service(db, catalog).household_blend(list(range(1, 8)))
+
+    assert catalog.facts_calls == []
+    assert catalog.detail_calls == []
+
+
+async def test_concurrent_household_blends_use_independent_sessions(tmp_path: Path) -> None:
+    engine = create_engine(tmp_path / "concurrent.db")
+    await upgrade_to_head(engine)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with maker() as prepare:
+            alice = User(seerr_user_id=1, display_name="alice", auth_type="plex")
+            bob = User(seerr_user_id=2, display_name="bob", auth_type="plex")
+            prepare.add_all((alice, bob))
+            await prepare.flush()
+            await store.record_signal(prepare, alice.id, "movie", 1, "request")
+            await store.record_signal(prepare, bob.id, "movie", 2, "request")
+            await store.save_profile(prepare, alice.id, {"genre:drama": 1.0})
+            await store.save_profile(prepare, bob.id, {"genre:drama": 1.0})
+            for tmdb_id in range(10, 14):
+                await store.save_features(
+                    prepare,
+                    ("movie", tmdb_id),
+                    FeatureRecord(
+                        vector={"genre:drama": 1.0},
+                        vote_average=7.0,
+                        vote_count=1000,
+                        watch_region="US",
+                    ),
+                )
+            await prepare.commit()
+            user_ids = [alice.id, bob.id]
+
+        async def run() -> list[int]:
+            catalog = FakeCatalog()
+            catalog.details[("movie", 1)] = _detail(
+                1, [_summary(tmdb_id) for tmdb_id in range(10, 14)]
+            )
+            catalog.details[("movie", 2)] = _detail(2, [])
+            async with maker() as session:
+                return [
+                    item.id for item in await _service(session, catalog).household_blend(user_ids)
+                ]
+
+        first, second = await asyncio.gather(run(), run())
+
+        assert first == second == [10, 11, 12, 13]
+    finally:
+        await engine.dispose()
+
+
 async def test_in_library_candidate_outranks_its_equal(db: AsyncSession) -> None:
     user_id = await _user(db)
     await store.record_signal(db, user_id, "movie", 1, "request")
@@ -323,9 +583,98 @@ async def test_more_like_ranks_the_sources_related_titles(db: AsyncSession) -> N
     result = await _service(db, catalog).more_like(user_id)
 
     assert result is not None
-    source_title, items = result
+    source_title, is_plex_watch, items = result
     assert source_title == "title-1"
+    assert is_plex_watch is False
     assert [item.id for item in items] == [2]  # source + hidden excluded
+
+
+async def test_more_like_uses_plex_watch_label(db: AsyncSession) -> None:
+    user_id = await _user(db)
+    await store.record_signal(db, user_id, "movie", 2, "watched_plex")
+    catalog = FakeCatalog()
+    catalog.details[("movie", 2)] = _detail(2, [_summary(20)])
+
+    result = await _service(db, catalog).more_like(user_id)
+
+    assert result is not None
+    assert (result[0], result[1], [item.id for item in result[2]]) == (
+        "title-2",
+        True,
+        [20],
+    )
+
+
+async def test_more_like_non_watch_source_keeps_label(db: AsyncSession) -> None:
+    user_id = await _user(db)
+    await store.record_signal(db, user_id, "movie", 2, "request")
+    catalog = FakeCatalog()
+    catalog.details[("movie", 2)] = _detail(2, [_summary(20)])
+
+    result = await _service(db, catalog).more_like(user_id)
+
+    assert result is not None
+    assert (result[0], result[1]) == ("title-2", False)
+
+
+async def test_more_like_falls_back_past_hidden_and_unavailable_sources(
+    db: AsyncSession,
+) -> None:
+    user_id = await _user(db)
+    old = utcnow() - timedelta(days=3)
+    await store.record_signal(db, user_id, "movie", 1, "request", old)
+    await store.record_signal(db, user_id, "movie", 2, "watched_plex", old + timedelta(days=1))
+    await store.record_signal(db, user_id, "movie", 3, "watchlist", old + timedelta(days=2))
+    await store.record_signal(db, user_id, "movie", 3, "not_interested", utcnow())
+    catalog = FakeCatalog()
+    catalog.details[("movie", 1)] = _detail(1, [_summary(10)])
+
+    result = await _service(db, catalog).more_like(user_id)
+
+    assert result is not None
+    assert (result[0], result[1], [item.id for item in result[2]]) == (
+        "title-1",
+        False,
+        [10],
+    )
+
+
+async def test_more_like_daily_rotation_is_stable_and_caps_source_attempts(
+    db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FixedDate(date):
+        current = date(2026, 1, 1)
+
+        @classmethod
+        def today(cls) -> date:
+            return cls.current
+
+    monkeypatch.setattr(service_mod, "date", FixedDate)
+    user_id = await _user(db)
+    old = utcnow() - timedelta(days=4)
+    for tmdb_id in range(1, 5):
+        await store.record_signal(
+            db,
+            user_id,
+            "movie",
+            tmdb_id,
+            "request",
+            old + timedelta(days=tmdb_id),
+        )
+    catalog = FakeCatalog()
+    service = _service(db, catalog)
+
+    assert await service.more_like(user_id) is None
+    assert catalog.detail_calls == [("movie", 2), ("movie", 3), ("movie", 4)]
+
+    catalog.detail_calls.clear()
+    assert await service.more_like(user_id) is None
+    assert catalog.detail_calls == [("movie", 2), ("movie", 3), ("movie", 4)]
+
+    FixedDate.current = date(2026, 1, 2)
+    catalog.detail_calls.clear()
+    assert await service.more_like(user_id) is None
+    assert catalog.detail_calls == [("movie", 3), ("movie", 2), ("movie", 4)]
 
 
 async def test_my_list_excludes_hidden_titles(db: AsyncSession) -> None:

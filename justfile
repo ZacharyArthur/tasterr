@@ -45,9 +45,8 @@ check-types-fresh:
     cd frontend && npx openapi-typescript openapi.json -o src/lib/api.gen.ts.check
     cd frontend && { diff -u src/lib/api.gen.ts src/lib/api.gen.ts.check; rc=$?; rm -f src/lib/api.gen.ts.check; exit $rc; }
 
-# Live Seerr contract tests (excluded from `check`): set TASTERR_LIVE_SEERR_URL,
-# TASTERR_LIVE_SEERR_EMAIL, TASTERR_LIVE_SEERR_PASSWORD (and optionally
-# TASTERR_LIVE_PLEX_TOKEN for the /auth/plex path) in the environment first.
+# Live upstream contract tests (excluded from `check`): see docs/CONFIGURATION.md
+# for the optional Seerr and three-role Plex environment variables.
 test-live:
     cd backend && uv run pytest -m live -s
 

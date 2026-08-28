@@ -4,8 +4,14 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tasterr.recommend.profile import HALF_LIFE_DAYS, SignalInput, compute_profile, decay_factor
-from tasterr.recommend.signals import TitleKey
+from tasterr.recommend.profile import (
+    HALF_LIFE_DAYS,
+    SignalInput,
+    blend_profiles,
+    compute_profile,
+    decay_factor,
+)
+from tasterr.recommend.signals import SIGNAL_WEIGHTS, TitleKey
 
 NOW = datetime(2026, 7, 9, 12, 0, 0)
 DRAMA: TitleKey = ("movie", 1)
@@ -25,6 +31,19 @@ def test_strong_signal_shifts_the_profile_toward_the_title() -> None:
     profile = compute_profile(signals, VECTORS, NOW)
 
     assert profile["genre:drama"] > profile["genre:comedy"] > 0.0
+
+
+def test_plex_watch_is_a_strong_profile_signal() -> None:
+    profile = compute_profile(
+        [
+            SignalInput(DRAMA, SIGNAL_WEIGHTS["watched_plex"], NOW),
+            SignalInput(COMEDY, SIGNAL_WEIGHTS["detail_open"], NOW),
+        ],
+        VECTORS,
+        NOW,
+    )
+
+    assert profile["genre:drama"] > profile["genre:comedy"] > 0
 
 
 def test_one_half_life_old_signal_contributes_half() -> None:
@@ -77,3 +96,14 @@ def test_no_usable_signals_yield_an_empty_profile() -> None:
 
 def test_decay_clamps_future_timestamps() -> None:
     assert decay_factor(-5.0) == 1.0
+
+
+def test_blend_is_the_normalized_mean_of_normalized_profiles() -> None:
+    result = blend_profiles([{"genre:drama": 2.0}, {"genre:comedy": 5.0}])
+
+    assert result["genre:drama"] == pytest.approx(2**-0.5)
+    assert result["genre:comedy"] == pytest.approx(2**-0.5)
+
+
+def test_blend_rejects_an_empty_selected_profile() -> None:
+    assert blend_profiles([{"genre:drama": 1.0}, {}]) == {}

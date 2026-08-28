@@ -12,6 +12,7 @@ from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import Signal, User, utcnow
 from tasterr.recommend import store
 from tasterr.recommend.features import FeatureRecord
+from tasterr.recommend.signals import SignalKind
 
 
 @pytest.fixture
@@ -135,6 +136,40 @@ async def test_seed_rows_are_unique_per_title(db: AsyncSession) -> None:
     assert await store.record_signal(db, user_id, "movie", 550, "seed_request_history") is False
 
     assert len(await store.load_signals(db, user_id)) == 1
+
+
+async def test_plex_episode_collapses_to_one_show_row_at_latest_watch(db: AsyncSession) -> None:
+    user_id = await _user(db, 1)
+    old = utcnow() - timedelta(days=2)
+    newest = old + timedelta(days=1)
+    await store.save_profile(db, user_id, {"genre:stale": 1.0})
+
+    assert await store.record_signal(db, user_id, "tv", 1399, "watched_plex", old) is True
+    await store.save_profile(db, user_id, {"genre:stale": 1.0})
+    assert await store.record_signal(db, user_id, "tv", 1399, "watched_plex", newest) is True
+    assert await store.load_profile(db, user_id) is None
+
+    await store.save_profile(db, user_id, {"genre:current": 1.0})
+    assert await store.record_signal(db, user_id, "tv", 1399, "watched_plex", old) is False
+    assert await store.load_profile(db, user_id) is not None
+    rows = await store.load_signals(db, user_id)
+    assert [
+        (row.media_type, row.tmdb_id, row.kind, row.weight, row.created_at) for row in rows
+    ] == [("tv", 1399, "watched_plex", 2.5, newest)]
+
+
+@pytest.mark.parametrize("kind", ["watchlist", "not_interested", "seed_request_history"])
+async def test_existing_unique_signals_keep_their_original_timestamp(
+    db: AsyncSession, kind: SignalKind
+) -> None:
+    user_id = await _user(db, 1)
+    original = utcnow() - timedelta(days=2)
+    later = original + timedelta(days=1)
+
+    assert await store.record_signal(db, user_id, "movie", 550, kind, original)
+    assert not await store.record_signal(db, user_id, "movie", 550, kind, later)
+
+    assert (await store.load_signals(db, user_id))[0].created_at == original
 
 
 async def test_schema_rejects_duplicate_unique_kind_rows(db: AsyncSession) -> None:

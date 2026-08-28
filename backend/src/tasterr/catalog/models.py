@@ -6,12 +6,13 @@ client-facing model can carry no secret configuration.
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from tasterr.catalog.availability import Availability
 
 MediaType = Literal["movie", "tv"]
 RailKind = Literal["standard", "genre", "top10"]
+MAX_TMDB_ID = 2_147_483_647
 
 
 class MediaSummary(BaseModel):
@@ -23,6 +24,8 @@ class MediaSummary(BaseModel):
     backdrop_path: str | None
     year: int | None
     vote_average: float
+    progress_percent: int | None = Field(default=None, ge=1, le=99)
+    context: str | None = None
 
 
 class Genre(BaseModel):

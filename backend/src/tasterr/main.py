@@ -113,6 +113,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # so fire-and-forget seed tasks aren't garbage-collected mid-import.
     app.state.seeding = set()
     app.state.seed_tasks = set()
+    # Per-user Plex history tasks are both the single-flight claims and the
+    # strong references reset uses to cancel/await an in-flight import.
+    app.state.plex_history_tasks = {}
+    app.state.plex_history_resets = set()
     # Catalog failures map to generic browser errors (no upstream detail leaks).
     # UpstreamRejected (TMDB 4xx) that an endpoint doesn't handle itself (title/
     # detail maps its own 404) also degrades to a generic 502.
