@@ -440,7 +440,7 @@ async def test_continue_watching_preserves_hub_order_without_timestamps() -> Non
 
 
 async def test_continue_watching_prefers_progress_on_equal_show_timestamp() -> None:
-    fake = FakePlex()
+    fake = FakePlex(2)
     fake.hubs["server-0"] = [
         _item(
             media_type="episode",
@@ -450,6 +450,8 @@ async def test_continue_watching_prefers_progress_on_equal_show_timestamp() -> N
             parent_index=1,
             index=2,
         ),
+    ]
+    fake.hubs["server-1"] = [
         _item(
             media_type="episode",
             rating_key=30,
@@ -462,6 +464,7 @@ async def test_continue_watching_prefers_progress_on_equal_show_timestamp() -> N
         ),
     ]
     fake.metadata_items[("server-0", "21")] = _item(11, rating_key=21)
+    fake.metadata_items[("server-1", "21")] = _item(11, rating_key=21)
 
     result = await _service(fake).continue_watching(7, "token")
 

@@ -809,14 +809,21 @@ async def test_continue_watching_drops_coercive_optional_values() -> None:
         "parentIndex": "2",
         "index": True,
     }
+    bool_timestamps = {
+        "type": "episode",
+        "ratingKey": "2",
+        "lastViewedAt": True,
+        "grandparentLastViewedAt": True,
+        "parentLastViewedAt": True,
+    }
 
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"MediaContainer": {"Hub": [{"Metadata": [row]}]}},
+            json={"MediaContainer": {"Hub": [{"Metadata": [row, bool_timestamps]}]}},
         )
 
-    item = (await _media_client(handler).continue_watching(_server()))[0]
+    item, bool_item = await _media_client(handler).continue_watching(_server())
 
     assert item.rating_key is None
     assert item.grandparent_rating_key is None
@@ -827,6 +834,9 @@ async def test_continue_watching_drops_coercive_optional_values() -> None:
     assert item.duration is None
     assert item.parent_index is None
     assert item.index is None
+    assert bool_item.last_viewed_at is None
+    assert bool_item.grandparent_last_viewed_at is None
+    assert bool_item.parent_last_viewed_at is None
 
 
 async def test_metadata_requests_guid_expansion_for_movie_and_episode() -> None:

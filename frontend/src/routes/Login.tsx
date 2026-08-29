@@ -59,7 +59,11 @@ async function copyText(value: string): Promise<boolean> {
 		return false;
 	} finally {
 		textarea.remove();
-		activeElement?.focus();
+		try {
+			activeElement?.focus();
+		} catch {
+			// Focus restoration is best effort.
+		}
 	}
 }
 

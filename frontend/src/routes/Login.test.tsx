@@ -110,9 +110,11 @@ test("plex flow protects and closes its approval window after polling succeeds",
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
 
 	await screen.findByText("Waiting for Plex approval…");
-	expect(
-		screen.getByRole("link", { name: "Open the approval page" }),
-	).toBeTruthy();
+	const approvalLink = screen.getByRole("link", {
+		name: "Open the approval page",
+	}) as HTMLAnchorElement;
+	expect(approvalLink.target).toBe("_blank");
+	expect(approvalLink.rel).toBe("noopener noreferrer");
 	expect(open).toHaveBeenCalledWith(
 		"",
 		"_blank",
@@ -285,7 +287,10 @@ test("plex flow shows a reachable approval link after popup blocking", async () 
 	const execCommand = vi.fn(() => {
 		const textarea = document.activeElement as HTMLTextAreaElement;
 		expect(textarea.value).toBe("https://app.plex.tv/auth#?x");
+		expect(textarea.readOnly).toBe(true);
+		expect(textarea.tabIndex).toBe(-1);
 		expect(textarea.getAttribute("aria-hidden")).toBe("true");
+		expect(textarea.style.position).toBe("fixed");
 		expect(textarea.style.top).toBe("0px");
 		expect(textarea.style.left).toBe("0px");
 		return true;
@@ -311,11 +316,13 @@ test("plex flow shows a reachable approval link after popup blocking", async () 
 	const copyButton = screen.getByRole("button", {
 		name: "Copy approval URL",
 	});
-	copyButton.focus();
+	const email = screen.getByLabelText("Email");
+	email.focus();
 	fireEvent.click(copyButton);
 	expect(await screen.findByText("Approval URL copied.")).toBeTruthy();
 	expect(execCommand).toHaveBeenCalledWith("copy");
-	expect(document.activeElement).toBe(copyButton);
+	expect(document.activeElement).toBe(email);
+	expect(document.querySelector('textarea[aria-hidden="true"]')).toBeNull();
 });
 
 test("plex flow re-announces repeated copy results", async () => {
@@ -439,14 +446,22 @@ test("plex flow reports when both clipboard paths fail", async () => {
 	renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
-	await screen.findByRole("button", { name: "Copy approval URL" });
-	fireEvent.click(screen.getByRole("button", { name: "Copy approval URL" }));
+	const copyButton = await screen.findByRole("button", {
+		name: "Copy approval URL",
+	});
+	const email = screen.getByLabelText("Email");
+	email.focus();
+	const restoreFocus = vi.spyOn(email, "focus").mockImplementation(() => {
+		throw new Error("focus blocked");
+	});
+	fireEvent.click(copyButton);
 
 	expect(
 		await screen.findByText(
 			"Could not copy the approval URL. Use the approval link instead.",
 		),
 	).toBeTruthy();
+	expect(restoreFocus).toHaveBeenCalledOnce();
 });
 
 test("plex flow centers the approval window in the current browser window", async () => {

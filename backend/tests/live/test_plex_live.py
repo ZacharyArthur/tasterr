@@ -336,7 +336,7 @@ async def test_history_is_account_filtered_isolated_and_paged() -> None:
 
 
 @requires_roles
-async def test_continue_watching_is_role_scoped_and_has_merge_order() -> None:
+async def test_continue_watching_is_role_scoped_and_reports_next_up_sources() -> None:
     states = await _load_states()
     fingerprints: list[set[tuple[str, str]]] = []
     next_up_sources: set[str] = set()
