@@ -92,6 +92,10 @@ class PlexPmsItem(BaseModel):
     account_id: PositiveInt | None = Field(default=None, alias="accountID")
     viewed_at: PositiveInt | None = Field(default=None, alias="viewedAt")
     last_viewed_at: PositiveInt | None = Field(default=None, alias="lastViewedAt")
+    grandparent_last_viewed_at: PositiveInt | None = Field(
+        default=None, alias="grandparentLastViewedAt"
+    )
+    parent_last_viewed_at: PositiveInt | None = Field(default=None, alias="parentLastViewedAt")
     media_type: StrictStr = Field(default="", alias="type")
     rating_key: StrictInt | StrictStr | None = Field(default=None, alias="ratingKey")
     grandparent_rating_key: StrictInt | StrictStr | None = Field(
@@ -102,6 +106,16 @@ class PlexPmsItem(BaseModel):
     view_offset: int | float | None = Field(default=None, alias="viewOffset")
     duration: int | float | None = None
     guids: list[PlexGuid] = Field(default=[], alias="Guid")
+
+    @field_validator(
+        "last_viewed_at",
+        "grandparent_last_viewed_at",
+        "parent_last_viewed_at",
+        mode="before",
+    )
+    @classmethod
+    def validate_optional_timestamp(cls, value: object) -> object:
+        return value if type(value) is int and value > 0 else None
 
     @field_validator("view_offset", "duration", mode="before")
     @classmethod

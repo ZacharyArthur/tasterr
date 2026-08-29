@@ -796,12 +796,14 @@ async def test_continue_watching_reads_nested_hub_and_caps_at_fifty() -> None:
     assert items[0].index == 4
 
 
-async def test_continue_watching_drops_coercive_progress_and_episode_coordinates() -> None:
+async def test_continue_watching_drops_coercive_optional_values() -> None:
     row = {
         "type": "episode",
         "ratingKey": True,
         "grandparentRatingKey": 1.0,
-        "lastViewedAt": 100,
+        "lastViewedAt": "100",
+        "grandparentLastViewedAt": 0,
+        "parentLastViewedAt": 1.5,
         "viewOffset": "5",
         "duration": True,
         "parentIndex": "2",
@@ -818,6 +820,9 @@ async def test_continue_watching_drops_coercive_progress_and_episode_coordinates
 
     assert item.rating_key is None
     assert item.grandparent_rating_key is None
+    assert item.last_viewed_at is None
+    assert item.grandparent_last_viewed_at is None
+    assert item.parent_last_viewed_at is None
     assert item.view_offset is None
     assert item.duration is None
     assert item.parent_index is None

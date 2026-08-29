@@ -19,6 +19,8 @@ from tasterr.clients.plex import (
     PlexServerDiscovery,
 )
 
+_MISSING = object()
+
 
 def _server(index: int) -> PlexServer:
     return PlexServer(
@@ -36,24 +38,30 @@ def _item(
     grandparent_rating_key: int | None = None,
     viewed_at: int | None = 100,
     last_viewed_at: int | None = None,
-    view_offset: int | float | None = None,
+    grandparent_last_viewed_at: int | None = None,
+    parent_last_viewed_at: int | None = None,
+    view_offset: int | float | None | object = _MISSING,
     duration: int | float | None = None,
     parent_index: int | None = None,
     index: int | None = None,
 ) -> PlexPmsItem:
-    return PlexPmsItem(
-        accountID=1,
-        viewedAt=viewed_at,
-        lastViewedAt=last_viewed_at,
-        type=media_type,
-        ratingKey=rating_key,
-        grandparentRatingKey=grandparent_rating_key,
-        viewOffset=view_offset,
-        duration=duration,
-        parentIndex=parent_index,
-        index=index,
-        Guid=[] if tmdb_id is None else [PlexGuid(id=f"tmdb://{tmdb_id}")],
-    )
+    data: dict[str, object] = {
+        "accountID": 1,
+        "viewedAt": viewed_at,
+        "lastViewedAt": last_viewed_at,
+        "grandparentLastViewedAt": grandparent_last_viewed_at,
+        "parentLastViewedAt": parent_last_viewed_at,
+        "type": media_type,
+        "ratingKey": rating_key,
+        "grandparentRatingKey": grandparent_rating_key,
+        "duration": duration,
+        "parentIndex": parent_index,
+        "index": index,
+        "Guid": [] if tmdb_id is None else [PlexGuid(id=f"tmdb://{tmdb_id}")],
+    }
+    if view_offset is not _MISSING:
+        data["viewOffset"] = view_offset
+    return PlexPmsItem.model_validate(data)
 
 
 class FakePlex:
@@ -347,6 +355,121 @@ async def test_continue_watching_maps_progress_episode_context_and_duplicate_ord
     assert "server-token" not in repr(result)
 
 
+async def test_continue_watching_includes_next_up_by_item_show_and_season_timestamp() -> None:
+    fake = FakePlex()
+    fake.hubs["server-0"] = [
+        _item(
+            media_type="episode",
+            rating_key=20,
+            grandparent_rating_key=21,
+            last_viewed_at=500,
+            grandparent_last_viewed_at=100,
+            parent_last_viewed_at=100,
+            parent_index=1,
+            index=2,
+        ),
+        _item(
+            media_type="episode",
+            rating_key=30,
+            grandparent_rating_key=31,
+            grandparent_last_viewed_at=400,
+            parent_last_viewed_at=600,
+            parent_index=2,
+            index=3,
+        ),
+        _item(
+            media_type="episode",
+            rating_key=40,
+            grandparent_rating_key=41,
+            parent_last_viewed_at=300,
+            parent_index=3,
+            index=4,
+        ),
+    ]
+    fake.metadata_items[("server-0", "21")] = _item(11, rating_key=21)
+    fake.metadata_items[("server-0", "31")] = _item(12, rating_key=31)
+    fake.metadata_items[("server-0", "41")] = _item(13, rating_key=41)
+
+    result = await _service(fake).continue_watching(7, "token")
+
+    assert [(item.id, item.progress_percent, item.context) for item in result] == [
+        (11, None, "S1 E2"),
+        (12, None, "S2 E3"),
+        (13, None, "S3 E4"),
+    ]
+
+
+async def test_continue_watching_preserves_hub_order_without_timestamps() -> None:
+    fake = FakePlex(2)
+    fake.hubs["server-0"] = [
+        _item(
+            media_type="episode",
+            rating_key=20,
+            grandparent_rating_key=21,
+            parent_index=1,
+            index=2,
+        ),
+        _item(
+            media_type="episode",
+            rating_key=30,
+            grandparent_rating_key=31,
+            parent_index=1,
+            index=3,
+        ),
+    ]
+    fake.hubs["server-1"] = [
+        _item(
+            media_type="episode",
+            rating_key=40,
+            grandparent_rating_key=41,
+            parent_index=1,
+            index=4,
+        )
+    ]
+    fake.metadata_items[("server-0", "21")] = _item(11, rating_key=21)
+    fake.metadata_items[("server-0", "31")] = _item(12, rating_key=31)
+    fake.metadata_items[("server-1", "41")] = _item(13, rating_key=41)
+
+    result = await _service(fake).continue_watching(7, "token")
+
+    assert [(item.id, item.progress_percent) for item in result] == [
+        (11, None),
+        (13, None),
+        (12, None),
+    ]
+
+
+async def test_continue_watching_prefers_progress_on_equal_show_timestamp() -> None:
+    fake = FakePlex()
+    fake.hubs["server-0"] = [
+        _item(
+            media_type="episode",
+            rating_key=20,
+            grandparent_rating_key=21,
+            grandparent_last_viewed_at=200,
+            parent_index=1,
+            index=2,
+        ),
+        _item(
+            media_type="episode",
+            rating_key=30,
+            grandparent_rating_key=21,
+            last_viewed_at=200,
+            view_offset=50,
+            duration=100,
+            parent_index=1,
+            index=1,
+        ),
+    ]
+    fake.metadata_items[("server-0", "21")] = _item(11, rating_key=21)
+
+    result = await _service(fake).continue_watching(7, "token")
+
+    assert [(item.id, item.progress_percent, item.context) for item in result] == [
+        (11, 50, "S1 E1")
+    ]
+
+
 async def test_continue_watching_skips_invalid_progress_context_and_partial_server() -> None:
     fake = FakePlex(2)
     fake.hubs["server-0"] = [
@@ -355,6 +478,7 @@ async def test_continue_watching_skips_invalid_progress_context_and_partial_serv
         _item(3, last_viewed_at=3, view_offset=1, duration=0),
         _item(7, last_viewed_at=7, view_offset=True, duration=100),
         _item(8, last_viewed_at=8, view_offset=1, duration=True),
+        _item(9, last_viewed_at=9, duration=100),
         _item(
             media_type="episode",
             rating_key=4,
@@ -364,6 +488,26 @@ async def test_continue_watching_skips_invalid_progress_context_and_partial_serv
             duration=100,
             parent_index=0,
             index=1,
+        ),
+        _item(
+            media_type="episode",
+            rating_key=10,
+            grandparent_rating_key=100,
+            last_viewed_at=10,
+            view_offset=True,
+            duration=100,
+            parent_index=1,
+            index=1,
+        ),
+        _item(
+            media_type="episode",
+            rating_key=11,
+            grandparent_rating_key=110,
+            last_viewed_at=11,
+            view_offset=None,
+            duration=100,
+            parent_index=1,
+            index=2,
         ),
         _item(5, last_viewed_at=5, view_offset=99, duration=100),
         _item(6, last_viewed_at=6, view_offset=1, duration=100),

@@ -181,7 +181,7 @@ class PlexCatalogService:
             return_exceptions=True,
         )
         resolver = _MetadataResolver(self._plex)
-        pending: list[tuple[int, PlexServer, PlexPmsItem, int, int, str | None]] = []
+        pending: list[tuple[int, PlexServer, PlexPmsItem, int, int | None, str | None]] = []
         for server_index, (server, result) in enumerate(zip(servers, hub_results, strict=True)):
             if isinstance(result, asyncio.CancelledError):
                 raise result
@@ -189,13 +189,26 @@ class PlexCatalogService:
                 continue
             if isinstance(result, BaseException):
                 raise result
-            for item in result:
+            for hub_index, item in enumerate(result):
                 if item.media_type not in ("movie", "episode"):
                     continue
                 progress = _progress(item)
-                timestamp = item.last_viewed_at
-                if progress is None or timestamp is None:
+                # Plex omits viewOffset for next-up rows; explicit null or junk is not proof.
+                next_up = (
+                    item.media_type == "episode" and "view_offset" not in item.model_fields_set
+                )
+                if progress is None and not next_up:
                     continue
+                timestamp = (
+                    item.last_viewed_at
+                    or item.grandparent_last_viewed_at
+                    or item.parent_last_viewed_at
+                )
+                if timestamp is None:
+                    if not next_up:
+                        continue
+                    # Negative sentinels stay local to Continue Watching hub order.
+                    timestamp = -(hub_index + 1)
                 context = None
                 if item.media_type == "episode":
                     context = _episode_context(item)
@@ -203,7 +216,7 @@ class PlexCatalogService:
                         continue
                 pending.append((server_index, server, item, timestamp, progress, context))
         pending.sort(key=lambda value: (-value[3], value[0]))
-        selected: list[tuple[int, PlexServer, PlexPmsItem, int, int, str | None]] = []
+        selected: list[tuple[int, PlexServer, PlexPmsItem, int, int | None, str | None]] = []
         seen_raw_keys: set[tuple[int, str, str]] = set()
         for candidate in pending:
             tmdb_id = _tmdb_guid(candidate[2]) if candidate[2].media_type == "movie" else None
@@ -278,8 +291,6 @@ class PlexCatalogService:
         if self._catalog is None:
             raise RuntimeError("TMDB catalog is required for Continue Watching")
         detail = await self._catalog.detail(item.media_type, item.tmdb_id)
-        if item.progress_percent is None:
-            raise ValueError("Continue Watching item omitted progress")
         return MediaSummary(
             id=detail.id,
             media_type=detail.media_type,
@@ -412,8 +423,13 @@ def _merge_candidates(items: list[_Candidate]) -> list[_Candidate]:
     for item in items:
         key = (item.media_type, item.tmdb_id)
         current = merged.get(key)
-        if current is None or (item.timestamp, -item.server_index) > (
+        if current is None or (
+            item.timestamp,
+            item.progress_percent is not None,
+            -item.server_index,
+        ) > (
             current.timestamp,
+            current.progress_percent is not None,
             -current.server_index,
         ):
             merged[key] = item

@@ -53,26 +53,28 @@ export function MediaCard({
 						{item.title}
 					</div>
 				)}
-				{progressLabel && (
+				{(progressLabel || item.context) && (
 					<div className="absolute inset-x-0 bottom-0 z-10 bg-black/75 px-1.5 pb-1 pt-1 text-white">
 						<p className="mb-0.5 flex justify-between text-[0.65rem] leading-none">
-							<span>{item.progress_percent}% watched</span>
-							{item.context && <span>{item.context}</span>}
+							{progressLabel && <span>{item.progress_percent}% watched</span>}
+							{item.context && <span className="ml-auto">{item.context}</span>}
 						</p>
-						<div
-							role="progressbar"
-							aria-label={progressLabel}
-							aria-valuemin={0}
-							aria-valuemax={100}
-							aria-valuenow={item.progress_percent ?? undefined}
-							className="h-1 overflow-hidden rounded-full bg-white/40"
-						>
+						{progressLabel && (
 							<div
-								aria-hidden="true"
-								className="h-full bg-app-accent"
-								style={{ width: `${item.progress_percent}%` }}
-							/>
-						</div>
+								role="progressbar"
+								aria-label={progressLabel}
+								aria-valuemin={0}
+								aria-valuemax={100}
+								aria-valuenow={item.progress_percent ?? undefined}
+								className="h-1 overflow-hidden rounded-full bg-white/40"
+							>
+								<div
+									aria-hidden="true"
+									className="h-full bg-app-accent"
+									style={{ width: `${item.progress_percent}%` }}
+								/>
+							</div>
+						)}
 					</div>
 				)}
 			</div>
