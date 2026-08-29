@@ -336,34 +336,32 @@ async def test_history_is_account_filtered_isolated_and_paged() -> None:
 
 
 @requires_roles
-async def test_continue_watching_is_role_scoped_and_has_merge_timestamps() -> None:
+async def test_continue_watching_is_role_scoped_and_reports_next_up_sources() -> None:
     states = await _load_states()
-    fingerprints: list[set[tuple[str, str, int, float, float]]] = []
+    fingerprints: list[set[tuple[str, str]]] = []
+    next_up_sources: set[str] = set()
     for state in states:
         _require(bool(state.continue_watching), f"{state.role} has no seeded Continue Watching")
-        rows: set[tuple[str, str, int, float, float]] = set()
-        timestamps: list[int] = []
+        rows: set[tuple[str, str]] = set()
         for item in state.continue_watching:
-            if (
-                item.last_viewed_at is not None
-                and isinstance(item.view_offset, (int, float))
-                and isinstance(item.duration, (int, float))
-            ):
-                timestamps.append(item.last_viewed_at)
-                rows.add(
-                    (
-                        item.media_type,
-                        str(item.rating_key),
-                        item.last_viewed_at,
-                        float(item.view_offset),
-                        float(item.duration),
-                    )
+            has_progress = isinstance(item.view_offset, (int, float)) and isinstance(
+                item.duration, (int, float)
+            )
+            next_up = item.media_type == "episode" and "view_offset" not in item.model_fields_set
+            if not has_progress and not next_up:
+                continue
+            if next_up:
+                next_up_sources.add(
+                    "lastViewedAt"
+                    if item.last_viewed_at is not None
+                    else "grandparentLastViewedAt"
+                    if item.grandparent_last_viewed_at is not None
+                    else "parentLastViewedAt"
+                    if item.parent_last_viewed_at is not None
+                    else "hub-position fallback"
                 )
-        _require(bool(rows), f"{state.role} Continue Watching lacked progress/timestamps")
-        _require(
-            timestamps == sorted(timestamps, reverse=True),
-            f"{state.role} Continue Watching was not newest-first",
-        )
+            rows.add((item.media_type, str(item.rating_key)))
+        _require(bool(rows), f"{state.role} Continue Watching lacked eligible rows")
         fingerprints.append(rows)
 
     for index, own in enumerate(fingerprints):
@@ -371,6 +369,10 @@ async def test_continue_watching_is_role_scoped_and_has_merge_timestamps() -> No
             item for other, rows in enumerate(fingerprints) if other != index for item in rows
         }
         _require(bool(own - others), "a Plex role lacked an isolated Continue Watching row")
+    print(
+        "Continue Watching next-up ordering sources: "
+        + (", ".join(sorted(next_up_sources)) if next_up_sources else "not exercised")
+    )
 
 
 @requires_roles

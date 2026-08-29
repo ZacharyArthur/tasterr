@@ -61,8 +61,8 @@ produces, failing when they have drifted out of sync.
 
 ### Requirement: Devcontainer runs the gate without host dependencies
 The repo SHALL provide a `.devcontainer/` configuration that supplies the full
-toolchain (uv, node, just) in a Linux container with the repository bind-mounted
-from the local working copy. Dependency trees (`backend/.venv`,
+toolchain (uv, node, just, GitHub CLI, OpenSpec) in a Linux container with the
+repository bind-mounted from the local working copy. Dependency trees (`backend/.venv`,
 `frontend/node_modules`) MUST live on container volumes, not the host filesystem.
 `just check` inside the devcontainer MUST be the same command and gate as on the
 host and in CI.
@@ -151,4 +151,3 @@ credentials or publish images.
 #### Scenario: Pull request cannot publish a package
 - **WHEN** untrusted pull-request code executes in CI
 - **THEN** its workflow token has no package-write permission and no publish step runs
-

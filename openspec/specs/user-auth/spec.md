@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change m1-auth. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Plex PIN login flow
 The system SHALL implement Plex PIN login. `POST /api/v1/auth/plex/pin` creates a
 PIN at plex.tv (product `Tasterr`, a stable client identifier) and returns an
@@ -212,23 +214,28 @@ browser headers upstream or upstream headers/bodies downstream.
 ### Requirement: SPA login experience
 
 The login screen SHALL offer both paths: "Sign in with Plex" and a local
-email/password form. Plex sign-in SHALL open a script-created popup context
-directly from the user's activation, sever that context's access to its opener
-before navigating to the backend-provided Plex approval URL, and retain only an
-in-memory handle for best-effort cleanup. The SPA SHALL poll until completion and,
-when the browser still exposes the script-created context, close it and request
-focus for Tasterr after success.
-A blocked, manually closed, or browser-severed context SHALL NOT block polling or
-successful login, and the user SHALL be able to reopen a new protected approval
-context. On success the SPA SHALL switch to the authenticated state without a full
-reload; a logout control SHALL end the session and return to the login screen.
-Failures SHALL surface as generic, human-readable messages. On each confirmed
-session transition — successful local login, successful Plex PIN completion,
-successful logout, or `auth/me` resolving to a different user — the SPA SHALL
-invalidate prior-session mutation callbacks, cancel in-flight TanStack Query
-requests before removing cached query data, and publish the confirmed user or
-signed-out state only after that boundary completes. Failed login or logout
-attempts SHALL preserve the current confirmed auth state and query cache.
+email/password form. Plex sign-in SHALL attempt to open a script-created popup
+context directly from the user's activation, sever that context's access to its
+opener before navigating to the backend-provided Plex approval URL, and retain
+only an in-memory handle for best-effort cleanup. The SPA SHALL poll until
+completion and, when the browser still exposes the script-created context, close
+it and request focus for Tasterr after success.
+While a Plex PIN is pending, the SPA SHALL expose the backend-provided approval
+URL through a link that opens a new context without opener or referrer access and
+through a copy action. A blocked, manually closed, or browser-severed popup
+context SHALL NOT block polling, successful login, or either recovery action.
+Each completed copy attempt SHALL provide visible and assistive success or failure
+feedback, a fallback copy attempt SHALL restore the user's prior focus, and
+feedback from an ended approval flow SHALL NOT reappear.
+On success the SPA SHALL switch to the authenticated state without a full reload;
+a logout control SHALL end the session and return to the login screen. Failures
+SHALL surface as generic, human-readable messages. On each confirmed session
+transition — successful local login, successful Plex PIN completion, successful
+logout, or `auth/me` resolving to a different user — the SPA SHALL invalidate
+prior-session mutation callbacks, cancel in-flight TanStack Query requests before
+removing cached query data, and publish the confirmed user or signed-out state
+only after that boundary completes. Failed login or logout attempts SHALL preserve
+the current confirmed auth state and query cache.
 
 #### Scenario: Plex login from the SPA
 
@@ -239,15 +246,33 @@ attempts SHALL preserve the current confirmed auth state and query cache.
 
 #### Scenario: Plex approval cannot control Tasterr
 
-- **WHEN** Tasterr navigates its script-created context to the Plex approval URL
-- **THEN** the child context has no `opener` reference to the Tasterr tab
+- **WHEN** Tasterr opens the backend-provided Plex approval URL in either the
+  script-created popup or the durable recovery link
+- **THEN** the approval context has no `opener` reference to the Tasterr tab
 
 #### Scenario: Approval context is unavailable
 
 - **WHEN** a popup blocker, manual close, or browser opener policy makes the
-  approval context unavailable
-- **THEN** polling and successful login remain operable, and the reopen action can
-  create and track a replacement context
+  script-created approval context unavailable
+- **THEN** polling and successful login remain operable, and the protected
+  approval link and copy action remain available for the pending PIN
+
+#### Scenario: Approval URL copy succeeds repeatedly
+
+- **WHEN** the user copies the pending approval URL one or more times
+- **THEN** each successful attempt is announced visibly and to assistive
+  technology, and any fallback copy operation restores prior focus
+
+#### Scenario: Approval URL copy fails
+
+- **WHEN** the browser rejects both supported copy mechanisms
+- **THEN** the SPA announces a generic failure and leaves the protected approval
+  link available
+
+#### Scenario: Approval flow ends during copy
+
+- **WHEN** a copy operation completes after its pending PIN has expired or ended
+- **THEN** feedback from that obsolete approval flow does not reappear
 
 #### Scenario: Local login from the SPA
 

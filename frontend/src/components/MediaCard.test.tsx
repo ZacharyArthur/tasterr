@@ -29,6 +29,17 @@ test("ordinary cards have no progress UI", () => {
 	expect(screen.queryByRole("progressbar")).toBeNull();
 });
 
+test("next-up cards show episode context without a progress bar", () => {
+	render(
+		<MemoryRouter>
+			<MediaCard item={item(undefined, "S2 E3")} />
+		</MemoryRouter>,
+	);
+
+	expect(screen.getByText("S2 E3")).toBeTruthy();
+	expect(screen.queryByRole("progressbar")).toBeNull();
+});
+
 test("resume cards expose progress and local episode context accessibly", () => {
 	render(
 		<MemoryRouter>

@@ -796,32 +796,47 @@ async def test_continue_watching_reads_nested_hub_and_caps_at_fifty() -> None:
     assert items[0].index == 4
 
 
-async def test_continue_watching_drops_coercive_progress_and_episode_coordinates() -> None:
+async def test_continue_watching_drops_coercive_optional_values() -> None:
     row = {
         "type": "episode",
         "ratingKey": True,
         "grandparentRatingKey": 1.0,
-        "lastViewedAt": 100,
+        "lastViewedAt": "100",
+        "grandparentLastViewedAt": 0,
+        "parentLastViewedAt": 1.5,
         "viewOffset": "5",
         "duration": True,
         "parentIndex": "2",
         "index": True,
     }
+    bool_timestamps = {
+        "type": "episode",
+        "ratingKey": "2",
+        "lastViewedAt": True,
+        "grandparentLastViewedAt": True,
+        "parentLastViewedAt": True,
+    }
 
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"MediaContainer": {"Hub": [{"Metadata": [row]}]}},
+            json={"MediaContainer": {"Hub": [{"Metadata": [row, bool_timestamps]}]}},
         )
 
-    item = (await _media_client(handler).continue_watching(_server()))[0]
+    item, bool_item = await _media_client(handler).continue_watching(_server())
 
     assert item.rating_key is None
     assert item.grandparent_rating_key is None
+    assert item.last_viewed_at is None
+    assert item.grandparent_last_viewed_at is None
+    assert item.parent_last_viewed_at is None
     assert item.view_offset is None
     assert item.duration is None
     assert item.parent_index is None
     assert item.index is None
+    assert bool_item.last_viewed_at is None
+    assert bool_item.grandparent_last_viewed_at is None
+    assert bool_item.parent_last_viewed_at is None
 
 
 async def test_metadata_requests_guid_expansion_for_movie_and_episode() -> None:
