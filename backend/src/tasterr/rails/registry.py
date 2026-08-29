@@ -8,16 +8,19 @@ toggles. The personalized fetches swallow *any* engine failure to an empty
 rail — personalization degrades, it never blocks browsing.
 """
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from itertools import zip_longest
 
 from pydantic import SecretStr
 
 from tasterr.catalog.models import MediaSummary, MediaType, RailKind, ServiceOption
 from tasterr.catalog.plex import PlexCatalogService
 from tasterr.catalog.service import CatalogService
+from tasterr.clients.errors import UpstreamError
 from tasterr.db.models import User
 from tasterr.recommend.service import TasteService
 from tasterr.runtime_settings import RailType
@@ -31,6 +34,7 @@ HERO_SIZE = 5
 EXTRA_PAGE_SIZE = 4
 HERO_GENRE_LABELS = 3
 SERVICE_RAIL_LIMIT = 4
+SERVICE_RAIL_SIZE = 20
 
 DECADES = (2020, 2010, 2000, 1990, 1980)
 _GENRE_MIN_VOTES = {"movie": 50, "tv": 30}
@@ -278,15 +282,25 @@ def decade_provider(decade: int) -> RailProvider:
 
 
 def service_provider(service: ServiceOption) -> RailProvider:
+    async def discover(ctx: RailContext, media: MediaType, sort_by: str) -> list[MediaSummary]:
+        try:
+            return await ctx.catalog.discover(
+                media,
+                sort_by=sort_by,
+                release_gte=_days_ago(365),
+                release_lte=_today(),
+                min_votes=3,
+                service_ids=[service.provider_id],
+            )
+        except UpstreamError:
+            return []
+
     async def fetch(ctx: RailContext) -> list[MediaSummary]:
-        return await ctx.catalog.discover(
-            "movie",
-            sort_by="primary_release_date.desc",
-            release_gte=_days_ago(365),
-            release_lte=_today(),
-            min_votes=3,
-            service_ids=[service.provider_id],
+        movies, tv = await asyncio.gather(
+            discover(ctx, "movie", "primary_release_date.desc"),
+            discover(ctx, "tv", "first_air_date.desc"),
         )
+        return _interleave(movies, tv)
 
     return RailProvider(
         f"service-{service.provider_id}",
@@ -294,4 +308,11 @@ def service_provider(service: ServiceOption) -> RailProvider:
         "standard",
         fetch,
         RailType.SERVICES,
+        min_items=SERVICE_RAIL_SIZE // 2,
     )
+
+
+def _interleave(movies: list[MediaSummary], tv: list[MediaSummary]) -> list[MediaSummary]:
+    return [item for pair in zip_longest(movies, tv) for item in pair if item is not None][
+        :SERVICE_RAIL_SIZE
+    ]

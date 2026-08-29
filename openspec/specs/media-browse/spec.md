@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change m2-browse. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Home feed of a hero and composed rails
 
 `GET /api/v1/home` SHALL return the enabled hero section and an ordered list of
@@ -14,19 +16,23 @@ bounded per-selected-service rails plus the authenticated caller's
 `unexpected-picks` providers. The separately requested `household-blend` rail
 SHALL NOT be part
 of this response. The generic release rail SHALL be titled `Recent Releases`.
-Each per-selected-service rail SHALL use current flatrate movie availability and
-movie release dates from the preceding 365 days and SHALL be titled
-`Recent Releases on {service}`. Dynamic genre and service instances share their
-registered type gate; absent disablement means enabled, including for a newly
-registered type. A provider failure SHALL degrade the feed to fewer rails rather
-than fail the request, and rails with fewer than a minimum number of items SHALL
-be omitted. Titles SHALL be de-duplicated across rails in the initial `/home`
-response so a title does not repeat later there. Paginated `/rails` results SHALL
-remove duplicates within each individual rail but SHALL NOT strip a provider's
-items because the same title occurs in another extra rail; overlap across service,
-decade, and genre rails is allowed because the stateless cursor does not carry a
-cross-page seen-title set. Disabling every provider SHALL return a valid empty
-feed rather than override the admin's choice.
+Each per-selected-service rail SHALL use current flatrate movie and TV
+availability, movie release dates and TV first-air dates from the preceding 365
+days, and SHALL be titled `Recent Releases on {service}`. Service results SHALL
+alternate movie and TV while both have items, append the remaining media type
+when one side is exhausted, and contain no more than 20 items. A service rail
+with fewer than 10 items after normal de-duplication SHALL be omitted. Dynamic
+genre and service instances share their registered type gate; absent disablement
+means enabled, including for a newly registered type. A provider failure SHALL
+degrade the feed to fewer rails rather than fail the request, and rails with
+fewer than a minimum number of items SHALL be omitted. Titles SHALL be
+de-duplicated across rails in the initial `/home` response so a title does not
+repeat later there. Paginated `/rails` results SHALL remove duplicates within
+each individual rail but SHALL NOT strip a provider's items because the same
+title occurs in another extra rail; overlap across service, decade, and genre
+rails is allowed because the stateless cursor does not carry a cross-page
+seen-title set. Disabling every provider SHALL return a valid empty feed rather
+than override the admin's choice.
 
 The visible Home sequence SHALL preserve this relative order among available
 rails: Continue Watching, My List, Recommended for You, Trending Now, More Like
@@ -61,10 +67,22 @@ user/day; no presentation seed SHALL be persisted.
 
 #### Scenario: Selected service produces a bounded service rail
 
-- **WHEN** a selected service has provider metadata and enough flatrate movie
-  titles released during the preceding 365 days
-- **THEN** the home feed includes a `Recent Releases on {service}` rail for it,
-  up to the documented service-rail cap
+- **WHEN** a selected service has provider metadata and enough recent flatrate
+  movie and TV titles
+- **THEN** the home feed includes a `Recent Releases on {service}` rail that
+  alternates movies and TV and contains no more than 20 items
+
+#### Scenario: Lopsided service results fill from the available side
+
+- **WHEN** one media type has fewer recent service titles than the other
+- **THEN** the rail alternates while both have items and fills its remaining
+  capacity from the media type with surplus titles
+
+#### Scenario: Service media-type failure degrades independently
+
+- **WHEN** either the movie or TV discovery call for a selected service fails
+- **THEN** the other media type may still produce the service rail when it meets
+  the service fullness floor
 
 #### Scenario: Service metadata failure degrades independently
 
@@ -80,6 +98,12 @@ user/day; no presentation seed SHALL be persisted.
 
 - **WHEN** a provider yields fewer than the minimum number of items
 - **THEN** that rail is omitted from the feed
+
+#### Scenario: Under-filled service rail omitted
+
+- **WHEN** a selected-service provider yields fewer than 10 distinct items
+- **THEN** that service rail is omitted rather than rendered as a visibly
+  stunted row
 
 #### Scenario: Titles de-duplicated across rails
 

@@ -11,6 +11,7 @@ from tasterr.catalog.models import (
     Genre,
     MediaDetail,
     MediaSummary,
+    MediaType,
     Rail,
     ServiceOption,
     WatchProviders,
@@ -22,6 +23,7 @@ from tasterr.rails.composer import build_extra_rails, build_home
 from tasterr.rails.registry import (
     EXTRA_PAGE_SIZE,
     HERO_SIZE,
+    SERVICE_RAIL_SIZE,
     RailContext,
     continue_watching_provider,
     decade_provider,
@@ -33,10 +35,10 @@ from tasterr.rails.registry import (
 from tasterr.runtime_settings import RailType
 
 
-def _summary(i: int) -> MediaSummary:
+def _summary(i: int, media_type: MediaType = "movie") -> MediaSummary:
     return MediaSummary(
         id=i,
-        media_type="movie",
+        media_type=media_type,
         title=f"T{i}",
         overview="",
         poster_path=None,
@@ -81,7 +83,7 @@ class FakeCatalog:
         self.available_services: list[ServiceOption] = []
         self.trending_items = [_summary(i) for i in range(1, 7)]
         self.fixed_discover: list[MediaSummary] | None = None
-        self.service_results: dict[int, list[MediaSummary]] = {}
+        self.service_results: dict[tuple[int, MediaType], list[MediaSummary]] = {}
         self.genre_map_result = {"Action": 28, "Comedy": 35, "Drama": 18, "Thriller": 53}
         self.discover_calls: list[dict[str, object]] = []
         self.fail_trending = False
@@ -89,6 +91,7 @@ class FakeCatalog:
         self.fail_genre_map = False
         self.fail_services = False
         self.failing_service_ids: set[int] = set()
+        self.failing_service_media: set[tuple[int, MediaType]] = set()
         self.genre_map_calls: list[str] = []
         self._block = 100
 
@@ -99,7 +102,7 @@ class FakeCatalog:
 
     async def discover(
         self,
-        media: str,
+        media: MediaType,
         *,
         page: int = 1,
         sort_by: str = "popularity.desc",
@@ -120,17 +123,21 @@ class FakeCatalog:
                 "service_ids": service_ids,
             }
         )
-        if self.fail_discover or (
-            service_ids is not None and bool(self.failing_service_ids.intersection(service_ids))
+        if (
+            self.fail_discover
+            or (
+                service_ids is not None and bool(self.failing_service_ids.intersection(service_ids))
+            )
+            or (service_ids is not None and (service_ids[0], media) in self.failing_service_media)
         ):
             raise UpstreamUnavailable("discover down")
         if self.fixed_discover is not None:
             return list(self.fixed_discover)
-        if service_ids and service_ids[0] in self.service_results:
-            return list(self.service_results[service_ids[0]])
+        if service_ids and (service_ids[0], media) in self.service_results:
+            return list(self.service_results[(service_ids[0], media)])
         block = self._block
         self._block += 100
-        return [_summary(block + i) for i in range(10)]
+        return [_summary(block + i, media) for i in range(10)]
 
     async def genre_map(self, media: str) -> dict[str, int]:
         self.genre_map_calls.append(media)
@@ -352,7 +359,7 @@ def test_top_rated_provider_ids() -> None:
     assert providers[1].title == "Top Rated TV"
 
 
-async def test_service_provider_queries_recent_flatrate_movies() -> None:
+async def test_service_provider_queries_recent_flatrate_movies_and_tv() -> None:
     service = ServiceOption(
         provider_id=8,
         name="Netflix",
@@ -362,18 +369,75 @@ async def test_service_provider_queries_recent_flatrate_movies() -> None:
     provider = service_provider(service)
     fake = FakeCatalog()
 
-    await provider.fetch(_ctx(fake))
+    items = await provider.fetch(_ctx(fake))
 
     assert provider.title == "Recent Releases on Netflix"
-    assert fake.discover_calls[-1] == {
-        "media": "movie",
-        "sort_by": "primary_release_date.desc",
+    assert provider.min_items == 10
+    assert [item.media_type for item in items] == ["movie", "tv"] * 10
+    common = {
         "genres": None,
         "min_votes": 3,
         "release_gte": (date.today() - timedelta(days=365)).isoformat(),
         "release_lte": date.today().isoformat(),
         "service_ids": [8],
     }
+    calls = {cast("str", call["media"]): call for call in fake.discover_calls}
+    assert calls == {
+        "movie": {
+            "media": "movie",
+            "sort_by": "primary_release_date.desc",
+            **common,
+        },
+        "tv": {
+            "media": "tv",
+            "sort_by": "first_air_date.desc",
+            **common,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("movies", "tv", "expected"),
+    [
+        ([1, 2], [101, 102], [1, 101, 2, 102]),
+        ([1, 2, 3], [101], [1, 101, 2, 3]),
+        ([1], [101, 102, 103], [1, 101, 102, 103]),
+    ],
+)
+async def test_service_interleave_balances_then_fills(
+    movies: list[int], tv: list[int], expected: list[int]
+) -> None:
+    service = ServiceOption(provider_id=8, name="Netflix", logo_path=None, display_priority=1)
+    fake = FakeCatalog()
+    fake.service_results[(8, "movie")] = [_summary(item) for item in movies]
+    fake.service_results[(8, "tv")] = [_summary(item, "tv") for item in tv]
+
+    result = await service_provider(service).fetch(_ctx(fake))
+
+    assert [item.id for item in result] == expected
+
+
+async def test_service_interleave_is_capped() -> None:
+    service = ServiceOption(provider_id=8, name="Netflix", logo_path=None, display_priority=1)
+    fake = FakeCatalog()
+    fake.service_results[(8, "movie")] = [_summary(item) for item in range(15)]
+    fake.service_results[(8, "tv")] = [_summary(100 + item, "tv") for item in range(15)]
+
+    result = await service_provider(service).fetch(_ctx(fake))
+
+    assert len(result) == SERVICE_RAIL_SIZE
+    assert [item.media_type for item in result] == ["movie", "tv"] * 10
+
+
+async def test_service_provider_keeps_one_healthy_media_type() -> None:
+    service = ServiceOption(provider_id=8, name="Netflix", logo_path=None, display_priority=1)
+    fake = FakeCatalog()
+    fake.failing_service_media = {(8, "tv")}
+
+    items = await service_provider(service).fetch(_ctx(fake))
+
+    assert len(items) == 10
+    assert {item.media_type for item in items} == {"movie"}
 
 
 async def test_disabled_provider_is_not_fetched() -> None:
@@ -425,7 +489,46 @@ async def test_selected_services_add_four_ordered_independent_rails() -> None:
         "service-15",
     ]
     service_calls = [call for call in fake.discover_calls if call["service_ids"] is not None]
-    assert [call["service_ids"] for call in service_calls] == [[8], [337], [9], [15]]
+    queries = {
+        (
+            cast("list[int]", call["service_ids"])[0],
+            cast("str", call["media"]),
+        )
+        for call in service_calls
+    }
+    assert queries == {
+        (8, "movie"),
+        (8, "tv"),
+        (9, "movie"),
+        (9, "tv"),
+        (15, "movie"),
+        (15, "tv"),
+        (337, "movie"),
+        (337, "tv"),
+    }
+
+
+async def test_underfilled_service_rail_is_omitted_after_deduplication() -> None:
+    fake = FakeCatalog()
+    fake.selected_service_ids = (8, 9)
+    fake.available_services = [
+        ServiceOption(provider_id=8, name="Netflix", logo_path=None, display_priority=1),
+        ServiceOption(provider_id=9, name="Prime", logo_path=None, display_priority=2),
+    ]
+    fake.service_results[(8, "movie")] = [
+        *(_summary(item) for item in range(5)),
+        _summary(0),
+    ]
+    fake.service_results[(8, "tv")] = [_summary(100 + item, "tv") for item in range(4)]
+    fake.service_results[(9, "movie")] = [_summary(200 + item) for item in range(5)]
+    fake.service_results[(9, "tv")] = [_summary(300 + item, "tv") for item in range(5)]
+
+    rails = await _all_extra_rails(_ctx(fake))
+
+    ids = {rail.id for rail in rails}
+    assert "service-8" not in ids
+    assert "service-9" in ids
+    assert "top-rated-movie" in ids
 
 
 async def test_service_metadata_failure_omits_only_service_rails() -> None:
@@ -545,11 +648,10 @@ async def test_cursor_grouping_does_not_underfill_an_overlapping_service_rail() 
         )
         for index, provider_id in enumerate(service_ids)
     ]
-    fake.service_results[9] = [_summary(tmdb_id) for tmdb_id in range(1, 21)]
-    fake.service_results[15] = [
-        *[_summary(tmdb_id) for tmdb_id in range(1, 17)],
-        *[_summary(tmdb_id) for tmdb_id in range(21, 25)],
-    ]
+    fake.service_results[(9, "movie")] = [_summary(tmdb_id) for tmdb_id in range(1, 11)]
+    fake.service_results[(9, "tv")] = [_summary(tmdb_id, "tv") for tmdb_id in range(11, 21)]
+    fake.service_results[(15, "movie")] = [_summary(tmdb_id) for tmdb_id in range(1, 11)]
+    fake.service_results[(15, "tv")] = [_summary(tmdb_id, "tv") for tmdb_id in range(21, 31)]
 
     page = await build_extra_rails(_ctx(fake), 4)
     by_id = {rail.id: rail for rail in page.rails}
