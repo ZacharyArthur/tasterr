@@ -373,8 +373,8 @@ def test_same_origin_and_headerless_polls_still_complete_login(tmp_path: Path) -
     passes (non-browser client — CSRF is a browser attack), same-site rejects."""
     harness = _harness(tmp_path)
 
-    # same-origin completes.
     with TestClient(harness.app) as client:
+        # same-origin completes.
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
         same_origin = _poll_pin(client, handle, **{"Sec-Fetch-Site": "same-origin"})
@@ -382,24 +382,21 @@ def test_same_origin_and_headerless_polls_still_complete_login(tmp_path: Path) -
         assert same_origin.json()["status"] == "ok"
         assert "tasterr_session=" in same_origin.headers["set-cookie"]
 
-    # none (user-initiated, e.g. typed address bar) completes.
-    with TestClient(harness.app) as client:
+        # none (user-initiated, e.g. typed address bar) completes.
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
         none_site = _poll_pin(client, handle, **{"Sec-Fetch-Site": "none"})
         assert none_site.status_code == 200
         assert none_site.json()["status"] == "ok"
 
-    # headerless non-browser client completes (the existing default behavior).
-    with TestClient(harness.app) as client:
+        # headerless non-browser client completes (the existing default behavior).
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
         headerless = _poll_pin(client, handle)
         assert headerless.status_code == 200
         assert headerless.json()["status"] == "ok"
 
-    # same-site is rejected (sibling origin to a registrable domain).
-    with TestClient(harness.app) as client:
+        # same-site is rejected (sibling origin to a registrable domain).
         handle = _start_pin_login(client)
         harness.plex.token = PLEX_TOKEN
         same_site = _poll_pin(client, handle, **{"Sec-Fetch-Site": "same-site"})
