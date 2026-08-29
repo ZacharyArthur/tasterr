@@ -27,11 +27,48 @@ function plexPopupFeatures() {
 	return `width=${PLEX_POPUP_WIDTH},height=${PLEX_POPUP_HEIGHT},left=${left},top=${top}`;
 }
 
+async function copyText(value: string): Promise<boolean> {
+	if (navigator.clipboard !== undefined) {
+		try {
+			await navigator.clipboard.writeText(value);
+			return true;
+		} catch {
+			// Fall back for denied clipboard permissions.
+		}
+	}
+
+	const activeElement =
+		document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
+	const textarea = document.createElement("textarea");
+	textarea.value = value;
+	textarea.readOnly = true;
+	textarea.tabIndex = -1;
+	textarea.setAttribute("aria-hidden", "true");
+	textarea.style.position = "fixed";
+	textarea.style.opacity = "0";
+	document.body.append(textarea);
+	try {
+		textarea.focus();
+		textarea.select();
+		return document.execCommand("copy");
+	} catch {
+		return false;
+	} finally {
+		textarea.remove();
+		activeElement?.focus();
+	}
+}
+
 export function Login() {
 	const queryClient = useQueryClient();
 	const [pin, setPin] = useState<PendingPin | null>(null);
 	const [plexError, setPlexError] = useState<string | null>(null);
 	const [popupFailed, setPopupFailed] = useState(false);
+	const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(
+		null,
+	);
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const approvalWindow = useRef<Window | null>(null);
@@ -63,6 +100,7 @@ export function Login() {
 	function openApprovalWindow() {
 		closeApprovalWindow();
 		setPopupFailed(false);
+		setCopyStatus(null);
 		const approval = window.open("", "_blank", plexPopupFeatures());
 		if (approval === null) {
 			setPopupFailed(true);
@@ -83,6 +121,11 @@ export function Login() {
 		}
 	}
 
+	async function copyApprovalUrl(authUrl: string, source: HTMLButtonElement) {
+		const status = (await copyText(authUrl)) ? "copied" : "failed";
+		if (source.isConnected) setCopyStatus(status);
+	}
+
 	const startPlex = useMutation({
 		mutationFn: createPlexPin,
 		onSuccess: (created) => {
@@ -92,6 +135,7 @@ export function Login() {
 		},
 		onError: () => {
 			closeApprovalWindow();
+			setCopyStatus(null);
 			setPlexError("Could not reach Plex — try again.");
 		},
 	});
@@ -129,6 +173,7 @@ export function Login() {
 	useEffect(() => {
 		if (pollError !== null) {
 			closeApprovalWindow();
+			setCopyStatus(null);
 			setPlexError(
 				pollError instanceof ApiError && pollError.status === 404
 					? "Plex sign-in expired — try again."
@@ -166,7 +211,7 @@ export function Login() {
 		>
 			<h1 className="text-4xl font-bold tracking-tight">Tasterr</h1>
 			<div className="flex w-full max-w-sm flex-col gap-6">
-				<div className="flex flex-col gap-2">
+				<div className="flex flex-col gap-2" aria-live="polite">
 					<button
 						type="button"
 						onClick={() => {
@@ -180,12 +225,11 @@ export function Login() {
 					</button>
 					{pin !== null && (
 						<p
-							role={popupFailed ? "alert" : undefined}
 							className={`text-sm ${popupFailed ? "text-status-error" : "text-app-subtle"}`}
 						>
 							{popupFailed
 								? "We couldn't open the Plex window — "
-								: "Approve the sign-in in the Plex window, then come back here. "}
+								: "Approve the sign-in with Plex, then come back here. "}
 							<a
 								href={pin.authUrl}
 								target="_blank"
@@ -197,11 +241,22 @@ export function Login() {
 							.{" "}
 							<button
 								type="button"
-								onClick={() => void navigator.clipboard.writeText(pin.authUrl)}
+								onClick={(event) =>
+									void copyApprovalUrl(pin.authUrl, event.currentTarget)
+								}
 								className="underline"
 							>
 								Copy approval URL
 							</button>
+						</p>
+					)}
+					{copyStatus !== null && (
+						<p
+							className={`text-sm ${copyStatus === "failed" ? "text-status-error" : "text-app-subtle"}`}
+						>
+							{copyStatus === "copied"
+								? "Approval URL copied."
+								: "Could not copy the approval URL. Use the approval link instead."}
 						</p>
 					)}
 					{plexError !== null && (

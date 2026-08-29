@@ -12,6 +12,7 @@ afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
+	Reflect.deleteProperty(document, "execCommand");
 });
 
 type Route = (init?: RequestInit) => { status: number; body: unknown };
@@ -91,6 +92,8 @@ test("plex flow protects and closes its approval window after polling succeeds",
 	const { approval, close, focus, replace } = fakeApprovalWindow();
 	const open = vi.fn(() => approval);
 	vi.stubGlobal("open", open);
+	const writeText = vi.fn(() => Promise.resolve());
+	vi.stubGlobal("navigator", { clipboard: { writeText } });
 	const parentFocus = vi.mocked(window.focus);
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
@@ -101,6 +104,9 @@ test("plex flow protects and closes its approval window after polling succeeds",
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
 
 	await screen.findByText("Waiting for Plex approval…");
+	expect(
+		screen.getByRole("link", { name: "Open the approval page" }),
+	).toBeTruthy();
 	expect(open).toHaveBeenCalledWith(
 		"",
 		"_blank",
@@ -109,6 +115,9 @@ test("plex flow protects and closes its approval window after polling succeeds",
 	expect(approval.opener).toBeNull();
 	expect(focus).toHaveBeenCalledOnce();
 	expect(replace).toHaveBeenCalledWith("https://app.plex.tv/auth#?x");
+	fireEvent.click(screen.getByRole("button", { name: "Copy approval URL" }));
+	expect(await screen.findByText("Approval URL copied.")).toBeTruthy();
+	expect(writeText).toHaveBeenCalledWith("https://app.plex.tv/auth#?x");
 	// First poll answers pending; the 2s refetch interval must fire again.
 	await vi.waitFor(() => expect(polls).toBeGreaterThanOrEqual(2), {
 		timeout: 5000,
@@ -266,6 +275,16 @@ test("plex flow shows a reachable approval link after popup blocking", async () 
 		"open",
 		vi.fn(() => null),
 	);
+	const execCommand = vi.fn(() => {
+		expect((document.activeElement as HTMLTextAreaElement).value).toBe(
+			"https://app.plex.tv/auth#?x",
+		);
+		return true;
+	});
+	Object.defineProperty(document, "execCommand", {
+		configurable: true,
+		value: execCommand,
+	});
 	renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
@@ -275,11 +294,60 @@ test("plex flow shows a reachable approval link after popup blocking", async () 
 	expect((link as HTMLAnchorElement).target).toBe("_blank");
 	expect((link as HTMLAnchorElement).rel).toBe("noopener noreferrer");
 	expect(
-		screen.getByRole("button", { name: "Copy approval URL" }),
+		screen
+			.getByText(/We couldn't open the Plex window/)
+			.closest("[aria-live]")
+			?.getAttribute("aria-live"),
+	).toBe("polite");
+	const copyButton = screen.getByRole("button", {
+		name: "Copy approval URL",
+	});
+	copyButton.focus();
+	fireEvent.click(copyButton);
+	expect(await screen.findByText("Approval URL copied.")).toBeTruthy();
+	expect(execCommand).toHaveBeenCalledWith("copy");
+	expect(document.activeElement).toBe(copyButton);
+});
+
+test("plex flow reports when both clipboard paths fail", async () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: {
+				pin_id: "opaque-handle",
+				auth_url: "https://app.plex.tv/auth#?x",
+			},
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 200,
+			body: { status: "pending", user: null },
+		}),
+	});
+	vi.stubGlobal("navigator", {
+		clipboard: { writeText: vi.fn(() => Promise.reject(new Error("denied"))) },
+	});
+	Object.defineProperty(document, "execCommand", {
+		configurable: true,
+		value: vi.fn(() => false),
+	});
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => null),
+	);
+	renderLogin();
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	await screen.findByRole("button", { name: "Copy approval URL" });
+	fireEvent.click(screen.getByRole("button", { name: "Copy approval URL" }));
+
+	expect(
+		await screen.findByText(
+			"Could not copy the approval URL. Use the approval link instead.",
+		),
 	).toBeTruthy();
 });
 
-test("plex flow centers a new approval window for each attempt", () => {
+test("plex flow centers the approval window in the current browser window", async () => {
 	stubFetch({
 		"POST /api/v1/auth/plex/pin": () => ({ status: 503, body: {} }),
 	});
@@ -299,6 +367,9 @@ test("plex flow centers a new approval window for each attempt", () => {
 		"_blank",
 		"width=600,height=700,left=1700,top=250",
 	);
+	expect(
+		await screen.findByText("Could not reach Plex — try again."),
+	).toBeTruthy();
 });
 
 test("plex flow can complete after the user closes the approval window", async () => {
