@@ -103,8 +103,8 @@ test("plex flow protects and closes its approval window after polling succeeds",
 	await screen.findByText("Waiting for Plex approval…");
 	expect(open).toHaveBeenCalledWith(
 		"",
-		"tasterr-plex-auth",
-		"popup=yes,width=600,height=700,scrollbars=yes,resizable=yes",
+		"_blank",
+		expect.stringMatching(/^width=600,height=700,left=-?\d+,top=-?\d+$/),
 	);
 	expect(approval.opener).toBeNull();
 	expect(focus).toHaveBeenCalledOnce();
@@ -248,7 +248,7 @@ test("plex flow can complete when the approval window is blocked", async () => {
 	);
 });
 
-test("plex flow reopens a protected approval window after popup blocking", async () => {
+test("plex flow shows a reachable approval link after popup blocking", async () => {
 	stubFetch({
 		"POST /api/v1/auth/plex/pin": () => ({
 			status: 200,
@@ -262,29 +262,43 @@ test("plex flow reopens a protected approval window after popup blocking", async
 			body: { status: "pending", user: null },
 		}),
 	});
-	const { approval, close, replace } = fakeApprovalWindow();
-	const open = vi
-		.fn<() => Window | null>()
-		.mockReturnValueOnce(null)
-		.mockReturnValueOnce(approval);
+	vi.stubGlobal(
+		"open",
+		vi.fn(() => null),
+	);
+	renderLogin();
+
+	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+
+	const link = await screen.findByRole("link", { name: "open it here" });
+	expect((link as HTMLAnchorElement).href).toBe("https://app.plex.tv/auth#?x");
+	expect((link as HTMLAnchorElement).target).toBe("_blank");
+	expect((link as HTMLAnchorElement).rel).toBe("noopener noreferrer");
+	expect(
+		screen.getByRole("button", { name: "Copy approval URL" }),
+	).toBeTruthy();
+});
+
+test("plex flow centers a new approval window for each attempt", () => {
+	stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({ status: 503, body: {} }),
+	});
+	vi.spyOn(window, "screenX", "get").mockReturnValue(1400);
+	vi.spyOn(window, "screenY", "get").mockReturnValue(100);
+	vi.spyOn(window, "outerWidth", "get").mockReturnValue(1200);
+	vi.spyOn(window, "outerHeight", "get").mockReturnValue(1000);
+	const { approval } = fakeApprovalWindow();
+	const open = vi.fn(() => approval);
 	vi.stubGlobal("open", open);
 	renderLogin();
 
 	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
-	fireEvent.click(
-		await screen.findByRole("button", { name: "Reopen the approval page" }),
-	);
 
-	expect(open).toHaveBeenNthCalledWith(
-		2,
+	expect(open).toHaveBeenCalledWith(
 		"",
-		"tasterr-plex-auth",
-		"popup=yes,width=600,height=700,scrollbars=yes,resizable=yes",
+		"_blank",
+		"width=600,height=700,left=1700,top=250",
 	);
-	expect(approval.opener).toBeNull();
-	expect(replace).toHaveBeenCalledWith("https://app.plex.tv/auth#?x");
-	cleanup();
-	expect(close).toHaveBeenCalledOnce();
 });
 
 test("plex flow can complete after the user closes the approval window", async () => {

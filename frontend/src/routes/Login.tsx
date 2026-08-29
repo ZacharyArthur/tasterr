@@ -14,13 +14,24 @@ interface PendingPin {
 	authUrl: string;
 }
 
-const PLEX_POPUP_FEATURES =
-	"popup=yes,width=600,height=700,scrollbars=yes,resizable=yes";
+const PLEX_POPUP_WIDTH = 600;
+const PLEX_POPUP_HEIGHT = 700;
+
+function plexPopupFeatures() {
+	const left = Math.round(
+		window.screenX + (window.outerWidth - PLEX_POPUP_WIDTH) / 2,
+	);
+	const top = Math.round(
+		window.screenY + (window.outerHeight - PLEX_POPUP_HEIGHT) / 2,
+	);
+	return `width=${PLEX_POPUP_WIDTH},height=${PLEX_POPUP_HEIGHT},left=${left},top=${top}`;
+}
 
 export function Login() {
 	const queryClient = useQueryClient();
 	const [pin, setPin] = useState<PendingPin | null>(null);
 	const [plexError, setPlexError] = useState<string | null>(null);
+	const [popupFailed, setPopupFailed] = useState(false);
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const approvalWindow = useRef<Window | null>(null);
@@ -37,23 +48,32 @@ export function Login() {
 	function navigateApprovalWindow(authUrl: string) {
 		const approval = approvalWindow.current;
 		try {
-			if (approval !== null && !approval.closed) {
-				approval.location.replace(authUrl);
+			if (approval === null) return;
+			if (approval.closed) {
+				setPopupFailed(true);
+				return;
 			}
+			approval.location.replace(authUrl);
 		} catch {
 			approvalWindow.current = null;
+			setPopupFailed(true);
 		}
 	}
 
-	function openApprovalWindow(authUrl?: string) {
+	function openApprovalWindow() {
 		closeApprovalWindow();
-		const approval = window.open("", "tasterr-plex-auth", PLEX_POPUP_FEATURES);
-		if (approval === null) return;
+		setPopupFailed(false);
+		const approval = window.open("", "_blank", plexPopupFeatures());
+		if (approval === null) {
+			setPopupFailed(true);
+			return;
+		}
 		approvalWindow.current = approval;
 		try {
 			approval.opener = null;
 		} catch {
 			closeApprovalWindow();
+			setPopupFailed(true);
 			return;
 		}
 		try {
@@ -61,7 +81,6 @@ export function Login() {
 		} catch {
 			// Focus is progressive enhancement; polling remains authoritative.
 		}
-		if (authUrl !== undefined) navigateApprovalWindow(authUrl);
 	}
 
 	const startPlex = useMutation({
@@ -160,14 +179,28 @@ export function Login() {
 						{pin !== null ? "Waiting for Plex approval…" : "Sign in with Plex"}
 					</button>
 					{pin !== null && (
-						<p className="text-sm text-app-subtle">
-							Approve the sign-in in the Plex window, then come back here.{" "}
-							<button
-								type="button"
-								onClick={() => openApprovalWindow(pin.authUrl)}
+						<p
+							role={popupFailed ? "alert" : undefined}
+							className={`text-sm ${popupFailed ? "text-status-error" : "text-app-subtle"}`}
+						>
+							{popupFailed
+								? "We couldn't open the Plex window — "
+								: "Approve the sign-in in the Plex window, then come back here. "}
+							<a
+								href={pin.authUrl}
+								target="_blank"
+								rel="noopener noreferrer"
 								className="underline"
 							>
-								Reopen the approval page
+								{popupFailed ? "open it here" : "Open the approval page"}
+							</a>
+							.{" "}
+							<button
+								type="button"
+								onClick={() => void navigator.clipboard.writeText(pin.authUrl)}
+								className="underline"
+							>
+								Copy approval URL
 							</button>
 						</p>
 					)}
