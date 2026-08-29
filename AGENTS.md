@@ -46,6 +46,7 @@ in the container, full stop.
 - VS Code: "Reopen in Container". Headless / agents:
   `npx @devcontainers/cli up --workspace-folder .` once, then
   `npx @devcontainers/cli exec --workspace-folder . <command>` for everything else.
+- Run `gh auth login` once inside the container before creating the first PR.
 - `docker build` / `docker run` work inside the container via
   docker-outside-of-docker (they drive the host engine).
 
