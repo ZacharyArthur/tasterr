@@ -147,10 +147,13 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 - [ ] `just audit` clean, or findings triaged with reasons in the PR.
 - [ ] Security review pass over the full diff since the last tag.
-- [ ] Live contract tests against the home Seerr instance pass; tested Seerr version recorded.
+- [ ] Live contract tests against the home Seerr instance pass and the tested Seerr
+      version is recorded, or the narrow release-owner exception in
+      [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-and-plex-contracts) is recorded.
 - [ ] Opt-in Plex contracts pass for every available owner/managed/shared role with
       standard TLS, machine identity, per-row history identity, account-scoped
-      Continue Watching, and TMDB GUID mapping; evidence is redacted.
+      Continue Watching, and TMDB GUID mapping with redacted evidence, or the same
+      narrow release-owner exception is recorded.
 - [ ] `.env.example` contains placeholders only — no real values, no real hostnames.
 
 - [ ] `just release-check` passes in the devcontainer (ordinary gate + browser +

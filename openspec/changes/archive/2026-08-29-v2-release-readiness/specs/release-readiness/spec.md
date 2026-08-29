@@ -1,10 +1,4 @@
-# release-readiness Specification
-
-## Purpose
-Define the documentation, security, verification, evidence, and publication controls
-that make a stable Tasterr release repeatable and safe to operate.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Release-facing documentation is complete and linked
 

@@ -235,9 +235,8 @@ docker compose run --rm --no-deps --entrypoint python tasterr -c "from alembic i
 docker compose up -d --no-build
 ```
 
-The implementation change does not publish `v2.0.0`; version metadata, image/tag
-publication, live release verification, and rollback rehearsal happen in a
-separate release change.
+The `v2.0.0` release uses this downgrade sequence for any return to v1.1. An
+image-only rollback across migration `0006` is unsupported.
 
 ## Live contract verification
 
@@ -246,8 +245,9 @@ Live Plex/Seerr contracts are opt-in and excluded from `just check` and CI. Put 
 outside the repository, restrict that file to the current user, load it only into
 the devcontainer shell, and run `just test-live`. Owner, managed, and shared Plex
 tokens are supplied as `TASTERR_LIVE_PLEX_OWNER_TOKEN`,
-`TASTERR_LIVE_PLEX_MANAGED_TOKEN`, and `TASTERR_LIVE_PLEX_SHARED_TOKEN`; omit a role
-only when it is genuinely unavailable and record the skip generically.
+`TASTERR_LIVE_PLEX_MANAGED_TOKEN`, and `TASTERR_LIVE_PLEX_SHARED_TOKEN`. All three
+are required for the five-test Plex suite; if any is unavailable, the complete suite
+skips and the release record must state that generically.
 
 ```console
 chmod 600 /tmp/tasterr-live.env
@@ -256,8 +256,9 @@ npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/taster
 
 Never put live values in `.env.example`, the repository, command output, test
 fixtures, or evidence. Record only versions and generic exercised/skipped/pass/fail
-results. The source implementation must pass its live contracts and full gate before
-archive; `v2.0.0` release verification remains a later step.
+results. Every v2.0 release candidate must pass these live contracts and the full
+release gate before tagging, or record the narrow release-owner exception in
+[RELEASING.md section 5](RELEASING.md#5-run-live-seerr-and-plex-contracts).
 
 ## Troubleshooting
 

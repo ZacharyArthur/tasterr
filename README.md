@@ -26,11 +26,8 @@ low-correlation picks keep discovery broad. These features need no Plex URL or t
 configuration: they reuse the encrypted token created by Plex sign-in and disappear
 cleanly for local sessions or when Plex is unavailable.
 
-Tasterr intentionally does not bundle Seerr, start or control playback, persist raw history
-or Plex progress, persist household groups, or run more than one process. The
-Plex-aware source change and its later `v2.0.0` image/tag release
-are separate review steps; the published-image example below remains pinned to the
-latest released line.
+Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
+history or Plex progress, persist household groups, or run more than one process.
 
 ## Screenshots
 
@@ -86,7 +83,7 @@ values listed above. Pin the desired version from the
 ```yaml
 services:
   tasterr:
-    image: ghcr.io/zacharyarthur/tasterr:1.1.0
+    image: ghcr.io/zacharyarthur/tasterr:2.0.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
