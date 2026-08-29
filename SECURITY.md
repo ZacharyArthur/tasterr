@@ -4,10 +4,10 @@
 
 | Version | Supported |
 |---|---|
-| 1.0.x | Yes |
+| 2.0.x | Yes |
 | Pre-release and older builds | No |
 
-Security fixes are made on the current stable 1.0 line. Upgrade to the newest patch
+Security fixes are made on the current stable 2.0 line. Upgrade to the newest patch
 release before reporting an issue that may already be fixed.
 
 ## Report a vulnerability privately

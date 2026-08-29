@@ -1,12 +1,8 @@
 # Releasing
 
-This procedure is for stable v1 releases. The current package version is
-`1.1.0`, its Git tag is `v1.1.0`, and its image is published by the `image` workflow
-only after all release changes are squash-merged to protected `main`. The published
-`v1.0.0` tag is retained for provenance, but no GitHub Release was announced for it;
-`v1.0.1` is the immutable-tag fix-forward and first announced release.
-The v1.0.1 image and GitHub Release predate image attestations and immutable GitHub
-Releases; those guarantees apply to later publications.
+This procedure is for stable releases. The current package version is
+`2.0.0`, its Git tag is `v2.0.0`, and its image is published by the `image` workflow
+only after all release changes are squash-merged to protected `main`.
 
 ## 1. Prepare the required devcontainer
 
@@ -46,11 +42,11 @@ native image/Compose smoke sequentially. Any failure blocks the release.
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-Record the date and result in `docs/releases/v1.1.0.md`. This command intentionally
+Record the date and result in `docs/releases/v2.0.0.md`. This command intentionally
 does not imply that audits, security review, or live contracts passed.
 
-For subsequent releases, the committed evidence file is the pre-tag record. Write
-it so it remains true after publication: use an `approved for release` disposition,
+The committed evidence file is the pre-tag record. Write it so it remains true after
+publication: use an `approved for release` disposition,
 not a pending post-tag state, and do not predict a manifest digest or publication
 time. The GitHub Release is the authoritative post-tag record for the final digest
 and post-tag smoke results.
@@ -68,32 +64,32 @@ finding only when its advisory identifier, affected surface, and concise rationa
 are recorded in the release evidence. Never copy audit output containing private
 registry coordinates or environment data into the repository.
 
-## 5. Run live Seerr contracts
+## 5. Run live Seerr and Plex contracts
 
 Create `/tmp/tasterr-live.env` inside the devcontainer with mode `600`; never place it
 under the repository. It must supply the live Seerr URL, local account email/password,
-Seerr API key, a stored Plex token, and a disposable movie identifier that the account
-may request. An optional known-available movie identifier enables the data-dependent
-availability case. Then run:
+Seerr API key, a stored Plex token accepted by Seerr, a disposable movie identifier
+that the account may request, and the owner/managed/shared Plex tokens documented in
+`backend/tests/live/test_plex_live.py`. An optional known-available movie identifier
+enables the data-dependent availability case. Then run:
 
 ```console
 npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/tasterr-live.env; set +a; just test-live'
 ```
 
-The mandatory v1.0 cases are local auth, invalid-session status, stored-Plex-token
-auth, availability read, request-history read, and request-as-user attribution. The
-request case creates a real Seerr request and attempts cleanup, so choose a disposable
-title and verify cleanup afterward. Record only the Seerr version and generic passed/
-skipped case names. A deeper pagination or available-title case may be skipped only
-when its documented data precondition is absent; stored-token auth and attributed
-request may not be skipped within a performed v1.0 run.
-
-The release owner may waive a release-candidate rerun only when a complete prior v1.0
-baseline passed, the reviewed delta does not change Seerr clients, authentication or
-session behavior, request/availability contracts, or the live harness, and the
-release evidence records the baseline date/version/scope plus the waiver rationale
-without claiming a fresh pass. Any change to those surfaces invalidates the waiver.
-Remove the temporary secret file after a run.
+Mandatory Seerr cases are local auth, invalid-session status, stored-Plex-token auth,
+availability read, request-history read, and request-as-user attribution. Mandatory
+Plex cases cover owner, managed, and shared account/resource discovery, verified TLS
+and machine identity, local-account mapping, per-row history isolation, caller-scoped
+Continue Watching, merge timestamps, and canonical TMDB GUID mapping. The request
+case creates a real Seerr request and attempts cleanup, so choose a disposable title
+and verify cleanup afterward. Only a deeper pagination, available-title, or other
+explicitly documented data-precondition case may skip. Record only upstream versions
+and generic passed/skipped case names. If retained credentials have become stale, a
+release owner may accept a recent complete automated baseline plus a fresh integrated
+manual test only for a release-only delta; record the baseline and, where a rerun was
+attempted, its generic failed phase, plus the explicit exception without claiming a
+fresh automated pass. Remove every temporary secret file after the run.
 
 ## 6. Validate and archive any OpenSpec change
 
@@ -181,8 +177,9 @@ commit-addressed `sha-<full-commit>` candidate tags. Before tagging:
    commit-SHA
    `ghcr.io/zacharyarthur/tasterr:sha-<full-commit>` candidate. Verify health, SPA
    serving, non-root uid, and named-volume persistence across recreation.
-4. Remove the disposable project, volume, network, and secret file. Record the
-   manifest digest and generic result in the release evidence.
+4. Remove the disposable project, volume, network, and secret file. Keep the manifest
+   digest and generic result for the GitHub Release; do not commit them to the
+   repository.
 
 Documentation-only pushes under `docs/` or to `README.md` do not trigger the image
 workflow. A release-preparation merge must include the package-version changes in
@@ -195,43 +192,42 @@ pushes.
 After every pre-tag release-record field is final, create and push the annotated tag:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . git tag -a v1.1.0 -m "v1.1.0"
-npx @devcontainers/cli exec --workspace-folder . git push origin v1.1.0
+npx @devcontainers/cli exec --workspace-folder . git tag -a v2.0.0 -m "v2.0.0"
+npx @devcontainers/cli exec --workspace-folder . git push origin v2.0.0
 ```
 
-Wait for the image workflow. It must publish `1.1.0`, `1.1`, `1`, and `latest`, and
+Wait for the image workflow. It must publish `2.0.0`, `2.0`, `2`, and `latest`, and
 leave the existing `sha-<full-commit>` candidate unchanged. Inspect the stable
 manifest and confirm both platforms:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:1.1.0
+npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:2.0.0
 ```
 
-The historical v1.0.1 image has no attestation. For subsequent releases, substitute
-the release version and verify the stable image attestation:
+Verify the stable image attestation:
 
 ```console
-gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:<version> -R ZacharyArthur/tasterr
+gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:2.0.0 -R ZacharyArthur/tasterr
 ```
 
 Perform a fresh install in an empty directory with a new external network, disposable
 `.env`, and new Compose project. Set
-`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:1.1.0`, run `docker compose pull` and
+`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:2.0.0`, run `docker compose pull` and
 `docker compose up -d --no-build`, then verify health, SPA serving, non-root uid, and
 named-volume persistence. Delete every disposable resource after verification.
 
 Publish release notes only after the applicable manifest, attestation, and fresh
 install checks pass. Summarize user-visible changes, upgrade steps, and known
-limitations; then pin the `1.1.0` digest as the released artifact without reproducing
-private evidence. The historical v1.0.1 GitHub Release is mutable. Publish v1.1.0
-with repository immutability enabled only after `1.1.0`, `1.1`, `1`, and `latest`
+limitations; then pin the `2.0.0` digest as the released artifact without reproducing
+private evidence. Publish v2.0.0 with repository immutability enabled only after
+`2.0.0`, `2.0`, `2`, and `latest`
 resolve to the expected release commit, the `sha-<full-commit>` candidate retains its
 recorded pre-tag digest, and the tagged clean-install smoke passes.
 
-For subsequent releases, do not create a post-release evidence commit. Record the
-final digest, publication time, alias verification, and tagged-image smoke only in
-the GitHub Release. This avoids advancing `main` and publishing a new candidate
-image solely to describe the release that preceded it.
+After publication, do not create a post-release evidence commit. Record the final
+digest, publication time, alias verification, and tagged-image smoke only in the
+GitHub Release. This avoids advancing `main` and publishing a new candidate image
+solely to describe the release that preceded it.
 
 If any post-tag check fails, do not move, delete, or reuse the published tag.
 Document the failure, fix forward through the normal protected-`main` workflow, and
@@ -248,5 +244,6 @@ documented in [CONFIGURATION.md](CONFIGURATION.md). To roll back an image-only c
 set `TASTERR_IMAGE` to the preceding known-good digest and force-recreate the service
 against the existing volume. If a migration is not backward-compatible, stop the
 writer and restore the matching pre-upgrade backup before starting the old digest.
-Version 1.0's M6 change has no migration, so its rollback basis is the prior image
-digest with the same database file.
+Version 2.0 includes migration `0006`. To return to v1.1, use the v2 image to
+downgrade to `0005` before starting the old image, or restore the validated matching
+pre-upgrade backup. Do not start a v1.1 image directly on the v2 database.

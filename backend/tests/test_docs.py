@@ -56,7 +56,7 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "A shared Docker network is not required" in readme
     assert "TASTERR_HTTP_PORT=8000" in readme
     assert "github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml/badge.svg" in readme
-    assert "image: ghcr.io/zacharyarthur/tasterr:1.1.0" in readme
+    assert "image: ghcr.io/zacharyarthur/tasterr:2.0.0" in readme
     assert '- "127.0.0.1:8000:8000"' in readme
     assert "tasterr-data:/data" in readme
     assert "does not require a\n`.env` file" in readme
@@ -81,12 +81,12 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "This is a Compose concern, not an application requirement" in configuration
 
     releasing = _read(DOCS / "RELEASING.md")
-    evidence = _read(DOCS / "releases" / "v1.1.0.md")
+    evidence = _read(DOCS / "releases" / "v2.0.0.md")
     assert "OWNER/REPOSITORY" not in readme + releasing + evidence
     assert "empty **public** `ZacharyArthur/tasterr` repository" in releasing
     assert "`check`, `e2e`, `container-smoke`, and `CodeQL`" in releasing
     assert "leave the existing `sha-<full-commit>` candidate unchanged" in releasing
-    assert "pin the `1.1.0` digest" in releasing
+    assert "pin the `2.0.0` digest" in releasing
     assert "GitHub Release is the authoritative post-tag record" in releasing
     assert "do not create a post-release evidence commit" in releasing
     assert "do not move, delete, or reuse the published tag" in releasing
@@ -141,7 +141,7 @@ def test_release_check_is_deterministic_and_keeps_external_checks_explicit() -> 
     assert "just release-check" in releasing
     assert "just audit" in releasing
     assert "just test-live" in releasing
-    assert "v1.1.0" in releasing
+    assert "v2.0.0" in releasing
     assert "archive <change-id>" in releasing
 
 
@@ -149,7 +149,7 @@ def test_public_security_policy_is_private_and_actionable() -> None:
     policy = _read(ROOT / "SECURITY.md")
     engineering = _read(DOCS / "SECURITY.md")
 
-    assert "1.0.x" in policy
+    assert "2.0.x" in policy
     assert "Security → Advisories → Report a vulnerability" in policy
     assert "Do not open a public issue" in policy
     assert "three business days" in policy
@@ -167,10 +167,10 @@ def test_plex_operator_docs_cover_privacy_recovery_and_release_order() -> None:
     for term in (
         "need no Plex URL or token",
         "Continue Watching",
-        "raw history",
-        "separate review steps",
+        "encrypted token created by Plex sign-in",
     ):
         assert term in readme
+    assert re.search(r"persist raw\s+history", readme)
     for term in (
         "No application environment variable is added",
         "Upgrade Matching",
@@ -178,7 +178,7 @@ def test_plex_operator_docs_cover_privacy_recovery_and_release_order() -> None:
         "Manage Library Access",
         "downgrade to `0005`",
         "TASTERR_LIVE_PLEX_OWNER_TOKEN",
-        "separate release change",
+        "Every v2.0 release candidate",
     ):
         assert term in configuration
     for term in (
