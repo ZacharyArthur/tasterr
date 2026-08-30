@@ -286,8 +286,8 @@ async def test_history_is_account_filtered_isolated_and_paged() -> None:
             params = {
                 "accountID": str(state.account_id),
                 "sort": "viewedAt:desc",
-                "viewedAt>=": str(after),
-                "viewedAt<=": str(now),
+                "viewedAt>": str(after),
+                "viewedAt<": str(now),
             }
             headers = _headers(state.server.access_token.get_secret_value())
             try:
