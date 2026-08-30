@@ -385,8 +385,8 @@ class PlexMediaClient:
                 params={
                     "accountID": str(account_id),
                     "sort": "viewedAt:desc",
-                    "viewedAt>=": str(viewed_after),
-                    "viewedAt<=": str(viewed_before),
+                    "viewedAt>": str(viewed_after),
+                    "viewedAt<": str(viewed_before),
                 },
                 headers={
                     "X-Plex-Container-Start": str(start),

@@ -640,8 +640,8 @@ async def test_history_is_filtered_ordered_and_paged() -> None:
         assert request.url.path == "/status/sessions/history/all"
         assert request.url.params["accountID"] == "42"
         assert request.url.params["sort"] == "viewedAt:desc"
-        assert request.url.params["viewedAt>="] == "1000"
-        assert request.url.params["viewedAt<="] == "2000"
+        assert request.url.params["viewedAt>"] == "1000"
+        assert request.url.params["viewedAt<"] == "2000"
         start = int(request.headers["x-plex-container-start"])
         starts.append(start)
         count = 100 if start == 0 else 1
