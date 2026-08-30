@@ -83,7 +83,7 @@ values listed above. Pin the desired version from the
 ```yaml
 services:
   tasterr:
-    image: ghcr.io/zacharyarthur/tasterr:2.0.0
+    image: ghcr.io/zacharyarthur/tasterr:2.1.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"

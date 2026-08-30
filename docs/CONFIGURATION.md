@@ -256,7 +256,7 @@ npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/taster
 
 Never put live values in `.env.example`, the repository, command output, test
 fixtures, or evidence. Record only versions and generic exercised/skipped/pass/fail
-results. Every v2.0 release candidate must pass these live contracts and the full
+results. Every v2.1 release candidate must pass these live contracts and the full
 release gate before tagging, or record the narrow release-owner exception in
 [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-and-plex-contracts).
 
