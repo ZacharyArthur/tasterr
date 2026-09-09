@@ -5,7 +5,7 @@ from ipaddress import ip_address, ip_network
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, SecretStr, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from tasterr.runtime_settings import Appearance, RuntimeSettings
@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     tasterr_host: str = "0.0.0.0"
     tasterr_port: int = 8000
     tasterr_forwarded_allow_ips: str = "127.0.0.1"
+    tasterr_plex_max_connection_probes: int = Field(default=6, ge=3, le=12)
 
     @field_validator("seerr_internal_url", "seerr_external_url")
     @classmethod

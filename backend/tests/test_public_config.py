@@ -55,6 +55,7 @@ CLIENT_SAFE_FIELDS = {
     "tasterr_port",
     "static_dir",
     "tasterr_forwarded_allow_ips",
+    "tasterr_plex_max_connection_probes",
 }
 
 
@@ -103,6 +104,11 @@ def test_forwarded_allowlist_has_no_client_or_runtime_projection() -> None:
     assert "tasterr_forwarded_allow_ips" not in RuntimeSettings.model_fields
 
 
+def test_plex_probe_limit_has_no_client_or_runtime_projection() -> None:
+    assert "tasterr_plex_max_connection_probes" not in PublicConfig.model_fields
+    assert "tasterr_plex_max_connection_probes" not in RuntimeSettings.model_fields
+
+
 def test_v2_private_fields_are_absent_from_browser_contracts() -> None:
     fields = _property_names(create_app(Settings()).openapi())
     assert fields.isdisjoint(
@@ -115,6 +121,7 @@ def test_v2_private_fields_are_absent_from_browser_contracts() -> None:
             "base_url",
             "machine_identifier",
             "rating_key",
+            "tasterr_plex_max_connection_probes",
             "profile",
             "profiles",
             "similarity",

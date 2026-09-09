@@ -273,6 +273,97 @@ async def test_connection_attempts_are_capped_at_six() -> None:
     assert attempts == 6
 
 
+async def test_local_connections_cannot_crowd_out_remote_direct_fallback() -> None:
+    uris = (
+        *(f"https://local-{index}.plex.direct:32400" for index in range(7)),
+        "https://remote-machine.plex.direct:32400",
+    )
+    attempts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "plex.tv":
+            return httpx.Response(200, json=[_resource("machine", *uris)])
+        attempts.append(request.url.host or "")
+        if request.url.host == "remote-machine.plex.direct":
+            return _identity("machine")
+        raise httpx.ConnectError("unavailable", request=request)
+
+    servers = await _media_client(handler).servers("account-token")
+
+    assert [server.machine_identifier for server in servers] == ["machine"]
+    assert "remote-machine.plex.direct" in attempts
+    assert len(attempts) == 6
+
+
+async def test_relay_connection_receives_a_reserved_probe_slot() -> None:
+    uris = (
+        *(f"https://local-{index}.plex.direct:32400" for index in range(7)),
+        "https://remote-machine.plex.direct:32400",
+        "https://relay-machine.plex.direct:443",
+    )
+    attempts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "plex.tv":
+            return httpx.Response(200, json=[_resource("machine", *uris)])
+        attempts.append(request.url.host or "")
+        if request.url.host == "relay-machine.plex.direct":
+            return _identity("machine")
+        raise httpx.ConnectError("unavailable", request=request)
+
+    servers = await _media_client(handler).servers("account-token")
+
+    assert [server.machine_identifier for server in servers] == ["machine"]
+    assert "remote-machine.plex.direct" in attempts
+    assert "relay-machine.plex.direct" in attempts
+    assert len(attempts) == 6
+
+
+async def test_reserved_fallback_does_not_jump_filled_local_connection() -> None:
+    uris = (
+        "https://local-a.plex.direct:32400",
+        "https://local-b.plex.direct:32400",
+        "https://remote-machine.plex.direct:32400",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "plex.tv":
+            return httpx.Response(200, json=[_resource("machine", *uris)])
+        if request.url.host == "local-a.plex.direct":
+            raise httpx.ConnectError("unavailable", request=request)
+        return _identity("machine")
+
+    servers = await _media_client(handler).servers("account-token")
+
+    assert servers[0].base_url == "https://local-b.plex.direct:32400"
+
+
+async def test_configured_connection_probe_limit_is_enforced() -> None:
+    uris = tuple(f"https://local-{index}.plex.direct:32400" for index in range(10))
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        if request.url.host == "plex.tv":
+            return httpx.Response(200, json=[_resource("machine", *uris)])
+        attempts += 1
+        raise httpx.ConnectError("unavailable", request=request)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = PlexMediaClient(http, CLIENT_ID, max_connection_probes=8)
+
+    assert await client.servers("account-token") == []
+    assert attempts == 8
+
+
+@pytest.mark.parametrize("limit", [2, 13])
+def test_media_client_rejects_out_of_range_probe_limits(limit: int) -> None:
+    http = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: _identity("x")))
+
+    with pytest.raises(ValueError, match="between 3 and 12"):
+        PlexMediaClient(http, CLIENT_ID, max_connection_probes=limit)
+
+
 async def test_invalid_connections_do_not_consume_the_probe_budget() -> None:
     uris = (
         *(f"http://bad-{index}.plex.direct:32400" for index in range(6)),
