@@ -181,7 +181,11 @@ def schedule_plex_history(
     async def run() -> None:
         while user_id in seeding:
             await asyncio.sleep(0.05)
-        plex = PlexMediaClient(state.http, plex_client_identifier(secret_key))
+        plex = PlexMediaClient(
+            state.http,
+            plex_client_identifier(secret_key),
+            max_connection_probes=settings.tasterr_plex_max_connection_probes,
+        )
         history = PlexCatalogService(plex, None, cast("Cache", state.catalog_cache))
         await import_plex_history(maker, history, secret_key, plex_token_enc, user_id)
 

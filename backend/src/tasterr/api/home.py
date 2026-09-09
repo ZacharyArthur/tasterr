@@ -67,7 +67,11 @@ async def get_home(
             pass
         else:
             plex = PlexCatalogService(
-                PlexMediaClient(request.app.state.http, plex_client_identifier(secret_key)),
+                PlexMediaClient(
+                    request.app.state.http,
+                    plex_client_identifier(secret_key),
+                    max_connection_probes=settings.tasterr_plex_max_connection_probes,
+                ),
                 catalog,
                 request.app.state.catalog_cache,
             )

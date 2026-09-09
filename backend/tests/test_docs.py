@@ -172,7 +172,7 @@ def test_plex_operator_docs_cover_privacy_recovery_and_release_order() -> None:
         assert term in readme
     assert re.search(r"persist raw\s+history", readme)
     for term in (
-        "No application environment variable is added",
+        "TASTERR_PLEX_MAX_CONNECTION_PROBES",
         "Upgrade Matching",
         "Refresh All Metadata",
         "Manage Library Access",

@@ -28,6 +28,7 @@ from tasterr.catalog.facts import TitleFacts
 from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, RailsPage, WatchProviders
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.plex import PlexCloudAccount, PlexServerDiscovery
 from tasterr.clients.seerr import SeerrClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
@@ -128,13 +129,14 @@ class FakeCatalog:
         return [_summary(1), _summary(2)]
 
 
-def _app(tmp_path: Path, *, tmdb: bool = True) -> FastAPI:
+def _app(tmp_path: Path, *, tmdb: bool = True, plex_max_connection_probes: int = 6) -> FastAPI:
     overrides: dict[str, object] = {
         "database_path": tmp_path / "tasterr.db",
         "static_dir": tmp_path / "static",
         "tasterr_secret_key": SECRET,
         "seerr_internal_url": "http://seerr:5055",
         "seerr_api_key": "seerr-api-key",
+        "tasterr_plex_max_connection_probes": plex_max_connection_probes,
     }
     if tmdb:
         overrides["tmdb_api_key"] = "tmdb-key"
@@ -207,6 +209,45 @@ def test_plex_backed_home_evaluates_history_sync(
 
     assert response.status_code == 200
     assert captured == [(1, True)]
+
+
+def test_home_passes_configured_plex_connection_probe_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = _app(tmp_path, plex_max_connection_probes=8)
+    app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
+    captured: list[int] = []
+
+    class RecordingPlexClient:
+        def __init__(
+            self,
+            _http: object,
+            _client_identifier: str,
+            *,
+            max_connection_probes: int,
+        ) -> None:
+            captured.append(max_connection_probes)
+
+        async def account(self, _account_token: str) -> PlexCloudAccount:
+            return PlexCloudAccount(id=1, username="member")
+
+        async def discover_servers(self, _account_token: str) -> PlexServerDiscovery:
+            return PlexServerDiscovery((), complete=True)
+
+    monkeypatch.setattr("tasterr.api.home.PlexMediaClient", RecordingPlexClient)
+
+    def ignore_schedule(*_args: object) -> None:
+        pass
+
+    monkeypatch.setattr("tasterr.api.home.schedule_plex_history", ignore_schedule)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path, plex=True)
+    with TestClient(app) as client:
+        client.cookies.set("tasterr_session", token)
+        response = client.get("/api/v1/home")
+
+    assert response.status_code == 200
+    assert captured == [8]
 
 
 def test_disabled_continue_watching_does_not_decrypt_account_token(

@@ -27,7 +27,9 @@ AUTH_URL = "https://app.plex.tv/auth"
 PRODUCT = "Tasterr"
 PLEX_TIMEOUT_SECONDS = 5.0
 MAX_SERVERS = 4
-MAX_CONNECTIONS_PER_SERVER = 6
+DEFAULT_MAX_CONNECTION_PROBES = 6
+MIN_CONNECTION_PROBES = 3
+MAX_CONNECTION_PROBES = 12
 HISTORY_PAGE_SIZE = 100
 HISTORY_MAX_ROWS = 500
 HUB_MAX_ITEMS = 50
@@ -267,9 +269,24 @@ class PlexAuthClient:
 
 
 class PlexMediaClient:
-    def __init__(self, http: httpx.AsyncClient, client_identifier: str) -> None:
+    def __init__(
+        self,
+        http: httpx.AsyncClient,
+        client_identifier: str,
+        *,
+        max_connection_probes: int = DEFAULT_MAX_CONNECTION_PROBES,
+    ) -> None:
+        if (
+            type(max_connection_probes) is not int
+            or not MIN_CONNECTION_PROBES <= max_connection_probes <= MAX_CONNECTION_PROBES
+        ):
+            raise ValueError(
+                "max_connection_probes must be between "
+                f"{MIN_CONNECTION_PROBES} and {MAX_CONNECTION_PROBES}"
+            )
         self._http = http
         self._client_identifier = client_identifier
+        self._max_connection_probes = max_connection_probes
 
     def _headers(self, token: str | None = None) -> dict[str, str]:
         headers = {
@@ -506,17 +523,26 @@ class PlexMediaClient:
             raise UpstreamUnavailable("unexpected Plex Media Server response shape") from error
 
     async def _validated_server(self, resource: PlexResource) -> PlexServer | None:
-        connections = [
-            connection
-            for connection in sorted(
-                resource.connections,
-                key=lambda item: (
-                    2 if item.relay else 0 if item.local else 1,
-                    item.uri,
-                ),
+        def priority(connection: PlexConnection) -> tuple[int, str]:
+            return (
+                2 if connection.relay else 0 if connection.local else 1,
+                connection.uri,
             )
+
+        eligible = [
+            connection
+            for connection in sorted(resource.connections, key=priority)
             if _validated_connection_url(connection.uri) is not None
-        ][:MAX_CONNECTIONS_PER_SERVER]
+        ]
+        reserved: list[PlexConnection] = []
+        for category in range(3):
+            candidate = next((item for item in eligible if priority(item)[0] == category), None)
+            if candidate is not None:
+                reserved.append(candidate)
+        selected = [*reserved, *(item for item in eligible if item not in reserved)][
+            : self._max_connection_probes
+        ]
+        connections = sorted(selected, key=priority)
 
         async def validate(connection: PlexConnection) -> PlexServer | None:
             base_url = _validated_connection_url(connection.uri)

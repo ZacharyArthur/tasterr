@@ -302,6 +302,37 @@ async def test_scheduler_is_single_flight_and_waits_for_seerr_seed(
     assert request.app.state.plex_history_tasks == {}
 
 
+async def test_scheduler_passes_configured_plex_connection_probe_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request()
+    captured: list[int] = []
+
+    class RecordingPlexClient:
+        def __init__(
+            self,
+            _http: object,
+            _client_identifier: str,
+            *,
+            max_connection_probes: int,
+        ) -> None:
+            captured.append(max_connection_probes)
+
+    async def fake_import(*_args: object) -> None:
+        pass
+
+    monkeypatch.setattr(taste_api, "PlexMediaClient", RecordingPlexClient)
+    monkeypatch.setattr(taste_api, "import_plex_history", fake_import)
+    settings = Settings.model_validate(
+        {"tasterr_secret_key": SECRET, "tasterr_plex_max_connection_probes": 8}
+    )
+
+    schedule_plex_history(request, settings, 1, None, "ciphertext")
+    await request.app.state.plex_history_tasks[1]
+
+    assert captured == [8]
+
+
 async def test_recent_attempt_and_failed_task_creation_do_not_run_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

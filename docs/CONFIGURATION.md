@@ -26,6 +26,7 @@ or place secret values directly in a Compose file.
 | `TASTERR_HOST` | No | `0.0.0.0` | Uvicorn bind address. |
 | `TASTERR_PORT` | No | `8000` | Uvicorn container port and healthcheck target. |
 | `TASTERR_FORWARDED_ALLOW_IPS` | No | `127.0.0.1` | Comma-separated direct proxy-peer IP addresses or CIDRs allowed to supply forwarded client/scheme headers. |
+| `TASTERR_PLEX_MAX_CONNECTION_PROBES` | No | `6` | Maximum unauthenticated Plex identity probes per advertised server resource. Accepts 3–12. Up to four resources are probed concurrently, so raising it can increase aggregate bounded discovery traffic. |
 
 Empty or missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
 The proxy allowlist accepts literal IP addresses and CIDRs only; empty entries,
@@ -98,9 +99,9 @@ never accept URLs, keys, tokens, cookies, or credentials.
 
 The rail list includes independent switches for **Continue Watching**, **Picks You
 Wouldn't Usually Watch**, and **Something for Everyone Tonight**. All three default
-enabled. No application environment variable is added for Plex personalization:
-Plex-backed sessions reuse their encrypted sign-in token, while local-login sessions
-perform no live Plex read.
+enabled. Plex-backed sessions reuse their encrypted sign-in token, while local-login
+sessions perform no live Plex read. `TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
+bounded server-side discovery and is never exposed to the browser.
 
 ## Plex-aware operation
 

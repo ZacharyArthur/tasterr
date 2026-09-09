@@ -16,6 +16,7 @@ ENV_VARS = (
     "TASTERR_HOST",
     "TASTERR_PORT",
     "TASTERR_FORWARDED_ALLOW_IPS",
+    "TASTERR_PLEX_MAX_CONNECTION_PROBES",
 )
 
 
@@ -64,6 +65,25 @@ def test_boot_with_nothing_set(clean_env: None) -> None:
     assert settings.seerr_configured is False
     assert settings.database_path == Path("data/tasterr.db")
     assert settings.tasterr_forwarded_allow_ips == "127.0.0.1"
+    assert settings.tasterr_plex_max_connection_probes == 6
+
+
+def test_plex_connection_probe_limit_populates_from_env(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TASTERR_PLEX_MAX_CONNECTION_PROBES", "8")
+
+    assert Settings().tasterr_plex_max_connection_probes == 8
+
+
+@pytest.mark.parametrize("value", ["2", "13"])
+def test_plex_connection_probe_limit_rejects_out_of_range_values(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("TASTERR_PLEX_MAX_CONNECTION_PROBES", value)
+
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_secrets_do_not_repr(clean_env: None, monkeypatch: pytest.MonkeyPatch) -> None:

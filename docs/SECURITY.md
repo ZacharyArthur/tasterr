@@ -64,8 +64,10 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 #### Advertised Plex Media Server connections
 
 - [ ] Select at most four Plex Media Server resources, owned-first then by advertised
-      machine id; attempt at most six connections per resource in local HTTPS,
-      remote-direct, relay, then stable URI order.
+      machine id; attempt at most the configured 3–12 connections per resource
+      (default six). Reserve one available candidate per local HTTPS, remote-direct,
+      and relay category before filling remaining slots, then preserve category and
+      stable URI priority for deterministic winner selection.
 - [ ] Accept only `https://<host>.plex.direct:<explicit-port>` with port 1–65535,
       empty or `/` path, and no username, password, query, or fragment. Reject plain
       HTTP, missing/invalid ports, other hosts/schemes, and embedded credentials.
