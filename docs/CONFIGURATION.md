@@ -241,6 +241,11 @@ image-only rollback across migration `0006` is unsupported.
 
 ## Live contract verification
 
+On 2026-10-04, operator testing used Seerr **3.5.0**. Default requests and
+request destination selection worked after valid root folders were configured in
+Seerr. This was manual verification; the automated live suite was not rerun on
+3.5.0. The earlier automated Seerr 3.3.0 baseline remains historical evidence.
+
 Live Plex/Seerr contracts are opt-in and excluded from `just check` and CI. Put the
 `TASTERR_LIVE_*` values named at the top of `backend/tests/live/` in a temporary file
 outside the repository, restrict that file to the current user, load it only into
@@ -279,6 +284,13 @@ choices. Deleting a Seerr request does not undo an autoapproved download.
   <seerr-host>` using the hostname from `SEERR_INTERNAL_URL`, then verify its port,
   routing, and API key. For the optional override, also verify both containers join
   the named network. Never paste keys into logs or issues.
+- Requests show Failed in Seerr, or the picker reports an unavailable destination:
+  in Seerr **Settings → Services**, select and save a valid default **Root Folder**
+  and **Quality Profile** for each configured Radarr/Sonarr server, including 4K
+  servers. Root folders must exist inside the corresponding Radarr/Sonarr
+  container. An unset selection or stale path can cause a `RootFolderExistsValidator`
+  rejection even when Tasterr successfully creates the Seerr request. Check Seerr
+  logs for the delivery failure, correct the configuration, then retry in Seerr.
 - Login loops behind HTTPS: verify the proxy's direct peer is trusted and it replaces
   `X-Forwarded-Proto` with `https`.
 - Health is good but the UI is unavailable: inspect `docker compose logs tasterr`
