@@ -261,6 +261,15 @@ results. Every v2.1 release candidate must pass these live contracts and the ful
 release gate before tagging, or record the narrow release-owner exception in
 [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-and-plex-contracts).
 
+The destination persistence contract additionally accepts
+`TASTERR_LIVE_REQUEST_4K_TMDB_ID`, a disposable movie whose 4K variant is not
+requested or available. The account needs the corresponding 4K request permission
+and Advanced Requests (or Manage Requests/admin) permission. The suite prefers a
+non-default destination, invokes the production request client, checks the stored
+variant/server/profile/folder and member attribution, and records the Seerr version.
+These checks do not prove downstream delivery; administrator rules can rewrite
+choices. Deleting a Seerr request does not undo an autoapproved download.
+
 ## Troubleshooting
 
 - `network ... declared as external, but could not be found`: this applies only to

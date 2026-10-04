@@ -14,6 +14,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from tasterr.api.admin import router as admin_router
 from tasterr.api.auth import router as auth_router
 from tasterr.api.availability import router as availability_router
+from tasterr.api.destinations import router as destinations_router
 from tasterr.api.home import router as home_router
 from tasterr.api.meta import router as meta_router
 from tasterr.api.onboarding import router as onboarding_router
@@ -95,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(title_router, prefix="/api/v1")
     app.include_router(search_router, prefix="/api/v1")
     app.include_router(availability_router, prefix="/api/v1")
+    app.include_router(destinations_router, prefix="/api/v1")
     app.include_router(request_router, prefix="/api/v1")
     app.include_router(signals_router, prefix="/api/v1")
     app.include_router(onboarding_router, prefix="/api/v1")

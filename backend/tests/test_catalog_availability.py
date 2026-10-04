@@ -44,7 +44,9 @@ def test_absent_media_info_is_not_requested() -> None:
 
 
 def test_media_info_maps_to_status() -> None:
-    assert to_availability(SeerrMediaInfo(status=5)) == Availability(status="available", known=True)
+    assert to_availability(SeerrMediaInfo(status=5)) == Availability(
+        status="available", known=True, regular_status="available"
+    )
 
 
 def test_available_overseerr_links_are_validated_and_build_android_fallback() -> None:
@@ -299,3 +301,31 @@ async def test_batch_degrades_per_item() -> None:
 
     assert result["movie:1"].status == "available"
     assert result["tv:2"] == UNKNOWN
+
+
+def test_missing_variant_remains_independently_requestable() -> None:
+    standard = to_availability(SeerrMediaInfo(status=5, status4k=1))
+    assert standard.status == standard.regular_status == "available"
+    assert standard.four_k_status == "not_requested"
+    four_k = to_availability(SeerrMediaInfo(status=1, status4k=2))
+    assert four_k.regular_status == "not_requested"
+    assert four_k.four_k_status == "pending"
+    assert UNKNOWN.regular_status == UNKNOWN.four_k_status == "unknown"
+
+
+async def test_request_cache_invalidation_prevents_stale_missing_variant() -> None:
+    calls = 0
+
+    async def loader() -> Availability:
+        nonlocal calls
+        calls += 1
+        return to_availability(SeerrMediaInfo(status=5, status4k=1 if calls == 1 else 2))
+
+    cache = Cache()
+    key = "seerr:avail:movie:42"
+    before = await cache.cached(key, avail.AVAIL_OPTS, loader)
+    assert before.four_k_status == "not_requested"
+    await cache.invalidate(key)
+    after = await cache.cached(key, avail.AVAIL_OPTS, loader)
+    assert after.four_k_status == "pending"
+    assert calls == 2

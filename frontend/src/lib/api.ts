@@ -19,6 +19,14 @@ export type MediaType = MediaSummary["media_type"];
 export type Availability = components["schemas"]["Availability"];
 export type AvailabilityStatus = Availability["status"];
 export type RequestResponse = components["schemas"]["RequestResponse"];
+export type RequestDestination = components["schemas"]["RequestDestination"];
+export type RequestOptions = components["schemas"]["RequestOptions"];
+export type RequestSelection = Partial<
+	Pick<
+		components["schemas"]["RequestBody"],
+		"is_4k" | "server_id" | "profile_id" | "root_folder"
+	>
+>;
 /** Keyed by `"<media_type>:<id>"`, the shape `POST /availability` returns. */
 export type AvailabilityMap = Record<string, Availability>;
 export type SignalKind = components["schemas"]["SignalBody"]["kind"];
@@ -153,6 +161,14 @@ export function getConfig(): Promise<PublicConfig> {
 	return request<PublicConfig>("/api/v1/config");
 }
 
+/** Current variant capabilities and permitted advanced destinations. */
+export function getDestinations(
+	type: MediaType,
+	id: number,
+): Promise<RequestOptions> {
+	return request<RequestOptions>(`/api/v1/${type}/${id}/destinations`);
+}
+
 export function getSettings(): Promise<SettingsResponse> {
 	return request<SettingsResponse>("/api/v1/settings");
 }
@@ -202,14 +218,22 @@ export async function postAvailability(
 	return availability;
 }
 
-/** Request a title as the current user; returns a discriminated outcome. */
+export type RequestDestinationOverride = {
+	[K in "server_id" | "profile_id" | "root_folder"]: NonNullable<
+		RequestSelection[K]
+	>;
+};
+
+/** Omitted options retain Seerr defaults; 4K is always explicit. */
 export function createRequest(
 	mediaType: MediaType,
 	tmdbId: number,
+	selection?: RequestSelection,
 ): Promise<RequestResponse> {
 	return postJson<RequestResponse>("/api/v1/request", {
 		media_type: mediaType,
 		tmdb_id: tmdbId,
+		...selection,
 	});
 }
 

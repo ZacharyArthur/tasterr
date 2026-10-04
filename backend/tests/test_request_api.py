@@ -90,8 +90,21 @@ def _stored_cookie(db_path: Path, token: str) -> str:
     return asyncio.run(_run())
 
 
-def _override_ctx(app: FastAPI, handler: Callable[[httpx.Request], httpx.Response]) -> None:
-    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+def _override_ctx(
+    app: FastAPI, handler: Callable[[httpx.Request], httpx.Response], *, preflight: bool = True
+) -> None:
+    def wrapped(request: httpx.Request) -> httpx.Response:
+        if preflight and request.url.path == "/api/v1/user/99":
+            return httpx.Response(200, json={"id": 99, "permissions": 2})
+        if (
+            preflight
+            and request.method == "GET"
+            and request.url.path.startswith(("/api/v1/movie/", "/api/v1/tv/"))
+        ):
+            return httpx.Response(404)
+        return handler(request)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(wrapped))
     ctx = SeerrRequestCtx(
         client=SeerrClient(http, SEERR_URL, "seerr-api-key"),
         seerr_auth=SeerrAuthClient(http, SEERR_URL),
@@ -203,7 +216,13 @@ def test_successful_request_returns_status_and_fallback(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "availability": {"status": "pending", "known": True, "playback": None},
+        "availability": {
+            "status": "pending",
+            "known": True,
+            "playback": None,
+            "regular_status": "pending",
+            "four_k_status": "not_requested",
+        },
         "seerr_url": "https://requests.example/movie/42",
     }
     assert seen == [SEED_COOKIE]  # attributed via the member's own cookie
@@ -220,6 +239,136 @@ def test_no_external_url_means_no_link(tmp_path: Path) -> None:
     assert body["status"] == "ok"
     assert body["seerr_url"] is None
     assert SEERR_URL not in response.text  # internal URL never leaks
+
+
+# ── Destination override (request-destination-override) ─────────────────────
+
+SERVER_FIXTURE = {
+    "id": 0,
+    "name": "radarr",
+    "isDefault": True,
+    "activeDirectory": "/movies",
+    "activeProfileId": 7,
+}
+DESTINATIONS_FIXTURE = {
+    "server": SERVER_FIXTURE,
+    "profiles": [{"id": 7, "name": "HD Bluray + WEB"}, {"id": 4, "name": "HD-1080p"}],
+    "rootFolders": [
+        {"id": 1, "freeSpace": 1, "path": "/movies"},
+        {"id": 2, "freeSpace": 1, "path": "/new releases"},
+    ],
+}
+
+
+def _destinations_handler(
+    request_response: httpx.Response,
+) -> tuple[Callable[[httpx.Request], httpx.Response], list[str]]:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/v1/service/radarr":
+            return httpx.Response(200, json=[SERVER_FIXTURE])
+        if request.url.path == "/api/v1/service/radarr/0":
+            return httpx.Response(200, json=DESTINATIONS_FIXTURE)
+        if request.url.path == "/api/v1/request":
+            assert json.loads(request.read()) == {
+                "mediaType": "movie",
+                "mediaId": 42,
+                "serverId": 0,
+                "profileId": 4,
+                "rootFolder": "/new releases",
+            }
+            assert request.headers["cookie"] == SEED_COOKIE
+            assert "x-api-key" not in request.headers
+            return request_response
+        raise AssertionError(f"unexpected path {request.url.path}")
+
+    return handler, paths
+
+
+def test_valid_override_is_forwarded_to_seerr(tmp_path: Path) -> None:
+    handler, paths = _destinations_handler(httpx.Response(201, json={"media": {"status": 2}}))
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={
+                **_body(),
+                "server_id": 0,
+                "profile_id": 4,
+                "root_folder": "/new releases",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert "/api/v1/request" in paths  # the override validated, then the request proceeded
+
+
+def test_override_not_matching_a_real_destination_is_rejected(tmp_path: Path) -> None:
+    handler, paths = _destinations_handler(httpx.Response(201, json={"media": {"status": 2}}))
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={**_body(), "server_id": 0, "profile_id": 999, "root_folder": "/movies"},
+        )
+
+    assert response.status_code == 422
+    assert "/api/v1/request" not in paths  # rejected before any Seerr request call
+
+
+def test_unknown_server_override_is_rejected(tmp_path: Path) -> None:
+    handler, paths = _destinations_handler(httpx.Response(201, json={"media": {"status": 2}}))
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={**_body(), "server_id": 9, "profile_id": 7, "root_folder": "/movies"},
+        )
+
+    assert response.status_code == 422
+    assert "/api/v1/request" not in paths
+
+
+def test_partial_override_is_rejected_without_a_destinations_call(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        raise AssertionError("no call expected for a partial override")
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body(), "server_id": 0})
+
+    assert response.status_code == 422
+    assert calls == []  # rejected on shape alone, before any upstream call
+
+
+def test_omitted_override_matches_prior_behavior_exactly(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/request"
+        assert json.loads(request.read()) == {"mediaType": "movie", "mediaId": 42}
+        return httpx.Response(201, json={"media": {"status": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json=_body())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
 
 
 # ── The 403 re-auth ladder ───────────────────────────────────────────────────
@@ -403,3 +552,253 @@ def test_signal_write_failure_never_fails_the_request(
     assert response.status_code == 200
     assert response.json()["status"] == "ok"  # Seerr accepted; the signal is best-effort
     assert _stored_taste_signals(tmp_path / "tasterr.db") == []
+
+
+@pytest.mark.parametrize(
+    "media_type,is_4k,permission,status",
+    [
+        ("movie", False, 32, 200),
+        ("tv", False, 524288, 200),
+        ("movie", True, 2048, 200),
+        ("tv", True, 4096, 200),
+        ("tv", True, 2048, 403),
+        ("movie", True, 32, 403),
+        ("movie", False, 16, 403),
+        ("movie", False, 0, 403),
+    ],
+)
+def test_request_checks_fresh_variant_permissions(
+    tmp_path: Path, media_type: str, is_4k: bool, permission: int, status: int
+) -> None:
+    writes: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/user/99":
+            return httpx.Response(200, json={"id": 99, "permissions": permission})
+        if request.url.path.startswith("/api/v1/service/"):
+            return httpx.Response(200, json=[{**SERVER_FIXTURE, "is4k": True}])
+        if request.method == "GET":
+            return httpx.Response(
+                200, json={"mediaInfo": {"status": 5 if is_4k else 1, "status4k": 1}}
+            )
+        writes.append(json.loads(request.read()))
+        return httpx.Response(201, json={"media": {"status": 5 if is_4k else 2, "status4k": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, preflight=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body(media_type), "is_4k": is_4k})
+    assert response.status_code == status
+    assert len(writes) == (1 if status == 200 else 0)
+    if writes:
+        assert writes[0] == {
+            "mediaType": media_type,
+            "mediaId": 42,
+            **({"is4k": True} if is_4k else {}),
+            **({"seasons": "all"} if media_type == "tv" else {}),
+        }
+        assert (
+            response.json()["availability"]["four_k_status" if is_4k else "regular_status"]
+            == "pending"
+        )
+
+
+@pytest.mark.parametrize("code", [2, 3, 4, 5])
+@pytest.mark.parametrize("is_4k", [False, True])
+def test_existing_variant_is_rejected_before_creation(
+    tmp_path: Path, code: int, is_4k: bool
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/user/99":
+            return httpx.Response(200, json={"id": 99, "permissions": 2})
+        assert request.method == "GET"
+        return httpx.Response(
+            200,
+            json={"mediaInfo": {"status": 1 if is_4k else code, "status4k": code if is_4k else 1}},
+        )
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, preflight=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body(), "is_4k": is_4k})
+    assert response.status_code == 409
+    assert _stored_taste_signals(tmp_path / "tasterr.db") == []
+
+
+@pytest.mark.parametrize("failure_path", ["user", "media", "servers", "detail"])
+def test_override_read_outages_return_generic_fallback(tmp_path: Path, failure_path: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/api/v1/user/99":
+            return (
+                httpx.Response(503, text="private")
+                if failure_path == "user"
+                else httpx.Response(200, json={"id": 99, "permissions": 2})
+            )
+        if path == "/api/v1/movie/42":
+            return (
+                httpx.Response(503, text="private")
+                if failure_path == "media"
+                else httpx.Response(404)
+            )
+        if path == "/api/v1/service/radarr":
+            return (
+                httpx.Response(503, text="private")
+                if failure_path == "servers"
+                else httpx.Response(200, json=[SERVER_FIXTURE])
+            )
+        assert path == "/api/v1/service/radarr/0"
+        return httpx.Response(503, text="private")
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, preflight=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={**_body(), "server_id": 0, "profile_id": 7, "root_folder": "/movies"},
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["seerr_url"] == "https://requests.example/movie/42"
+    assert "private" not in response.text
+
+
+def test_advanced_override_denied_to_ordinary_requester(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/user/99"
+        return httpx.Response(200, json={"id": 99, "permissions": 32})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, preflight=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={**_body(), "server_id": 0, "profile_id": 7, "root_folder": "/movies"},
+        )
+    assert response.status_code == 403
+
+
+def test_4k_server_cannot_be_used_for_standard_request(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/service/radarr"
+        return httpx.Response(200, json=[{**SERVER_FIXTURE, "is4k": True}])
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={**_body(), "server_id": 0, "profile_id": 7, "root_folder": "/movies"},
+        )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"server_id": -1},
+        {"profile_id": 2147483648},
+        {"root_folder": "x" * 4097},
+        {"root_folder": ""},
+    ],
+)
+def test_override_input_bounds_reject_before_reads(
+    tmp_path: Path, extra: dict[str, object]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid input must not reach Seerr")
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, preflight=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        assert client.post("/api/v1/request", json={**_body(), **extra}).status_code == 422
+
+
+def test_4k_override_survives_reauth_exactly(tmp_path: Path) -> None:
+    ladder, state = _ladder_handler(
+        httpx.Response(201, json={"media": {"status": 5, "status4k": 2}})
+    )
+    server = {**SERVER_FIXTURE, "is4k": True, "isDefault": False}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/service/radarr":
+            return httpx.Response(200, json=[server])
+        if request.url.path == "/api/v1/service/radarr/0":
+            return httpx.Response(200, json={**DESTINATIONS_FIXTURE, "server": server})
+        return ladder(request)
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db", plex_token="plex-token")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={
+                **_body(),
+                "is_4k": True,
+                "server_id": 0,
+                "profile_id": 4,
+                "root_folder": "/new releases",
+            },
+        )
+    assert response.json()["status"] == "ok"
+    expected = {
+        "mediaType": "movie",
+        "mediaId": 42,
+        "is4k": True,
+        "serverId": 0,
+        "profileId": 4,
+        "rootFolder": "/new releases",
+    }
+    assert state.request_bodies == [expected, expected]
+    assert state.request_cookies == [SEED_COOKIE, NEW_COOKIE]
+
+
+@pytest.mark.parametrize("media_type", ["movie", "tv"])
+@pytest.mark.parametrize("configuration", ["empty", "standard", "nondefault", "default", "outage"])
+def test_bare_4k_requires_default_before_request_creation(
+    tmp_path: Path, media_type: str, configuration: str
+) -> None:
+    writes: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/api/v1/service/"):
+            service = "radarr" if media_type == "movie" else "sonarr"
+            assert request.url.path == f"/api/v1/service/{service}"
+            if configuration == "outage":
+                return httpx.Response(503, text="private")
+            servers = (
+                []
+                if configuration == "empty"
+                else [
+                    {
+                        **SERVER_FIXTURE,
+                        "is4k": configuration != "standard",
+                        "isDefault": configuration != "nondefault",
+                    }
+                ]
+            )
+            return httpx.Response(200, json=servers)
+        assert request.method == "POST"
+        writes.append(json.loads(request.read()))
+        return httpx.Response(201, json={"media": {"status4k": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body(media_type), "is_4k": True})
+    if configuration in ("default", "outage"):
+        assert response.status_code == 200
+        assert response.json()["status"] == ("ok" if configuration == "default" else "failed")
+        assert response.json()["seerr_url"] == f"https://requests.example/{media_type}/42"
+    else:
+        assert response.status_code == 422
+    assert len(writes) == (1 if configuration == "default" else 0)
+    assert "private" not in response.text

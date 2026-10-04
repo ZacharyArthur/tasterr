@@ -137,3 +137,33 @@ async def test_concurrent_misses_collapse_to_one_loader_call(
 
     assert results == ["v"] * 5
     assert calls == 1
+
+
+@pytest.mark.parametrize("refresh", [False, True])
+async def test_invalidation_waits_for_old_load_and_forces_fresh_read(
+    monkeypatch: pytest.MonkeyPatch, refresh: bool
+) -> None:
+    cache, clock = _cache(monkeypatch)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def old_loader() -> str:
+        started.set()
+        await release.wait()
+        return "not_requested"
+
+    async def fresh_loader() -> str:
+        return "pending"
+
+    if refresh:
+        await cache.cached("k", OPTS, fresh_loader)
+        clock.now += OPTS.ttl + 1
+    read = asyncio.create_task(cache.cached("k", OPTS, old_loader))
+    await started.wait()
+    invalidation = asyncio.create_task(cache.invalidate("k"))
+    await asyncio.sleep(0)
+    assert not invalidation.done()
+    release.set()
+    assert await read == "not_requested"
+    await invalidation
+    assert await cache.cached("k", OPTS, fresh_loader) == "pending"

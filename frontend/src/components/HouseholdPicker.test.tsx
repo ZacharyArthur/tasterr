@@ -158,7 +158,12 @@ test("renders a standard arrow-navigable rail and hydrates its availability", as
 				Object.fromEntries(
 					body.items.map(({ media_type, id }) => [
 						`${media_type}:${id}`,
-						{ status: "available", known: true },
+						{
+							status: "available",
+							known: true,
+							regular_status: "available",
+							four_k_status: "not_requested",
+						},
 					]),
 				),
 			);

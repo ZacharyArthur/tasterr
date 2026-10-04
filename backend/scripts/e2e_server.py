@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, SecretStr
 
 from tasterr.clients import tmdb
+from tasterr.clients.seerr import SeerrPermission
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -44,6 +45,10 @@ class RequestBody(BaseModel):
     mediaType: Literal["movie", "tv"]
     mediaId: int
     seasons: str | None = None
+    is4k: bool = False
+    serverId: int | None = None
+    profileId: int | None = None
+    rootFolder: str | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +127,41 @@ def _detail(tmdb_id: int, media_type: Literal["movie", "tv"]) -> dict[str, objec
 
 def build_fixture_router() -> APIRouter:
     router = APIRouter(prefix=FIXTURE_PREFIX, include_in_schema=False)
+    states: dict[tuple[str, int], dict[str, int]] = {}
+
+    @router.get("/seerr/api/v1/user/{user_id}")
+    async def _user(user_id: int) -> dict[str, int]:
+        return {
+            "id": user_id,
+            "permissions": SeerrPermission.REQUEST
+            | SeerrPermission.REQUEST_4K
+            | SeerrPermission.REQUEST_ADVANCED,
+        }
+
+    @router.get("/seerr/api/v1/service/{service}")
+    async def _servers(service: Literal["radarr", "sonarr"]) -> list[dict[str, object]]:
+        return [
+            {
+                "id": number,
+                "name": f"{service} {'4K' if number else 'Standard'}",
+                "is4k": bool(number),
+                "isDefault": True,
+                "activeProfileId": 7,
+                "activeDirectory": "/4k" if number else "/media",
+            }
+            for number in (0, 1)
+        ]
+
+    @router.get("/seerr/api/v1/service/{service}/{server_id}")
+    async def _server_detail(
+        service: Literal["radarr", "sonarr"], server_id: int
+    ) -> dict[str, object]:
+        server = (await _servers(service))[server_id]
+        return {
+            "server": server,
+            "profiles": [{"id": 7, "name": "Default"}],
+            "rootFolders": [{"id": 1, "path": server["activeDirectory"]}],
+        }
 
     @router.get("/ready")
     async def _ready() -> dict[str, bool]:
@@ -136,7 +176,9 @@ def build_fixture_router() -> APIRouter:
                 "id": 7001,
                 "displayName": "E2E Viewer",
                 "email": E2E_EMAIL,
-                "permissions": 0,
+                "permissions": SeerrPermission.REQUEST
+                | SeerrPermission.REQUEST_4K
+                | SeerrPermission.REQUEST_ADVANCED,
             }
         )
         response.set_cookie("connect.sid", "e2e-session", httponly=True)
@@ -152,13 +194,24 @@ def build_fixture_router() -> APIRouter:
     ) -> JSONResponse:
         if cookie != E2E_SEERR_COOKIE:
             return JSONResponse(status_code=403, content={"message": "Invalid session"})
+        if payload.mediaType == "tv" and payload.seasons != "all":
+            return JSONResponse(status_code=422, content={"message": "Whole series required"})
         if payload.mediaId < 1:
             return JSONResponse(status_code=422, content={"message": "Invalid title"})
-        return JSONResponse(status_code=201, content={"media": {"status": 2}})
+        info = states.setdefault(
+            (payload.mediaType, payload.mediaId),
+            {"status": 5 if payload.mediaId in (102, 104) else 1, "status4k": 1},
+        )
+        info["status4k" if payload.is4k else "status"] = 2
+        return JSONResponse(status_code=201, content={"media": info})
 
     @router.get("/seerr/api/v1/{media_type}/{tmdb_id}")
     async def _media_status(media_type: Literal["movie", "tv"], tmdb_id: int) -> JSONResponse:
-        del media_type, tmdb_id
+        info = states.get((media_type, tmdb_id))
+        if info is None and tmdb_id in (102, 104):
+            info = {"status": 5, "status4k": 1}
+        if info is not None:
+            return JSONResponse(content={"mediaInfo": info})
         return JSONResponse(status_code=404, content={"message": "Not requested"})
 
     @router.get("/tmdb/3/genre/{media_type}/list")
