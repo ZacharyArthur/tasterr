@@ -445,7 +445,13 @@ def test_title_availability_degrades_when_seerr_down(tmp_path: Path) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == 42
-    assert body["availability"] == {"status": "unknown", "known": False, "playback": None}
+    assert body["availability"] == {
+        "status": "unknown",
+        "known": False,
+        "regular_status": "unknown",
+        "four_k_status": "unknown",
+        "playback": None,
+    }
 
 
 # ── Search (4.3) ─────────────────────────────────────────────────────────────

@@ -443,6 +443,18 @@ export interface components {
             status: "available" | "partial" | "processing" | "pending" | "not_requested" | "unknown";
             /** Known */
             known: boolean;
+            /**
+             * Regular Status
+             * @default not_requested
+             * @enum {string}
+             */
+            regular_status: "available" | "partial" | "processing" | "pending" | "not_requested" | "unknown";
+            /**
+             * Four K Status
+             * @default not_requested
+             * @enum {string}
+             */
+            four_k_status: "available" | "partial" | "processing" | "pending" | "not_requested" | "unknown";
             playback?: components["schemas"]["PlaybackLinks"] | null;
         };
         /** AvailabilityItem */
@@ -809,6 +821,11 @@ export interface components {
             media_type: "movie" | "tv";
             /** Tmdb Id */
             tmdb_id: number;
+            /**
+             * Is 4K
+             * @default false
+             */
+            is_4k: boolean;
             /** Server Id */
             server_id?: number | null;
             /** Profile Id */
@@ -824,6 +841,8 @@ export interface components {
             server_name: string;
             /** Is Default */
             is_default: boolean;
+            /** Is 4K */
+            is_4k: boolean;
             /** Default Profile Id */
             default_profile_id: number;
             /** Default Root Folder */
@@ -832,6 +851,39 @@ export interface components {
             quality_profiles: components["schemas"]["DestinationProfile"][];
             /** Root Folders */
             root_folders: components["schemas"]["DestinationRootFolder"][];
+        };
+        /** RequestOptions */
+        RequestOptions: {
+            /**
+             * Available
+             * @default false
+             */
+            available: boolean;
+            /**
+             * Can Request Standard
+             * @default false
+             */
+            can_request_standard: boolean;
+            /**
+             * Can Request 4K
+             * @default false
+             */
+            can_request_4k: boolean;
+            /**
+             * Can Request 4K Default
+             * @default false
+             */
+            can_request_4k_default: boolean;
+            /**
+             * Can Override
+             * @default false
+             */
+            can_override: boolean;
+            /**
+             * Destinations
+             * @default []
+             */
+            destinations: components["schemas"]["RequestDestination"][];
         };
         /**
          * RequestResponse
@@ -1539,7 +1591,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RequestDestination"][];
+                    "application/json": components["schemas"]["RequestOptions"];
                 };
             };
             /** @description Validation Error */

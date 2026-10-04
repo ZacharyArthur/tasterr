@@ -58,7 +58,7 @@ def test_harness_is_ready_and_serves_only_invented_upstreams(
                 json={"mediaType": "movie", "mediaId": 101},
             )
             assert request.status_code == 201
-            assert request.json() == {"media": {"status": 2}}
+            assert request.json() == {"media": {"status": 2, "status4k": 1}}
 
         assert root.exists()
         assert (root / "tasterr.db").is_file()

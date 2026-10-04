@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
-from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrUser
+from tasterr.clients.seerr import MediaType, SeerrAuthClient, SeerrClient, SeerrUser
 
 SERVER_LIST_FIXTURE: list[dict[str, object]] = [
     {
@@ -540,3 +540,76 @@ async def test_list_requests_5xx_is_unavailable() -> None:
 
     with pytest.raises(UpstreamUnavailable):
         await _media_client(handler).list_requests(7)
+
+
+@pytest.mark.parametrize(
+    "media_type,is_4k,permission,allowed",
+    [
+        ("movie", False, 2, True),
+        ("tv", True, 2, True),
+        ("movie", False, 32, True),
+        ("tv", False, 32, True),
+        ("movie", False, 262144, True),
+        ("tv", False, 262144, False),
+        ("tv", False, 524288, True),
+        ("movie", False, 524288, False),
+        ("movie", True, 1024, True),
+        ("tv", True, 1024, True),
+        ("movie", True, 2048, True),
+        ("tv", True, 2048, False),
+        ("tv", True, 4096, True),
+        ("movie", True, 4096, False),
+        ("movie", False, 16, False),
+        ("tv", True, 16, False),
+        ("movie", True, 32, False),
+        ("movie", False, 1024, False),
+    ],
+)
+def test_native_request_permission_matrix(
+    media_type: MediaType, is_4k: bool, permission: int, allowed: bool
+) -> None:
+    from tasterr.clients.seerr import SeerrUser
+
+    assert SeerrUser(id=99, permissions=permission).can_request(media_type, is_4k=is_4k) is allowed
+
+
+@pytest.mark.parametrize("permission,allowed", [(2, True), (16, True), (8192, True), (32, False)])
+def test_native_advanced_permission(permission: int, allowed: bool) -> None:
+    from tasterr.clients.seerr import SeerrUser
+
+    assert SeerrUser(id=99, permissions=permission).can_override is allowed
+
+
+async def test_user_permission_read_is_scoped_and_rejects_identity_mismatch() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/user/99"
+        assert request.headers["x-api-key"] == "key"
+        assert "cookie" not in request.headers
+        return httpx.Response(200, json={"id": 98, "permissions": 2})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(UpstreamUnavailable):
+            await SeerrClient(http, "http://seerr", "key").user(99)
+
+
+@pytest.mark.parametrize("media_type", ["movie", "tv"])
+async def test_4k_payload_and_result_use_selected_variant(media_type: MediaType) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.read())
+        assert payload == {
+            "mediaType": media_type,
+            "mediaId": 42,
+            "is4k": True,
+            **({"seasons": "all"} if media_type == "tv" else {}),
+        }
+        assert request.headers["cookie"] == "connect.sid=member"
+        assert "x-api-key" not in request.headers
+        return httpx.Response(201, json={"media": {"status": 5, "status4k": 2}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        assert (
+            await SeerrClient(http, "http://seerr", "key").create_request(
+                "connect.sid=member", media_type, 42, is_4k=True
+            )
+            == 2
+        )

@@ -42,8 +42,18 @@ function Harness({ items }: { items: MediaSummary[] }) {
 test("hydrates badges from one deduped batch call after rendering", async () => {
 	const bodies: unknown[] = [];
 	const map: AvailabilityMap = {
-		"movie:1": { status: "available", known: true },
-		"movie:2": { status: "not_requested", known: true },
+		"movie:1": {
+			status: "available",
+			known: true,
+			regular_status: "available",
+			four_k_status: "not_requested",
+		},
+		"movie:2": {
+			status: "not_requested",
+			known: true,
+			regular_status: "not_requested",
+			four_k_status: "not_requested",
+		},
 	};
 	vi.stubGlobal(
 		"fetch",

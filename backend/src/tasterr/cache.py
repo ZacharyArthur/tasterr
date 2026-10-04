@@ -56,6 +56,15 @@ class Cache:
         # is collected — bounded without a maxsize, and never evicted while in use.
         self._locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
+    async def invalidate(self, key: str) -> None:
+        lock = self._locks.get(key)
+        if lock is None:
+            self._values.pop(key, None)
+        else:
+            # Wait for an older loader before removing the value it may store.
+            async with lock:
+                self._values.pop(key, None)
+
     async def cached(self, key: str, opts: CacheOpts, loader: Callable[[], Awaitable[T]]) -> T:
         entry = self._values.get(key)
         if entry is not None and time.monotonic() - entry.stored_at < opts.ttl:

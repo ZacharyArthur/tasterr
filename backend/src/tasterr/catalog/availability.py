@@ -55,18 +55,28 @@ class Availability(BaseModel):
 
     status: AvailabilityStatus
     known: bool
+    regular_status: AvailabilityStatus = "not_requested"
+    four_k_status: AvailabilityStatus = "not_requested"
     playback: PlaybackLinks | None = None
 
 
-UNKNOWN = Availability(status="unknown", known=False)
+UNKNOWN = Availability(
+    status="unknown", known=False, regular_status="unknown", four_k_status="unknown"
+)
 NOT_REQUESTED = Availability(status="not_requested", known=True)
 
 
-def availability_from_code(code: int) -> Availability:
+def availability_from_code(code: int, *, is_4k: bool = False) -> Availability:
     """Map a Seerr MediaStatus code to a *known* Availability. Unmapped codes fall
     back to not-requested (actionable as a request), never to Unknown — Unknown is
     reserved for an unreachable Seerr."""
-    return Availability(status=_CODE_TO_STATUS.get(code, "not_requested"), known=True)
+    status = _CODE_TO_STATUS.get(code, "not_requested")
+    return Availability(
+        status=status,
+        known=True,
+        regular_status="not_requested" if is_4k else status,
+        four_k_status=status if is_4k else "not_requested",
+    )
 
 
 def to_availability(media_info: SeerrMediaInfo | None) -> Availability:
@@ -86,7 +96,13 @@ def to_availability(media_info: SeerrMediaInfo | None) -> Availability:
         else None
     )
     playback = PlaybackLinks(regular=regular, four_k=four_k) if regular or four_k else None
-    return availability.model_copy(update={"playback": playback})
+    return availability.model_copy(
+        update={
+            "regular_status": _CODE_TO_STATUS.get(media_info.status, "not_requested"),
+            "four_k_status": _CODE_TO_STATUS.get(media_info.status_4k, "not_requested"),
+            "playback": playback,
+        }
+    )
 
 
 def _playback_variant(web_url: str | None, app_url: str | None) -> PlaybackVariant | None:

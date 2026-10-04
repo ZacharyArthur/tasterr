@@ -11,6 +11,7 @@ Seerr 3.3.0 (docs/SEERR-AUTH-SPIKE.md).
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import IntFlag
 from typing import Literal
 
 import httpx
@@ -30,6 +31,18 @@ MEDIA_STATUS_PENDING = 2
 _SERVICE_BY_MEDIA_TYPE: dict[MediaType, str] = {"movie": "radarr", "tv": "sonarr"}
 
 
+class SeerrPermission(IntFlag):
+    ADMIN = 2
+    MANAGE_REQUESTS = 16
+    REQUEST = 32
+    REQUEST_4K = 1024
+    REQUEST_4K_MOVIE = 2048
+    REQUEST_4K_TV = 4096
+    REQUEST_ADVANCED = 8192
+    REQUEST_MOVIE = 262144
+    REQUEST_TV = 524288
+
+
 class SeerrUser(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -38,7 +51,34 @@ class SeerrUser(BaseModel):
     plex_username: str | None = Field(default=None, alias="plexUsername")
     email: str | None = None
     avatar: str | None = None
-    permissions: int = 0
+    permissions: int = Field(default=0, ge=0)
+
+    def can_request(self, media_type: MediaType, *, is_4k: bool = False) -> bool:
+        # Seerr 3.3.0: Manage Requests grants advanced controls, not requesting.
+        if is_4k:
+            mask = SeerrPermission.REQUEST_4K | (
+                SeerrPermission.REQUEST_4K_MOVIE
+                if media_type == "movie"
+                else SeerrPermission.REQUEST_4K_TV
+            )
+        else:
+            mask = SeerrPermission.REQUEST | (
+                SeerrPermission.REQUEST_MOVIE
+                if media_type == "movie"
+                else SeerrPermission.REQUEST_TV
+            )
+        return bool(self.permissions & (SeerrPermission.ADMIN | mask))
+
+    @property
+    def can_override(self) -> bool:
+        return bool(
+            self.permissions
+            & (
+                SeerrPermission.ADMIN
+                | SeerrPermission.MANAGE_REQUESTS
+                | SeerrPermission.REQUEST_ADVANCED
+            )
+        )
 
     @property
     def resolved_display_name(self) -> str:
@@ -169,6 +209,7 @@ class SeerrServer(BaseModel):
     id: int
     name: str
     is_default: bool = Field(default=False, alias="isDefault")
+    is_4k: bool = Field(default=False, alias="is4k")
     active_profile_id: int = Field(default=0, alias="activeProfileId")
     active_directory: str = Field(default="", alias="activeDirectory")
 
@@ -244,6 +285,26 @@ class SeerrClient:
             return _SeerrTitle.model_validate(response.json()).media_info
         except ValueError as error:
             raise UpstreamUnavailable("unexpected seerr response shape") from error
+
+    async def user(self, user_id: int) -> SeerrUser:
+        """Fresh capabilities from a server-derived user id, using the read key."""
+        try:
+            response = await self._http.get(
+                f"{self._base}/api/v1/user/{user_id}",
+                headers={"X-Api-Key": self._api_key, "Accept": "application/json"},
+                timeout=SEERR_TIMEOUT_SECONDS,
+            )
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
+        if response.status_code >= 400:
+            raise UpstreamUnavailable("seerr user read failed")
+        try:
+            user = SeerrUser.model_validate(response.json())
+        except ValueError as error:
+            raise UpstreamUnavailable("unexpected seerr response shape") from error
+        if user.id != user_id:
+            raise UpstreamUnavailable("unexpected seerr user identity")
+        return user
 
     async def list_servers(self, media_type: MediaType) -> list[SeerrServer]:
         """Every configured destination for this media type (`radarr` for movies,
@@ -333,12 +394,13 @@ class SeerrClient:
         media_type: MediaType,
         tmdb_id: int,
         *,
+        is_4k: bool = False,
         server_id: int | None = None,
         profile_id: int | None = None,
         root_folder: str | None = None,
     ) -> int:
         """Create a request attributed to the member (their cookie only — never the
-        global key). A TV title requests the whole series at the default quality.
+        global key). A TV title requests the whole series in the selected variant.
         When given, `server_id`/`profile_id`/`root_folder` select a non-default
         destination (the caller validates these against the title's real
         destinations first — this method forwards them as-is). Returns the
@@ -347,6 +409,8 @@ class SeerrClient:
         UpstreamRejected for other 4xx, UpstreamUnavailable for transport/5xx."""
         url = f"{self._base}/api/v1/request"
         payload: dict[str, object] = {"mediaType": media_type, "mediaId": tmdb_id}
+        if is_4k:
+            payload["is4k"] = True
         if media_type == "tv":
             payload["seasons"] = "all"
         if server_id is not None:
@@ -370,7 +434,10 @@ class SeerrClient:
             result = _SeerrRequestResult.model_validate(response.json())
         except ValueError:
             return MEDIA_STATUS_PENDING  # accepted; unparseable body → assume pending
-        return result.media.status if result.media is not None else MEDIA_STATUS_PENDING
+        if result.media is None:
+            return MEDIA_STATUS_PENDING
+        code = result.media.status_4k if is_4k else result.media.status
+        return code if code >= 2 else MEDIA_STATUS_PENDING
 
 
 def _historical_request(row: _SeerrHistoryRow) -> SeerrHistoricalRequest | None:

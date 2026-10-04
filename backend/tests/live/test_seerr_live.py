@@ -56,6 +56,7 @@ API_KEY = os.environ.get("TASTERR_LIVE_SEERR_API_KEY", "")
 AVAILABLE_TMDB_ID = os.environ.get("TASTERR_LIVE_AVAILABLE_TMDB_ID", "")
 PLEX_TOKEN = os.environ.get("TASTERR_LIVE_PLEX_TOKEN", "")
 REQUEST_TMDB_ID = os.environ.get("TASTERR_LIVE_REQUEST_TMDB_ID", "")
+REQUEST_4K_TMDB_ID = os.environ.get("TASTERR_LIVE_REQUEST_4K_TMDB_ID", "")
 
 # A stable, always-known movie (Fight Club) for the read smoke test.
 KNOWN_MOVIE_TMDB_ID = 550
@@ -97,10 +98,14 @@ class _CleanupMedia(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     tmdb_id: int | None = Field(default=None, alias="tmdbId")
+    media_type: str = Field(default="", alias="mediaType")
 
 
 class _CleanupRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: int
+    is_4k: bool = Field(alias="is4k")
     media: _CleanupMedia | None = None
 
 
@@ -108,7 +113,9 @@ class _CleanupPage(BaseModel):
     results: list[_CleanupRequest]
 
 
-async def _request_id_for_title(http: httpx.AsyncClient, user_id: int, tmdb_id: int) -> int | None:
+async def _request_id_for_title(
+    http: httpx.AsyncClient, user_id: int, tmdb_id: int, *, is_4k: bool = False
+) -> int | None:
     response = await http.get(
         f"{URL}/api/v1/request",
         params={"take": 50, "skip": 0, "requestedBy": user_id, "sort": "added"},
@@ -117,7 +124,12 @@ async def _request_id_for_title(http: httpx.AsyncClient, user_id: int, tmdb_id: 
     response.raise_for_status()
     page = _CleanupPage.model_validate(response.json())
     for row in page.results:
-        if row.media is not None and row.media.tmdb_id == tmdb_id:
+        if (
+            row.media is not None
+            and row.media.tmdb_id == tmdb_id
+            and row.media.media_type == "movie"
+            and row.is_4k == is_4k
+        ):
             return row.id
     return None
 
@@ -128,10 +140,11 @@ async def _delete_request_and_verify(
     user_id: int,
     tmdb_id: int,
     request_id: int | None,
+    *,
+    is_4k: bool = False,
 ) -> None:
-    client = SeerrClient(http, URL, API_KEY)
     for _ in range(5):
-        request_id = request_id or await _request_id_for_title(http, user_id, tmdb_id)
+        request_id = request_id or await _request_id_for_title(http, user_id, tmdb_id, is_4k=is_4k)
         if request_id is not None:
             deleted = await http.delete(
                 f"{URL}/api/v1/request/{request_id}", headers={"Cookie": cookie}
@@ -139,8 +152,7 @@ async def _delete_request_and_verify(
             assert deleted.status_code in (200, 204, 404)
             request_id = None
 
-        history = await client.list_requests(user_id)
-        if all(item.tmdb_id != tmdb_id for item in history):
+        if await _request_id_for_title(http, user_id, tmdb_id, is_4k=is_4k) is None:
             return
         await asyncio.sleep(1)
     pytest.fail("disposable live request remained after cleanup")
@@ -334,56 +346,74 @@ async def test_request_as_user_attribution_and_cleanup() -> None:
 
 
 @requires_request
-async def test_request_destination_override_lands_on_chosen_destination() -> None:
-    """request-destination-override's live bar: an explicit server/profile/
-    root-folder override is accepted by Seerr and the resulting request carries
-    it — not just that a plain default-destination request still works. Reuses
-    the operator's real configured destination(s) rather than a new env var;
-    skips if the account has none configured for movies. Same invasive
-    create-then-verify-cleanup shape as the base attribution test."""
-    tmdb_id = int(REQUEST_TMDB_ID)
+@pytest.mark.parametrize("is_4k", [False, True])
+async def test_request_destination_override_stores_chosen_destination(is_4k: bool) -> None:
+    """Opt-in persistence contract; downstream delivery remains operator-verified.
+
+    The separate 4K title is disposable too: deleting a request does not undo
+    an autoapproved download. Administrator rules can rewrite supplied choices.
+    """
+    if is_4k and not REQUEST_4K_TMDB_ID:
+        pytest.skip("TASTERR_LIVE_REQUEST_4K_TMDB_ID not set")
+    tmdb_id = int(REQUEST_4K_TMDB_ID if is_4k else REQUEST_TMDB_ID)
     async with httpx.AsyncClient(timeout=10.0) as http:
+        version_response = await http.get(f"{URL}/api/v1/status")
+        version_response.raise_for_status()
+        version = version_response.json().get("version")
+        assert isinstance(version, str)
+        print(f"\nSeerr version tested: {version}")
+        login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
+        if not login.user.can_override or not login.user.can_request("movie", is_4k=is_4k):
+            pytest.skip("operator account lacks variant or advanced permission")
         client = SeerrClient(http, URL, API_KEY)
-        servers = await client.list_servers("movie")
+        servers = [server for server in await client.list_servers("movie") if server.is_4k == is_4k]
         if not servers:
-            pytest.skip("operator account has no configured movie destinations")
-        server = next((s for s in servers if s.is_default), servers[0])
+            pytest.skip("operator has no configured destination for this variant")
+        server = next((server for server in servers if not server.is_default), servers[0])
         detail = await client.server_destinations("movie", server.id)
         if not detail.profiles or not detail.root_folders:
-            pytest.skip("chosen destination has no profiles/root folders to select")
-        profile_id = detail.profiles[0].id
-        root_folder = detail.root_folders[0].path
-
-        login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
+            pytest.skip("chosen destination has no profiles/root folders")
+        profile = next(
+            (p for p in detail.profiles if p.id != server.active_profile_id), detail.profiles[0]
+        )
+        folder = next(
+            (f for f in detail.root_folders if f.path != server.active_directory),
+            detail.root_folders[0],
+        )
         info = await client.media_status("movie", tmdb_id)
-        availability = to_availability(info)
-        assert availability.status == "not_requested"
-        assert availability.known
+        code = (info.status_4k if is_4k else info.status) if info else 0
+        assert code not in (2, 3, 4, 5), "disposable title variant must be unrequested"
 
-        created_may_have_succeeded = False
         request_id: int | None = None
         try:
-            created = await http.post(
-                f"{URL}/api/v1/request",
-                headers={"Cookie": login.cookie},
-                json={
-                    "mediaType": "movie",
-                    "mediaId": tmdb_id,
-                    "serverId": server.id,
-                    "profileId": profile_id,
-                    "rootFolder": root_folder,
-                },
+            await client.create_request(
+                login.cookie,
+                "movie",
+                tmdb_id,
+                is_4k=is_4k,
+                server_id=server.id,
+                profile_id=profile.id,
+                root_folder=folder.path,
             )
-            created_may_have_succeeded = created.is_success
-            assert created.status_code in (200, 201)
-            payload = created.json()
-            candidate_id = payload.get("id")
-            if isinstance(candidate_id, int):
-                request_id = candidate_id
-            assert request_id is not None
-            assert payload["requestedBy"]["id"] == login.user.id
+            request_id = await _request_id_for_title(http, login.user.id, tmdb_id, is_4k=is_4k)
+            assert request_id is not None, "created request must be visible in member history"
+            saved = await http.get(
+                f"{URL}/api/v1/request/{request_id}", headers={"X-Api-Key": API_KEY}
+            )
+            saved.raise_for_status()
+            payload = saved.json()
+            if payload["requestedBy"]["id"] != login.user.id:
+                pytest.fail("stored request attribution differs")
+            if payload["is4k"] is not is_4k:
+                pytest.fail("stored request variant differs")
+            if payload["serverId"] != server.id:
+                pytest.fail("stored request server differs; administrator rules may rewrite it")
+            if payload["profileId"] != profile.id:
+                pytest.fail("stored request profile differs; administrator rules may rewrite it")
+            if payload["rootFolder"] != folder.path:
+                pytest.fail("stored request folder differs; administrator rules may rewrite it")
         finally:
-            if created_may_have_succeeded:
-                await _delete_request_and_verify(
-                    http, login.cookie, login.user.id, tmdb_id, request_id
-                )
+            # A timeout can occur after creation; lookup/cleanup must still run.
+            await _delete_request_and_verify(
+                http, login.cookie, login.user.id, tmdb_id, request_id, is_4k=is_4k
+            )

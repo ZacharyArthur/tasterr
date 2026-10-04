@@ -82,7 +82,14 @@ test("shows the availability badge for the current slide", () => {
 	render(
 		<MemoryRouter>
 			<AvailabilityContext.Provider
-				value={{ "movie:1": { status: "available", known: true } }}
+				value={{
+					"movie:1": {
+						status: "available",
+						known: true,
+						regular_status: "available",
+						four_k_status: "not_requested",
+					},
+				}}
 			>
 				<Hero slides={[slide(1, "First"), slide(2, "Second")]} />
 			</AvailabilityContext.Provider>
@@ -98,8 +105,18 @@ test("updates the badge as the hero rotates to the next slide", () => {
 		<MemoryRouter>
 			<AvailabilityContext.Provider
 				value={{
-					"movie:1": { status: "available", known: true },
-					"movie:2": { status: "pending", known: true },
+					"movie:1": {
+						status: "available",
+						known: true,
+						regular_status: "available",
+						four_k_status: "not_requested",
+					},
+					"movie:2": {
+						status: "pending",
+						known: true,
+						regular_status: "pending",
+						four_k_status: "not_requested",
+					},
 				}}
 			>
 				<Hero slides={[slide(1, "First"), slide(2, "Second")]} />

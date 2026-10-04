@@ -115,6 +115,8 @@ def test_batch_returns_a_status_per_title(tmp_path: Path) -> None:
         "movie:1": {
             "status": "available",
             "known": True,
+            "regular_status": "available",
+            "four_k_status": "not_requested",
             "playback": {
                 "regular": {
                     "web_url": "https://app.plex.tv/desktop/#!/details",
@@ -128,7 +130,13 @@ def test_batch_returns_a_status_per_title(tmp_path: Path) -> None:
                 "four_k": None,
             },
         },
-        "movie:2": {"status": "not_requested", "known": True, "playback": None},
+        "movie:2": {
+            "status": "not_requested",
+            "known": True,
+            "regular_status": "not_requested",
+            "four_k_status": "not_requested",
+            "playback": None,
+        },
     }
 
 
@@ -149,8 +157,20 @@ def test_one_unresolved_title_does_not_fail_the_batch(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["movie:1"] == {"status": "available", "known": True, "playback": None}
-    assert body["movie:3"] == {"status": "unknown", "known": False, "playback": None}
+    assert body["movie:1"] == {
+        "status": "available",
+        "known": True,
+        "regular_status": "available",
+        "four_k_status": "not_requested",
+        "playback": None,
+    }
+    assert body["movie:3"] == {
+        "status": "unknown",
+        "known": False,
+        "regular_status": "unknown",
+        "four_k_status": "unknown",
+        "playback": None,
+    }
 
 
 def test_unconfigured_seerr_yields_unknown_without_a_call(tmp_path: Path) -> None:
@@ -166,8 +186,20 @@ def test_unconfigured_seerr_yields_unknown_without_a_call(tmp_path: Path) -> Non
 
     assert response.status_code == 200
     assert response.json() == {
-        "movie:1": {"status": "unknown", "known": False, "playback": None},
-        "tv:2": {"status": "unknown", "known": False, "playback": None},
+        "movie:1": {
+            "status": "unknown",
+            "known": False,
+            "regular_status": "unknown",
+            "four_k_status": "unknown",
+            "playback": None,
+        },
+        "tv:2": {
+            "status": "unknown",
+            "known": False,
+            "regular_status": "unknown",
+            "four_k_status": "unknown",
+            "playback": None,
+        },
     }
 
 

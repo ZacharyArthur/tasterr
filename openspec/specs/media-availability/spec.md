@@ -1,8 +1,11 @@
 # media-availability Specification
 
 ## Purpose
-TBD - created by archiving change m3-seerr. Update Purpose after archive.
+Expose secret-free library and variant availability, degrade safely during
+Seerr outages, and carry validated playback links for household browsing.
+
 ## Requirements
+
 ### Requirement: Seerr availability reads are isolated behind the client boundary
 
 The system SHALL perform all Seerr availability reads through the single Seerr
@@ -55,6 +58,16 @@ settings module.
 
 - **WHEN** availability cannot be resolved because Seerr is unreachable
 - **THEN** the status is Unknown with `known` false
+
+The model SHALL expose regular_status and four_k_status independently, preserving the existing highest-fulfillment aggregate status and separately validated playback. Missing media SHALL mark both variants not_requested; unreachable media SHALL mark both unknown.
+
+#### Scenario: Available standard variant does not hide missing 4K
+- **WHEN** standard is available and 4K is absent
+- **THEN** aggregate and regular status are available while four_k_status is not_requested
+
+#### Scenario: Separate requested variants
+- **WHEN** only one variant is pending
+- **THEN** only its variant status is pending and the other remains not_requested
 
 ### Requirement: Availability reads are cached and degrade to Unknown
 
@@ -211,4 +224,3 @@ it SHALL remain excluded from `just check` and CI.
 
 - **WHEN** `just check` runs
 - **THEN** no live playback-link contract executes
-

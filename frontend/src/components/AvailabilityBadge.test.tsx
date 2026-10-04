@@ -6,7 +6,12 @@ import { AvailabilityBadge } from "./AvailabilityBadge";
 afterEach(cleanup);
 
 function av(status: Availability["status"], known = true): Availability {
-	return { status, known };
+	return {
+		status,
+		known,
+		regular_status: status,
+		four_k_status: known ? "not_requested" : "unknown",
+	};
 }
 
 test("labels available and requested states", () => {

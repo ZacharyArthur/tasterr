@@ -12,9 +12,8 @@ Radarr/Sonarr-specific shapes it doesn't otherwise need.
 `service/{radarr|sonarr}` (list) and `service/{radarr|sonarr}/{id}` (profiles +
 root folders) endpoints, authenticated with the **global** key — this is
 household configuration metadata (what destinations exist), not a per-user
-action, same reasoning the existing availability read already uses. The `{id}`
-path param is accepted only to decide movie vs. TV dispatch (`radarr` vs.
-`sonarr`); it is not otherwise used in the destination call.
+action, same reasoning the existing availability read already uses. The `{type}` path parameter decides Radarr versus Sonarr dispatch. The bounded
+`{id}` preserves the validated title route shape and is otherwise unused.
 
 **The override is validated server-side against that title's real destinations,
 not merely type-checked.** `POST /api/v1/request` already validates `media_type`/
@@ -22,10 +21,10 @@ not merely type-checked.** `POST /api/v1/request` already validates `media_type`
 through an additional check — re-fetch (or reuse an in-request cache of) that
 title's destinations and reject an override that doesn't match a real
 server/profile/folder combination for it, rather than forwarding whatever the
-client sent straight to Seerr. This is strictly a correctness/defense-in-depth
-check (Seerr would itself reject a nonsensical id), but it keeps the request
-endpoint consistent with the rest of `media-requests`: inputs are validated
-before any upstream effect, not after.
+client sent straight to Seerr. Seerr stores unknown server ids and can fail only during dispatch, so this
+validation prevents silently failed requests. Shape errors are rejected before
+reads; destination membership is checked before request creation. Failed reads
+retain the generic request failure and configured redirect fallback.
 
 **Omitting all three override fields is byte-for-byte today's request body** —
 the existing `media-requests` behavior, tests, and the live contract test for
@@ -61,8 +60,8 @@ new client-rendered HTML).
   for anything filesystem-adjacent on Tasterr's own side, it is only ever
   forwarded to Seerr as a JSON field).
 - An override that doesn't match a real destination for that title is rejected
-  (`422`) **before** any Seerr call, same as the existing out-of-range
-  `tmdb_id` requirement — no wasted upstream call, no partial state.
+  (`422`) before any Seerr request creation. Shape validation occurs before
+  reads; membership validation requires configuration reads.
 - Everything else about the endpoint (auth, CSRF, rate limit, re-auth ladder,
   redirect fallback, error shape) is unchanged by this addition.
 
@@ -85,3 +84,11 @@ matching the existing generic-error convention.
 
 None — reuses `httpx` and the existing typed-client/response-model patterns
 already in `clients/seerr.py` and `api/request.py`.
+
+
+## Review revision
+
+Superseded in this PR by `request-variants-and-review-fixes`: discovery is
+permission-scoped, Standard/4K variants are explicit, and unchanged confirmation
+uses Seerr defaults (including anime defaults). Upstream administrator rules remain
+authoritative; stored request fields do not prove actual downstream delivery.

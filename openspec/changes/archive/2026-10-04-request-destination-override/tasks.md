@@ -11,7 +11,7 @@
 - [x] 1.2 `clients/seerr.py`: add `server_destinations(media_type, server_id)` —
       `GET /api/v1/service/{radarr|sonarr}/{server_id}` parsed into a typed
       profiles + root-folders model. Tests: 200 parse, unknown server id → typed
-      not-found, `5xx`/timeout → typed upstream error.
+      upstream-unavailable, `5xx`/timeout → typed upstream error.
 
 ## 2. Destinations API endpoint
 
@@ -36,7 +36,7 @@
       if the combination doesn't match a real server/profile/root-folder for
       it — no Seerr call on a rejected override. Tests: valid override is
       accepted and forwarded, an override not present in that title's real
-      destinations is rejected before any Seerr call, all-omitted override
+      destinations is rejected before any Seerr request creation, all-omitted override
       behaves byte-for-byte as today (existing tests still pass unmodified).
 - [x] 3.2 `clients/seerr.py`: extend `create_request` to accept the optional
       `server_id`/`profile_id`/`root_folder` and include Seerr's
@@ -63,8 +63,14 @@
 
 ## 5. Spec, contract coverage, and gate
 
-- [x] 5.1 Live-marked contract test (excluded from `just check`) confirming a
-      real request with an explicit server/profile/root-folder override lands
-      on that exact destination in Seerr; record the Seerr version tested
-      (reuse the pinned version from the existing live request test).
+- [x] 5.1 Add a live-marked contract test (excluded from `just check`) that, when
+      operator-run, verifies stored server/profile/root-folder fields and
+      records the observed Seerr version. Execution remains opt-in.
 - [x] 5.2 Run `just check` and fix any failures.
+
+
+Review evidence correction: the initial live test did not assert destination
+fields and was not run against a household instance. The supplemental
+request-variants-and-review-fixes change replaces it with production-client
+persistence assertions, version recording, and optional 4K coverage. Downstream
+delivery remains operator-verified.
