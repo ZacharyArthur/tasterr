@@ -9,8 +9,9 @@ and maintain. Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT
 - Use the [issue chooser](https://github.com/ZacharyArthur/tasterr/issues/new/choose)
   for bug reports and feature requests.
 - Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
-- Open a feature request before investing in a substantial change so its scope can
-  be agreed first.
+- For substantial changes, consider opening a feature request to discuss scope
+  before investing in implementation. Prior discussion is encouraged, but is not
+  required to begin work or open a pull request.
 
 ## Development environment
 
@@ -38,10 +39,10 @@ just check        # full required quality gate
 ## Change workflow
 
 New features, behavior changes, and architecture decisions require an OpenSpec change
-under `openspec/changes/` before implementation. Start with a feature request; after
-its scope is agreed, the maintainer will coordinate the OpenSpec artifacts. Bug fixes
-that restore specified behavior, documentation, chores, and dependency updates do
-not require an OpenSpec change.
+under `openspec/changes/` before implementation. Contributors can prepare the OpenSpec
+artifacts and implementation without prior maintainer approval; the maintainer
+reviews both in the pull request. Bug fixes that restore specified behavior,
+documentation, chores, and dependency updates do not require an OpenSpec change.
 
 Use a focused branch:
 

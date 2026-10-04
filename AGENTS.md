@@ -124,9 +124,3 @@ dependencies). Walk the relevant checklist whenever touching `api/`, `auth/`,
 - Tests accompany behavior, especially: recommendation math, auth/session lifecycle,
   boundary contracts, config scrubbing.
 - Match surrounding style; comments only for constraints the code can't express.
-
-## Reference
-
-[janpuc/browserr](https://github.com/janpuc/browserr) — the Next.js predecessor this
-project is a clean rebuild of — may be consulted for UX patterns, API shapes, and
-client resilience patterns. **Consult, don't port.**
