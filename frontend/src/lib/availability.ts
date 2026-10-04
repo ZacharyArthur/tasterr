@@ -10,10 +10,12 @@ import {
 	type AvailabilityMap,
 	createRequest,
 	getConfig,
+	getDestinations,
 	type MediaDetail,
 	type MediaSummary,
 	type MediaType,
 	postAvailability,
+	type RequestDestinationOverride,
 } from "./api";
 import { captureSession, isSessionCurrent } from "./auth";
 
@@ -78,10 +80,22 @@ export function isRequestable(
 	);
 }
 
+/** A title's available request destinations. Only worth showing an "Advanced"
+ * picker when this resolves to more than one — most titles have exactly one
+ * (or zero, when Seerr isn't configured), and the mutation defaults to it. */
+export function useDestinations(type: MediaType, id: number) {
+	return useQuery({
+		queryKey: ["destinations", type, id],
+		queryFn: () => getDestinations(type, id),
+		staleTime: 60_000,
+	});
+}
+
 export function useRequest(type: MediaType, id: number) {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: () => createRequest(type, id),
+		mutationFn: (destination?: RequestDestinationOverride) =>
+			createRequest(type, id, destination),
 		onMutate: () => captureSession(queryClient),
 		onSuccess: (response, _variables, sessionEpoch) => {
 			if (!isSessionCurrent(queryClient, sessionEpoch)) return;

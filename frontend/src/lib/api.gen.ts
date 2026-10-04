@@ -277,6 +277,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/{media_type}/{tmdb_id}/destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Destinations */
+        get: operations["get_destinations_api_v1__media_type___tmdb_id__destinations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/request": {
         parameters: {
             query?: never;
@@ -462,6 +479,20 @@ export interface components {
             ok: boolean;
             /** Detail */
             detail: string;
+        };
+        /** DestinationProfile */
+        DestinationProfile: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /** DestinationRootFolder */
+        DestinationRootFolder: {
+            /** Id */
+            id: number;
+            /** Path */
+            path: string;
         };
         /** ExplainResponse */
         ExplainResponse: {
@@ -778,6 +809,29 @@ export interface components {
             media_type: "movie" | "tv";
             /** Tmdb Id */
             tmdb_id: number;
+            /** Server Id */
+            server_id?: number | null;
+            /** Profile Id */
+            profile_id?: number | null;
+            /** Root Folder */
+            root_folder?: string | null;
+        };
+        /** RequestDestination */
+        RequestDestination: {
+            /** Server Id */
+            server_id: number;
+            /** Server Name */
+            server_name: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Default Profile Id */
+            default_profile_id: number;
+            /** Default Root Folder */
+            default_root_folder: string;
+            /** Quality Profiles */
+            quality_profiles: components["schemas"]["DestinationProfile"][];
+            /** Root Folders */
+            root_folders: components["schemas"]["DestinationRootFolder"][];
         };
         /**
          * RequestResponse
@@ -1454,6 +1508,38 @@ export interface operations {
                     "application/json": {
                         [key: string]: components["schemas"]["Availability"];
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_destinations_api_v1__media_type___tmdb_id__destinations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                media_type: "movie" | "tv";
+                tmdb_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestDestination"][];
                 };
             };
             /** @description Validation Error */

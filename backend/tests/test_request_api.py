@@ -222,6 +222,127 @@ def test_no_external_url_means_no_link(tmp_path: Path) -> None:
     assert SEERR_URL not in response.text  # internal URL never leaks
 
 
+# ── Destination override (request-destination-override) ─────────────────────
+
+SERVER_FIXTURE = {
+    "id": 0,
+    "name": "radarr",
+    "isDefault": True,
+    "activeDirectory": "/movies",
+    "activeProfileId": 7,
+}
+DESTINATIONS_FIXTURE = {
+    "server": SERVER_FIXTURE,
+    "profiles": [{"id": 7, "name": "HD Bluray + WEB"}, {"id": 4, "name": "HD-1080p"}],
+    "rootFolders": [
+        {"id": 1, "freeSpace": 1, "path": "/movies"},
+        {"id": 2, "freeSpace": 1, "path": "/new releases"},
+    ],
+}
+
+
+def _destinations_handler(
+    request_response: httpx.Response,
+) -> tuple[Callable[[httpx.Request], httpx.Response], list[str]]:
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/api/v1/service/radarr":
+            return httpx.Response(200, json=[SERVER_FIXTURE])
+        if request.url.path == "/api/v1/service/radarr/0":
+            return httpx.Response(200, json=DESTINATIONS_FIXTURE)
+        if request.url.path == "/api/v1/request":
+            return request_response
+        raise AssertionError(f"unexpected path {request.url.path}")
+
+    return handler, paths
+
+
+def test_valid_override_is_forwarded_to_seerr(tmp_path: Path) -> None:
+    handler, paths = _destinations_handler(httpx.Response(201, json={"media": {"status": 2}}))
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={
+                **_body(),
+                "server_id": 0,
+                "profile_id": 4,
+                "root_folder": "/new releases",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert "/api/v1/request" in paths  # the override validated, then the request proceeded
+
+
+def test_override_not_matching_a_real_destination_is_rejected(tmp_path: Path) -> None:
+    handler, paths = _destinations_handler(httpx.Response(201, json={"media": {"status": 2}}))
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={**_body(), "server_id": 0, "profile_id": 999, "root_folder": "/movies"},
+        )
+
+    assert response.status_code == 422
+    assert "/api/v1/request" not in paths  # rejected before any Seerr request call
+
+
+def test_unknown_server_override_is_rejected(tmp_path: Path) -> None:
+    handler, paths = _destinations_handler(httpx.Response(201, json={"media": {"status": 2}}))
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post(
+            "/api/v1/request",
+            json={**_body(), "server_id": 9, "profile_id": 7, "root_folder": "/movies"},
+        )
+
+    assert response.status_code == 422
+    assert "/api/v1/request" not in paths
+
+
+def test_partial_override_is_rejected_without_a_destinations_call(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        raise AssertionError("no call expected for a partial override")
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body(), "server_id": 0})
+
+    assert response.status_code == 422
+    assert calls == []  # rejected on shape alone, before any upstream call
+
+
+def test_omitted_override_matches_prior_behavior_exactly(tmp_path: Path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/request"
+        assert json.loads(request.read()) == {"mediaType": "movie", "mediaId": 42}
+        return httpx.Response(201, json={"media": {"status": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json=_body())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
 # ── The 403 re-auth ladder ───────────────────────────────────────────────────
 
 

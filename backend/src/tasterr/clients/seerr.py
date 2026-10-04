@@ -25,6 +25,9 @@ MediaType = Literal["movie", "tv"]
 SEERR_TIMEOUT_SECONDS = 5.0
 # A freshly created request is pending until Seerr's response says otherwise.
 MEDIA_STATUS_PENDING = 2
+# Seerr's service-discovery endpoints are per-*arr-app, not per-media-type —
+# movies route to Radarr, TV to Sonarr.
+_SERVICE_BY_MEDIA_TYPE: dict[MediaType, str] = {"movie": "radarr", "tv": "sonarr"}
 
 
 class SeerrUser(BaseModel):
@@ -144,6 +147,42 @@ class _SeerrHistoryPage(BaseModel):
     results: list[_SeerrHistoryRow] = []
 
 
+class SeerrQualityProfile(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+
+
+class SeerrRootFolder(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    path: str
+
+
+class SeerrServer(BaseModel):
+    """One configured Radarr/Sonarr server entry (`service/{radarr|sonarr}`)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    id: int
+    name: str
+    is_default: bool = Field(default=False, alias="isDefault")
+    active_profile_id: int = Field(default=0, alias="activeProfileId")
+    active_directory: str = Field(default="", alias="activeDirectory")
+
+
+class SeerrServerDetail(BaseModel):
+    """A server's available destinations (`service/{radarr|sonarr}/{id}`)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    server: SeerrServer
+    profiles: list[SeerrQualityProfile] = []
+    root_folders: list[SeerrRootFolder] = Field(default=[], alias="rootFolders")
+
+
 @dataclass
 class SeerrHistoricalRequest:
     """One of the member's past requests — the cold-start seed's input."""
@@ -206,6 +245,44 @@ class SeerrClient:
         except ValueError as error:
             raise UpstreamUnavailable("unexpected seerr response shape") from error
 
+    async def list_servers(self, media_type: MediaType) -> list[SeerrServer]:
+        """Every configured destination for this media type (`radarr` for movies,
+        `sonarr` for TV) — household configuration, read with the global key.
+        Raises UpstreamUnavailable on failure so the caller can degrade to an
+        empty destinations list rather than fail the request flow."""
+        service = _SERVICE_BY_MEDIA_TYPE[media_type]
+        url = f"{self._base}/api/v1/service/{service}"
+        headers = {"X-Api-Key": self._api_key, "Accept": "application/json"}
+        try:
+            response = await self._http.get(url, headers=headers, timeout=SEERR_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
+        if response.status_code >= 400:
+            raise UpstreamUnavailable(f"seerr returned {response.status_code}")
+        try:
+            return [SeerrServer.model_validate(item) for item in response.json()]
+        except ValueError as error:
+            raise UpstreamUnavailable("unexpected seerr response shape") from error
+
+    async def server_destinations(self, media_type: MediaType, server_id: int) -> SeerrServerDetail:
+        """A server's available quality profiles and root folders. Raises
+        UpstreamUnavailable (including for an unknown server id, which Seerr
+        reports via a non-2xx) so the caller degrades the same way as any other
+        destinations failure."""
+        service = _SERVICE_BY_MEDIA_TYPE[media_type]
+        url = f"{self._base}/api/v1/service/{service}/{server_id}"
+        headers = {"X-Api-Key": self._api_key, "Accept": "application/json"}
+        try:
+            response = await self._http.get(url, headers=headers, timeout=SEERR_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
+        if response.status_code >= 400:
+            raise UpstreamUnavailable(f"seerr returned {response.status_code}")
+        try:
+            return SeerrServerDetail.model_validate(response.json())
+        except ValueError as error:
+            raise UpstreamUnavailable("unexpected seerr response shape") from error
+
     async def list_requests(self, requested_by: int) -> list[SeerrHistoricalRequest]:
         """The member's request history, newest pages first, capped at
         HISTORY_MAX_ROWS. A read scoped by the explicit `requestedBy` filter,
@@ -250,16 +327,34 @@ class SeerrClient:
         except ValueError as error:
             raise UpstreamUnavailable("unexpected seerr response shape") from error
 
-    async def create_request(self, cookie: str, media_type: MediaType, tmdb_id: int) -> int:
+    async def create_request(
+        self,
+        cookie: str,
+        media_type: MediaType,
+        tmdb_id: int,
+        *,
+        server_id: int | None = None,
+        profile_id: int | None = None,
+        root_folder: str | None = None,
+    ) -> int:
         """Create a request attributed to the member (their cookie only — never the
         global key). A TV title requests the whole series at the default quality.
-        Returns the resulting media-status code. Raises UpstreamRejected(403) for an
+        When given, `server_id`/`profile_id`/`root_folder` select a non-default
+        destination (the caller validates these against the title's real
+        destinations first — this method forwards them as-is). Returns the
+        resulting media-status code. Raises UpstreamRejected(403) for an
         invalid session or denied request (the caller runs the re-auth ladder),
         UpstreamRejected for other 4xx, UpstreamUnavailable for transport/5xx."""
         url = f"{self._base}/api/v1/request"
         payload: dict[str, object] = {"mediaType": media_type, "mediaId": tmdb_id}
         if media_type == "tv":
             payload["seasons"] = "all"
+        if server_id is not None:
+            payload["serverId"] = server_id
+        if profile_id is not None:
+            payload["profileId"] = profile_id
+        if root_folder is not None:
+            payload["rootFolder"] = root_folder
         headers = {"Cookie": cookie, "Accept": "application/json"}
         try:
             response = await self._http.post(

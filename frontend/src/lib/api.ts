@@ -19,6 +19,7 @@ export type MediaType = MediaSummary["media_type"];
 export type Availability = components["schemas"]["Availability"];
 export type AvailabilityStatus = Availability["status"];
 export type RequestResponse = components["schemas"]["RequestResponse"];
+export type RequestDestination = components["schemas"]["RequestDestination"];
 /** Keyed by `"<media_type>:<id>"`, the shape `POST /availability` returns. */
 export type AvailabilityMap = Record<string, Availability>;
 export type SignalKind = components["schemas"]["SignalBody"]["kind"];
@@ -153,6 +154,16 @@ export function getConfig(): Promise<PublicConfig> {
 	return request<PublicConfig>("/api/v1/config");
 }
 
+/** Available request destinations for a title (request-destination-override).
+ * Empty when Seerr is unconfigured/down, or when there's only ever one — the
+ * caller only needs to offer a picker when this has more than one entry. */
+export function getDestinations(
+	type: MediaType,
+	id: number,
+): Promise<RequestDestination[]> {
+	return request<RequestDestination[]>(`/api/v1/${type}/${id}/destinations`);
+}
+
 export function getSettings(): Promise<SettingsResponse> {
 	return request<SettingsResponse>("/api/v1/settings");
 }
@@ -202,14 +213,30 @@ export async function postAvailability(
 	return availability;
 }
 
-/** Request a title as the current user; returns a discriminated outcome. */
+export type RequestDestinationOverride = {
+	server_id: number;
+	profile_id: number;
+	root_folder: string;
+};
+
+/** Request a title as the current user; returns a discriminated outcome.
+ * `destination` selects a non-default server/profile/root-folder (omit for
+ * Seerr's default destination — today's behavior, unchanged). */
 export function createRequest(
 	mediaType: MediaType,
 	tmdbId: number,
+	destination?: RequestDestinationOverride,
 ): Promise<RequestResponse> {
 	return postJson<RequestResponse>("/api/v1/request", {
 		media_type: mediaType,
 		tmdb_id: tmdbId,
+		...(destination
+			? {
+					server_id: destination.server_id,
+					profile_id: destination.profile_id,
+					root_folder: destination.root_folder,
+				}
+			: {}),
 	});
 }
 

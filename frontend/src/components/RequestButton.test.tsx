@@ -118,3 +118,200 @@ test("shows no request button when the title is already available", async () => 
 		expect(screen.queryByRole("button", { name: "Request" })).toBeNull(),
 	);
 });
+
+// ── Destination override (request-destination-override) ─────────────────────
+
+const ONE_DESTINATION = [
+	{
+		server_id: 0,
+		server_name: "radarr",
+		is_default: true,
+		default_profile_id: 7,
+		default_root_folder: "/movies",
+		quality_profiles: [{ id: 7, name: "HD Bluray + WEB" }],
+		root_folders: [{ id: 1, path: "/movies" }],
+	},
+];
+const TWO_DESTINATIONS = [
+	...ONE_DESTINATION,
+	{
+		server_id: 1,
+		server_name: "radarr (new releases)",
+		is_default: false,
+		default_profile_id: 4,
+		default_root_folder: "/new releases",
+		quality_profiles: [
+			{ id: 7, name: "HD Bluray + WEB" },
+			{ id: 4, name: "HD-1080p" },
+		],
+		root_folders: [
+			{ id: 1, path: "/movies" },
+			{ id: 2, path: "/new releases" },
+		],
+	},
+];
+
+test("a single destination with no other options requests immediately", async () => {
+	stubFetch({
+		"/api/v1/config": SEERR_ON,
+		"/destinations": ONE_DESTINATION,
+		"/api/v1/request": {
+			status: "ok",
+			availability: av("pending"),
+			seerr_url: null,
+		},
+	});
+	renderButton(av("not_requested"));
+
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+
+	await screen.findByText("Requested ✓");
+	expect(screen.queryByText("Root Folder")).toBeNull();
+});
+
+test("clicking Request opens the picker for a single server with multiple root folders", async () => {
+	const oneServerManyFolders = [
+		{
+			...ONE_DESTINATION[0],
+			root_folders: [
+				{ id: 1, path: "/movies" },
+				{ id: 2, path: "/new releases" },
+				{ id: 3, path: "/comedy specials" },
+			],
+		},
+	];
+	stubFetch({
+		"/api/v1/config": SEERR_ON,
+		"/destinations": oneServerManyFolders,
+	});
+	renderButton(av("not_requested"));
+
+	const button = await screen.findByRole("button", { name: "Request" });
+	expect(screen.queryByText("Root Folder")).toBeNull();
+
+	fireEvent.click(button);
+
+	expect(await screen.findByText("Root Folder")).toBeTruthy();
+	expect(screen.getByRole("combobox", { name: "Server" })).toBeTruthy();
+	expect(screen.getByRole("button", { name: "Confirm request" })).toBeTruthy();
+});
+
+test("clicking Request opens the picker for multiple destinations", async () => {
+	stubFetch({
+		"/api/v1/config": SEERR_ON,
+		"/destinations": TWO_DESTINATIONS,
+	});
+	renderButton(av("not_requested"));
+
+	const button = await screen.findByRole("button", { name: "Request" });
+	expect(screen.queryByText("Root Folder")).toBeNull();
+
+	fireEvent.click(button);
+
+	expect(await screen.findByText("Root Folder")).toBeTruthy();
+	expect(screen.getByRole("combobox", { name: "Server" })).toBeTruthy();
+});
+
+test("confirming the picker sends the selected destination", async () => {
+	const requestCalls: unknown[] = [];
+	const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = String(input);
+		if (url.includes("/api/v1/request")) {
+			requestCalls.push(init?.body ? JSON.parse(String(init.body)) : null);
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({
+					status: "ok",
+					availability: av("pending"),
+					seerr_url: null,
+				}),
+			} as Response;
+		}
+		if (url.includes("/destinations")) {
+			return {
+				ok: true,
+				status: 200,
+				json: async () => TWO_DESTINATIONS,
+			} as Response;
+		}
+		if (url.includes("/api/v1/config")) {
+			return { ok: true, status: 200, json: async () => SEERR_ON } as Response;
+		}
+		return {
+			ok: false,
+			status: 404,
+			json: async () => ({ detail: "x" }),
+		} as Response;
+	});
+	vi.stubGlobal("fetch", mock);
+	renderButton(av("not_requested"));
+
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	const serverSelect = await screen.findByRole("combobox", { name: "Server" });
+	fireEvent.change(serverSelect, { target: { value: "1" } });
+	fireEvent.click(screen.getByRole("button", { name: "Confirm request" }));
+
+	await screen.findByText("Requested ✓");
+	expect(requestCalls).toEqual([
+		{
+			media_type: "movie",
+			tmdb_id: 42,
+			server_id: 1,
+			profile_id: 4,
+			root_folder: "/new releases",
+		},
+	]);
+});
+
+test("confirming the picker without changing the selection sends the default destination", async () => {
+	const requestCalls: unknown[] = [];
+	const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = String(input);
+		if (url.includes("/api/v1/request")) {
+			requestCalls.push(init?.body ? JSON.parse(String(init.body)) : null);
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({
+					status: "ok",
+					availability: av("pending"),
+					seerr_url: null,
+				}),
+			} as Response;
+		}
+		if (url.includes("/destinations")) {
+			return {
+				ok: true,
+				status: 200,
+				json: async () => TWO_DESTINATIONS,
+			} as Response;
+		}
+		if (url.includes("/api/v1/config")) {
+			return { ok: true, status: 200, json: async () => SEERR_ON } as Response;
+		}
+		return {
+			ok: false,
+			status: 404,
+			json: async () => ({ detail: "x" }),
+		} as Response;
+	});
+	vi.stubGlobal("fetch", mock);
+	renderButton(av("not_requested"));
+
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Confirm request" }),
+	);
+
+	await screen.findByText("Requested ✓");
+	expect(requestCalls).toEqual([
+		{
+			media_type: "movie",
+			tmdb_id: 42,
+			server_id: 0,
+			profile_id: 7,
+			root_folder: "/movies",
+		},
+	]);
+});

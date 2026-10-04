@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from cryptography.fernet import InvalidToken
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.destinations import list_destinations
 from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import refresh_profile
 from tasterr.auth.crypto import decrypt_token
@@ -39,6 +40,11 @@ RequestStatus = Literal["ok", "re_auth_required", "unavailable", "failed"]
 class RequestBody(BaseModel):
     media_type: Literal["movie", "tv"]
     tmdb_id: int = Field(ge=1, le=MAX_TMDB_ID)
+    # Optional non-default destination (request-destination-override). All three
+    # or none — a partial override is rejected the same as an unmatched one.
+    server_id: int | None = None
+    profile_id: int | None = None
+    root_folder: str | None = None
 
 
 class RequestResponse(BaseModel):
@@ -110,7 +116,19 @@ async def create_request(
     seerr_url = _external_url(settings.seerr_external_url, payload.media_type, payload.tmdb_id)
     if ctx is None:
         return RequestResponse(status="unavailable", seerr_url=seerr_url)
-    outcome = await _request_with_reauth(ctx, db, authed, payload.media_type, payload.tmdb_id)
+    await _validate_override(
+        ctx.client, payload.media_type, payload.server_id, payload.profile_id, payload.root_folder
+    )
+    outcome = await _request_with_reauth(
+        ctx,
+        db,
+        authed,
+        payload.media_type,
+        payload.tmdb_id,
+        server_id=payload.server_id,
+        profile_id=payload.profile_id,
+        root_folder=payload.root_folder,
+    )
     if outcome.status == "ok":
         await _record_request_signal(
             request,
@@ -124,6 +142,31 @@ async def create_request(
     return RequestResponse(
         status=outcome.status, availability=outcome.availability, seerr_url=seerr_url
     )
+
+
+async def _validate_override(
+    client: SeerrClient,
+    media_type: MediaType,
+    server_id: int | None,
+    profile_id: int | None,
+    root_folder: str | None,
+) -> None:
+    """Rejects (422, before any Seerr call) a destination override that isn't a
+    complete, real destination for this title's media type. A no-op when all
+    three fields are omitted — the default-destination path is unchanged."""
+    if server_id is None and profile_id is None and root_folder is None:
+        return
+    if server_id is None or profile_id is None or root_folder is None:
+        raise HTTPException(status_code=422, detail="Incomplete destination override")
+    destinations = await list_destinations(client, media_type)
+    for destination in destinations:
+        if destination.server_id != server_id:
+            continue
+        has_profile = any(p.id == profile_id for p in destination.quality_profiles)
+        has_folder = any(rf.path == root_folder for rf in destination.root_folders)
+        if has_profile and has_folder:
+            return
+    raise HTTPException(status_code=422, detail="Unknown request destination")
 
 
 async def _record_request_signal(
@@ -159,9 +202,20 @@ async def _request_with_reauth(
     authed: AuthedSession,
     media_type: MediaType,
     tmdb_id: int,
+    *,
+    server_id: int | None = None,
+    profile_id: int | None = None,
+    root_folder: str | None = None,
 ) -> _Outcome:
     try:
-        code = await ctx.client.create_request(authed.session.seerr_cookie, media_type, tmdb_id)
+        code = await ctx.client.create_request(
+            authed.session.seerr_cookie,
+            media_type,
+            tmdb_id,
+            server_id=server_id,
+            profile_id=profile_id,
+            root_folder=root_folder,
+        )
         return _Outcome("ok", availability_from_code(code))
     except UpstreamUnavailable:
         return _Outcome("failed")
@@ -176,7 +230,14 @@ async def _request_with_reauth(
     if new_cookie is None:
         return _Outcome("failed")  # re-auth itself failed
     try:
-        code = await ctx.client.create_request(new_cookie, media_type, tmdb_id)
+        code = await ctx.client.create_request(
+            new_cookie,
+            media_type,
+            tmdb_id,
+            server_id=server_id,
+            profile_id=profile_id,
+            root_folder=root_folder,
+        )
         return _Outcome("ok", availability_from_code(code))
     except (UpstreamRejected, UpstreamUnavailable):
         return _Outcome("failed")  # still 403 → genuine denial (quota/permission)

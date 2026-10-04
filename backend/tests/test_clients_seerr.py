@@ -7,6 +7,26 @@ import pytest
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrUser
 
+SERVER_LIST_FIXTURE: list[dict[str, object]] = [
+    {
+        "id": 0,
+        "name": "radarr",
+        "is4k": False,
+        "isDefault": True,
+        "activeDirectory": "/movies",
+        "activeProfileId": 7,
+        "activeTags": [],
+    }
+]
+SERVER_DETAIL_FIXTURE: dict[str, object] = {
+    "server": SERVER_LIST_FIXTURE[0],
+    "profiles": [{"id": 7, "name": "HD Bluray + WEB"}, {"id": 4, "name": "HD-1080p"}],
+    "rootFolders": [
+        {"id": 1, "freeSpace": 123, "path": "/movies"},
+        {"id": 2, "freeSpace": 123, "path": "/new releases"},
+    ],
+}
+
 BASE_URL = "http://seerr:5055"
 
 # Shape from the auth spike (docs/SEERR-AUTH-SPIKE.md) against Seerr 3.3.0,
@@ -280,6 +300,69 @@ async def test_media_status_error_drops_url_and_cause() -> None:
     assert excinfo.value.__cause__ is None
 
 
+# ── SeerrClient: destination discovery (global API key) ──────────────────────
+
+
+async def test_list_servers_parses_movie_servers() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/service/radarr"
+        assert request.headers["x-api-key"] == "seerr-api-key"
+        assert "cookie" not in request.headers
+        return httpx.Response(200, json=SERVER_LIST_FIXTURE)
+
+    servers = await _media_client(handler).list_servers("movie")
+
+    assert len(servers) == 1
+    assert servers[0].id == 0
+    assert servers[0].is_default is True
+    assert servers[0].active_directory == "/movies"
+
+
+async def test_list_servers_uses_sonarr_for_tv() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/service/sonarr"
+        return httpx.Response(200, json=[])
+
+    assert await _media_client(handler).list_servers("tv") == []
+
+
+async def test_list_servers_server_error_is_unavailable() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    with pytest.raises(UpstreamUnavailable):
+        await _media_client(handler).list_servers("movie")
+
+
+async def test_server_destinations_parses_profiles_and_root_folders() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/service/radarr/0"
+        assert request.headers["x-api-key"] == "seerr-api-key"
+        return httpx.Response(200, json=SERVER_DETAIL_FIXTURE)
+
+    detail = await _media_client(handler).server_destinations("movie", 0)
+
+    assert detail.server.id == 0
+    assert [p.name for p in detail.profiles] == ["HD Bluray + WEB", "HD-1080p"]
+    assert [rf.path for rf in detail.root_folders] == ["/movies", "/new releases"]
+
+
+async def test_server_destinations_unknown_server_is_unavailable() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "not found"})
+
+    with pytest.raises(UpstreamUnavailable):
+        await _media_client(handler).server_destinations("movie", 99)
+
+
+async def test_server_destinations_timeout_is_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    with pytest.raises(UpstreamUnavailable):
+        await _media_client(handler).server_destinations("movie", 0)
+
+
 # ── SeerrClient: request-as-user (per-user cookie) ───────────────────────────
 
 
@@ -304,6 +387,33 @@ async def test_create_request_tv_asks_for_all_seasons() -> None:
     code = await _media_client(handler).create_request("connect.sid=abc", "tv", 7)
 
     assert code == 3
+
+
+async def test_create_request_includes_override_fields_when_given() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.read()) == {
+            "mediaType": "movie",
+            "mediaId": 42,
+            "serverId": 1,
+            "profileId": 4,
+            "rootFolder": "/new releases",
+        }
+        return httpx.Response(201, json={"id": 1, "media": {"status": 2}})
+
+    await _media_client(handler).create_request(
+        "connect.sid=abc", "movie", 42, server_id=1, profile_id=4, root_folder="/new releases"
+    )
+
+
+async def test_create_request_omits_override_fields_when_not_given() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read())
+        assert "serverId" not in body
+        assert "profileId" not in body
+        assert "rootFolder" not in body
+        return httpx.Response(201, json={"id": 1, "media": {"status": 2}})
+
+    await _media_client(handler).create_request("connect.sid=abc", "movie", 42)
 
 
 async def test_create_request_403_is_typed_rejection() -> None:

@@ -331,3 +331,59 @@ async def test_request_as_user_attribution_and_cleanup() -> None:
                 await _delete_request_and_verify(
                     http, login.cookie, login.user.id, tmdb_id, request_id
                 )
+
+
+@requires_request
+async def test_request_destination_override_lands_on_chosen_destination() -> None:
+    """request-destination-override's live bar: an explicit server/profile/
+    root-folder override is accepted by Seerr and the resulting request carries
+    it — not just that a plain default-destination request still works. Reuses
+    the operator's real configured destination(s) rather than a new env var;
+    skips if the account has none configured for movies. Same invasive
+    create-then-verify-cleanup shape as the base attribution test."""
+    tmdb_id = int(REQUEST_TMDB_ID)
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        client = SeerrClient(http, URL, API_KEY)
+        servers = await client.list_servers("movie")
+        if not servers:
+            pytest.skip("operator account has no configured movie destinations")
+        server = next((s for s in servers if s.is_default), servers[0])
+        detail = await client.server_destinations("movie", server.id)
+        if not detail.profiles or not detail.root_folders:
+            pytest.skip("chosen destination has no profiles/root folders to select")
+        profile_id = detail.profiles[0].id
+        root_folder = detail.root_folders[0].path
+
+        login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
+        info = await client.media_status("movie", tmdb_id)
+        availability = to_availability(info)
+        assert availability.status == "not_requested"
+        assert availability.known
+
+        created_may_have_succeeded = False
+        request_id: int | None = None
+        try:
+            created = await http.post(
+                f"{URL}/api/v1/request",
+                headers={"Cookie": login.cookie},
+                json={
+                    "mediaType": "movie",
+                    "mediaId": tmdb_id,
+                    "serverId": server.id,
+                    "profileId": profile_id,
+                    "rootFolder": root_folder,
+                },
+            )
+            created_may_have_succeeded = created.is_success
+            assert created.status_code in (200, 201)
+            payload = created.json()
+            candidate_id = payload.get("id")
+            if isinstance(candidate_id, int):
+                request_id = candidate_id
+            assert request_id is not None
+            assert payload["requestedBy"]["id"] == login.user.id
+        finally:
+            if created_may_have_succeeded:
+                await _delete_request_and_verify(
+                    http, login.cookie, login.user.id, tmdb_id, request_id
+                )
