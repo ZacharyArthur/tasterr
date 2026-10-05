@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type {
 	Availability,
 	MediaType,
 	RequestDestinationOverride,
+	RequestSelection,
+	SeasonSummary,
 } from "../lib/api";
 import {
 	useConfig,
@@ -10,15 +12,18 @@ import {
 	useRequest,
 	variantRequestable,
 } from "../lib/availability";
+import { SeasonPicker } from "./SeasonPicker";
 
 export function RequestButton({
 	type,
 	id,
 	availability,
+	seasons = [],
 }: {
 	type: MediaType;
 	id: number;
 	availability?: Availability | null;
+	seasons?: SeasonSummary[];
 }) {
 	const config = useConfig();
 	const missingStandard = variantRequestable(availability, false);
@@ -31,6 +36,8 @@ export function RequestButton({
 	const request = useRequest(type, id);
 	const [quality, setQuality] = useState<boolean | null>(null);
 	const [advancedOpen, setAdvancedOpen] = useState(false);
+	const [pickingSeasons, setPickingSeasons] = useState(false);
+	const closeSeasons = useCallback(() => setPickingSeasons(false), []);
 	const [selection, setSelection] = useState<RequestDestinationOverride | null>(
 		null,
 	);
@@ -93,6 +100,7 @@ export function RequestButton({
 	const pending = request.isPending || destinations.isPending;
 	const canOverride = Boolean(options?.available && options.can_override);
 	const defaultAllowed = !is4k || Boolean(options?.can_request_4k_default);
+	const pickSeasons = type === "tv" && seasons.length > 1;
 
 	function selectServer(value: string) {
 		if (value === "default") {
@@ -116,16 +124,40 @@ export function RequestButton({
 			(selection && !canOverride)
 		)
 			return;
-		request.mutate(
-			selection
-				? { ...selection, ...(is4k ? { is_4k: true } : {}) }
-				: is4k
-					? { is_4k: true }
-					: undefined,
-		);
+		if (pickSeasons) {
+			setPickingSeasons(true);
+			return;
+		}
+		send();
+	}
+	function send(chosen?: number[]) {
+		const regular = seasons
+			.map((season) => season.season_number)
+			.filter((number) => number > 0);
+		// The default choice (every regular season, no Specials) stays Seerr's "all".
+		const whole =
+			!chosen ||
+			(chosen.length === regular.length &&
+				chosen.every((number) => number > 0));
+		const body: RequestSelection = {
+			...selection,
+			...(is4k ? { is_4k: true } : {}),
+			...(whole ? {} : { seasons: chosen }),
+		};
+		request.mutate(Object.keys(body).length > 0 ? body : undefined);
 	}
 	return (
 		<div className="flex flex-col items-start gap-2">
+			{pickingSeasons && (
+				<SeasonPicker
+					seasons={seasons}
+					onCancel={closeSeasons}
+					onConfirm={(chosen) => {
+						setPickingSeasons(false);
+						send(chosen);
+					}}
+				/>
+			)}
 			{submitted && (
 				<p className="text-sm font-medium text-emerald-400">Requested ✓</p>
 			)}

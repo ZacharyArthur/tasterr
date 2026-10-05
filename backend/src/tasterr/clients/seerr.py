@@ -398,9 +398,11 @@ class SeerrClient:
         server_id: int | None = None,
         profile_id: int | None = None,
         root_folder: str | None = None,
+        seasons: list[int] | None = None,
     ) -> int:
         """Create a request attributed to the member (their cookie only — never the
-        global key). A TV title requests the whole series in the selected variant.
+        global key). A TV title requests the whole series in the selected variant,
+        or only `seasons` when given (ignored for a movie).
         When given, `server_id`/`profile_id`/`root_folder` select a non-default
         destination (the caller validates these against the title's real
         destinations first — this method forwards them as-is). Returns the
@@ -412,7 +414,7 @@ class SeerrClient:
         if is_4k:
             payload["is4k"] = True
         if media_type == "tv":
-            payload["seasons"] = "all"
+            payload["seasons"] = seasons if seasons is not None else "all"
         if server_id is not None:
             payload["serverId"] = server_id
         if profile_id is not None:

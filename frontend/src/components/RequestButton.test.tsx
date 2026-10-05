@@ -490,3 +490,103 @@ test("losing the 4K default during refetch blocks bare confirmation", async () =
 	fireEvent.click(button);
 	expect(bodies).toEqual([]);
 });
+
+const SEASONS = [0, 1, 2, 3].map((n) => ({
+	season_number: n,
+	name: n === 0 ? "Specials" : `Season ${n}`,
+	episode_count: 10,
+	air_date: null,
+}));
+function toggle(name: RegExp | string): HTMLElement {
+	return screen.getByRole("switch", { name });
+}
+function renderTv(seasons = SEASONS) {
+	render(
+		<QueryClientProvider
+			client={
+				new QueryClient({ defaultOptions: { queries: { retry: false } } })
+			}
+		>
+			<RequestButton
+				type="tv"
+				id={7}
+				availability={av("not_requested")}
+				seasons={seasons}
+			/>
+		</QueryClientProvider>,
+	);
+}
+
+test("request opens a season dialog with regular seasons on and Specials off", async () => {
+	const { bodies } = fixture();
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	screen.getByRole("dialog", { name: "Choose seasons" });
+	expect(toggle(/Specials/).getAttribute("aria-checked")).toBe("false");
+	for (const name of [/Season 1/, /Season 2/, /Season 3/])
+		expect(toggle(name).getAttribute("aria-checked")).toBe("true");
+	expect(bodies).toEqual([]);
+});
+
+test("OK with the default seasons keeps the whole-series request", async () => {
+	const { bodies } = fixture();
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	await screen.findByText("Requested ✓");
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});
+
+test("OK sends only the chosen seasons, Specials included", async () => {
+	const { bodies } = fixture();
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(toggle(/Season 1/));
+	fireEvent.click(toggle(/Specials/));
+	fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	await screen.findByText("Requested ✓");
+	expect(bodies).toEqual([
+		{ media_type: "tv", tmdb_id: 7, seasons: [0, 2, 3] },
+	]);
+});
+
+test("no season chosen blocks OK", async () => {
+	const { bodies } = fixture();
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(toggle("All seasons")); // everything on, Specials included
+	fireEvent.click(toggle("All seasons")); // everything off
+	screen.getByText("Choose at least one season.");
+	expect(
+		(screen.getByRole("button", { name: "OK" }) as HTMLButtonElement).disabled,
+	).toBe(true);
+	expect(bodies).toEqual([]);
+});
+
+test("cancel closes the dialog without requesting and resets choices", async () => {
+	const { bodies } = fixture();
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(toggle(/Season 2/));
+	fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+	expect(screen.queryByRole("dialog")).toBeNull();
+	fireEvent.click(screen.getByRole("button", { name: "Request" }));
+	expect(toggle(/Season 2/).getAttribute("aria-checked")).toBe("true");
+	expect(bodies).toEqual([]);
+});
+
+test("escape closes only the season dialog", async () => {
+	fixture();
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.keyDown(document, { key: "Escape" });
+	expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("a single-season show requests directly without a dialog", async () => {
+	const { bodies } = fixture();
+	renderTv(SEASONS.slice(1, 2));
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	await screen.findByText("Requested ✓");
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});

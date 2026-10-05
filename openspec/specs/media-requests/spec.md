@@ -14,7 +14,12 @@ session row, so the request is attributed to that member in Seerr and subject
 to their own quota and approval rules. The request body SHALL be validated
 (`media_type` constrained to `movie` or `tv`, an integer `tmdb_id` between 1
 and 2,147,483,647 inclusive); a TV request SHALL request the whole series at
-the selected standard or 4K variant. The request body MAY additionally include optional
+the selected standard or 4K variant unless an optional `seasons` list is
+given. `seasons`, when present, SHALL be a non-empty list of unique integers
+between 0 and 1000 inclusive (0 is Specials), SHALL only be accepted for `tv`,
+SHALL be forwarded to Seerr as its `seasons` array in place of `"all"`, and
+SHALL be preserved on a re-auth retry; invalid `seasons` SHALL be rejected with
+`422` before any Seerr call. The request body MAY additionally include optional
 `server_id`, `profile_id`, and `root_folder` fields to select a non-default
 destination; when any of these is present, the backend SHALL validate the
 combination against that title's permitted destinations (as returned by the
@@ -49,8 +54,18 @@ approval and administrator rules SHALL remain authoritative.
 
 #### Scenario: TV request covers the series
 
-- **WHEN** a member requests a TV title
+- **WHEN** a member requests a TV title without a season list
 - **THEN** the request asks Seerr for the whole series at the selected standard or 4K variant
+
+#### Scenario: TV request for chosen seasons
+
+- **WHEN** a member requests a TV title with a valid `seasons` list
+- **THEN** the request asks Seerr for exactly those seasons, and the same list is kept on a re-auth retry
+
+#### Scenario: Invalid season list rejected
+
+- **WHEN** `seasons` is sent for a movie, or is empty, out of range, or contains duplicates
+- **THEN** the response is `422` and no Seerr call is made
 
 #### Scenario: Successful request returns the new status
 
@@ -314,3 +329,46 @@ unconfigured or no known variant is missing.
 
 - **WHEN** submission is rejected or the member cancels advanced selection
 - **THEN** the UI shows a retryable error or returns to Seerr defaults respectively
+
+### Requirement: TV season selection dialog
+
+For a TV title with more than one season entry (Specials included), activating
+Request SHALL open a dialog listing every season and, when the title has them,
+Specials, each with an on/off toggle, plus an "All seasons" toggle, an OK
+action and a Cancel action. Regular seasons SHALL start on and Specials off.
+OK with that default choice SHALL send the same request body as a request
+without the dialog; any other choice SHALL send the chosen season numbers.
+OK SHALL be blocked while no season is chosen. Cancel and Escape SHALL close
+only the dialog without requesting, and reopening SHALL restore the default
+choice. Movies and single-season titles SHALL keep the one-step request. The
+title detail page's own season list SHALL continue to omit Specials.
+
+#### Scenario: Dialog defaults
+
+- **WHEN** a member activates Request on a TV title with several seasons and Specials
+- **THEN** a dialog lists every season on and Specials off, and nothing is submitted yet
+
+#### Scenario: Default choice keeps the whole-series request
+
+- **WHEN** the member presses OK without changing any toggle
+- **THEN** the request body is identical to a request made without the dialog
+
+#### Scenario: Chosen seasons are requested
+
+- **WHEN** the member changes the toggles and presses OK
+- **THEN** the request carries exactly the chosen season numbers, Specials as 0
+
+#### Scenario: Empty choice is blocked
+
+- **WHEN** every toggle is off
+- **THEN** OK is disabled and a hint asks for at least one season
+
+#### Scenario: Cancel requests nothing
+
+- **WHEN** the member presses Cancel or Escape
+- **THEN** only the dialog closes and no request is sent
+
+#### Scenario: Single-season title requests directly
+
+- **WHEN** a member activates Request on a TV title with one season entry
+- **THEN** the request is submitted without a dialog

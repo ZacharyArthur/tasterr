@@ -389,6 +389,14 @@ async def test_create_request_tv_asks_for_all_seasons() -> None:
     assert code == 3
 
 
+async def test_create_request_tv_asks_for_only_the_selected_seasons() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.read()) == {"mediaType": "tv", "mediaId": 7, "seasons": [4, 5]}
+        return httpx.Response(201, json={"id": 2, "media": {"status": 2}})
+
+    await _media_client(handler).create_request("connect.sid=abc", "tv", 7, seasons=[4, 5])
+
+
 async def test_create_request_includes_override_fields_when_given() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert json.loads(request.read()) == {

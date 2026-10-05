@@ -11,6 +11,10 @@ const FOCUSABLE = [
 	"[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+// Open traps, innermost last: only the top one handles keys, and the page
+// behind stays inert until the last one closes.
+const openTraps: HTMLElement[] = [];
+
 export function useFocusTrap(
 	container: RefObject<HTMLElement | null>,
 	onEscape: () => void,
@@ -19,6 +23,7 @@ export function useFocusTrap(
 		const node = container.current;
 		if (!node) return;
 		const previous = document.activeElement as HTMLElement | null;
+		openTraps.push(node);
 		const background = document.getElementById("shell-background");
 		if (background) background.inert = true;
 		const focusable = () =>
@@ -28,6 +33,7 @@ export function useFocusTrap(
 			);
 		(focusable()[0] ?? node).focus();
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (openTraps.at(-1) !== node) return;
 			if (event.key === "Escape") {
 				event.preventDefault();
 				onEscape();
@@ -56,7 +62,8 @@ export function useFocusTrap(
 		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown);
-			if (background) background.inert = false;
+			openTraps.splice(openTraps.indexOf(node), 1);
+			if (background && openTraps.length === 0) background.inert = false;
 			previous?.focus?.();
 		};
 	}, [container, onEscape]);

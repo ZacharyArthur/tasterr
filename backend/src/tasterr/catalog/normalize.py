@@ -177,7 +177,6 @@ def _seasons(raw: TmdbDetail) -> list[SeasonSummary]:
             air_date=s.air_date,
         )
         for s in raw.seasons
-        if s.season_number >= 1
     ]
 
 

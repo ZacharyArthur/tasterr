@@ -832,6 +832,8 @@ export interface components {
             profile_id?: number | null;
             /** Root Folder */
             root_folder?: string | null;
+            /** Seasons */
+            seasons?: number[] | null;
         };
         /** RequestDestination */
         RequestDestination: {

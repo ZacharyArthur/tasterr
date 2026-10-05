@@ -455,6 +455,21 @@ def test_tv_denial_after_reauth_preserves_series_shape_without_looping(tmp_path:
     ]
 
 
+def test_season_subset_survives_reauth_exactly(tmp_path: Path) -> None:
+    handler, state = _ladder_handler(httpx.Response(201, json={"media": {"status": 2}}))
+    app = _app(tmp_path)
+    _override_ctx(app, handler)
+    token = _seed_session(tmp_path / "tasterr.db", plex_token="plex-token")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body("tv", 7), "seasons": [5, 3]})
+
+    assert response.json()["status"] == "ok"
+    assert state.request_bodies == [
+        {"mediaType": "tv", "mediaId": 7, "seasons": [3, 5]},
+        {"mediaType": "tv", "mediaId": 7, "seasons": [3, 5]},  # subset preserved on retry
+    ]
+
+
 def test_local_member_gets_re_auth_required(tmp_path: Path) -> None:
     handler, state = _ladder_handler(httpx.Response(201, json={"media": {"status": 2}}))
     app = _app(tmp_path)
@@ -718,6 +733,27 @@ def test_override_input_bounds_reject_before_reads(
     token = _seed_session(tmp_path / "tasterr.db")
     with _client(app, token) as client:
         assert client.post("/api/v1/request", json={**_body(), **extra}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"media_type": "movie", "tmdb_id": 42, "seasons": [1]},
+        {"media_type": "tv", "tmdb_id": 7, "seasons": []},
+        {"media_type": "tv", "tmdb_id": 7, "seasons": [-1]},
+        {"media_type": "tv", "tmdb_id": 7, "seasons": [1001]},
+        {"media_type": "tv", "tmdb_id": 7, "seasons": [2, 2]},
+    ],
+)
+def test_invalid_seasons_reject_before_reads(tmp_path: Path, body: dict[str, object]) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("invalid input must not reach Seerr")
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, preflight=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        assert client.post("/api/v1/request", json=body).status_code == 422
 
 
 def test_4k_override_survives_reauth_exactly(tmp_path: Path) -> None:

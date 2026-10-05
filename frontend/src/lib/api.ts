@@ -14,6 +14,7 @@ export type Rail = components["schemas"]["Rail"];
 export type HeroSlide = components["schemas"]["HeroSlide"];
 export type MediaSummary = components["schemas"]["MediaSummary"];
 export type MediaDetail = components["schemas"]["MediaDetail"];
+export type SeasonSummary = components["schemas"]["SeasonSummary"];
 export type SearchResponse = components["schemas"]["SearchResponse"];
 export type MediaType = MediaSummary["media_type"];
 export type Availability = components["schemas"]["Availability"];
@@ -24,7 +25,7 @@ export type RequestOptions = components["schemas"]["RequestOptions"];
 export type RequestSelection = Partial<
 	Pick<
 		components["schemas"]["RequestBody"],
-		"is_4k" | "server_id" | "profile_id" | "root_folder"
+		"is_4k" | "server_id" | "profile_id" | "root_folder" | "seasons"
 	>
 >;
 /** Keyed by `"<media_type>:<id>"`, the shape `POST /availability` returns. */
