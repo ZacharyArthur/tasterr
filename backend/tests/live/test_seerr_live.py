@@ -363,12 +363,13 @@ async def test_request_destination_override_stores_chosen_destination(is_4k: boo
         assert isinstance(version, str)
         print(f"\nSeerr version tested: {version}")
         login = await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
-        if not login.user.can_override or not login.user.can_request("movie", is_4k=is_4k):
-            pytest.skip("operator account lacks variant or advanced permission")
         client = SeerrClient(http, URL, API_KEY)
         servers = [server for server in await client.list_servers("movie") if server.is_4k == is_4k]
         if not servers:
             pytest.skip("operator has no configured destination for this variant")
+        user = await client.user(login.user.id)
+        if not user.can_override or not user.can_request("movie", is_4k=is_4k):
+            pytest.skip("operator account lacks variant or advanced permission")
         server = next((server for server in servers if not server.is_default), servers[0])
         detail = await client.server_destinations("movie", server.id)
         if not detail.profiles or not detail.root_folders:
