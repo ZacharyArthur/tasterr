@@ -1,7 +1,7 @@
 import type { RegionOption, ServiceOption } from "../lib/api";
 import { providerLogoUrl } from "../lib/images";
 
-const MAX_SERVICES = 8;
+export const MAX_SERVICES = 8;
 
 export function RegionServicePicker({
 	region,

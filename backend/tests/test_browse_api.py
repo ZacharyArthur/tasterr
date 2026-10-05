@@ -20,10 +20,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from tasterr.api.availability import get_availability
 from tasterr.api.catalog import get_catalog
 from tasterr.api.runtime_settings import get_runtime_settings
+from tasterr.api.title import get_title
 from tasterr.auth.crypto import encrypt_token
+from tasterr.auth.deps import AuthedSession
 from tasterr.auth.sessions import mint_session
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
+from tasterr.catalog.discovery import DiscoveryFilter
 from tasterr.catalog.facts import TitleFacts
 from tasterr.catalog.models import Genre, MediaDetail, MediaSummary, RailsPage, WatchProviders
 from tasterr.catalog.service import CatalogService
@@ -32,7 +35,8 @@ from tasterr.clients.plex import PlexCloudAccount, PlexServerDiscovery
 from tasterr.clients.seerr import SeerrClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User
+from tasterr.db.models import User, UserSession
+from tasterr.db.runtime_settings import save_runtime_settings
 from tasterr.main import create_app
 from tasterr.rails.registry import RailContext
 from tasterr.recommend.signals import SignalKind
@@ -85,6 +89,7 @@ def _detail(i: int) -> MediaDetail:
 
 
 class FakeCatalog:
+    discovery_filter: DiscoveryFilter | None = None
     region = "US"
     selected_service_ids: tuple[int, ...] = ()
 
@@ -127,6 +132,431 @@ class FakeCatalog:
         if self.fail:
             raise UpstreamUnavailable("down")
         return [_summary(1), _summary(2)]
+
+
+def test_discovery_filters_home_extra_and_suggestions_but_preserves_access(tmp_path: Path) -> None:
+    class ExclusionCatalog(FakeCatalog):
+        async def title_facts(self, media: str, tmdb_id: int) -> TitleFacts:
+            return TitleFacts(
+                tmdb_id=tmdb_id,
+                media_type="movie" if media == "movie" else "tv",
+                title="Title",
+                watch_region="US",
+                flatrate_provider_ids=[8] if tmdb_id % 2 else [],
+            )
+
+        async def detail(self, media: str, tmdb_id: int) -> MediaDetail:
+            return (await super().detail(media, tmdb_id)).model_copy(
+                update={
+                    "recommendations": [_summary(1), _summary(2)],
+                    "similar": [_summary(3), _summary(4)],
+                }
+            )
+
+    app = _app(tmp_path)
+
+    def catalog_for_request() -> CatalogService:
+        catalog = ExclusionCatalog()
+        catalog.discovery_filter = DiscoveryFilter(
+            cast("CatalogService", catalog), None, False, [8]
+        )
+        return cast("CatalogService", catalog)
+
+    app.dependency_overrides[get_catalog] = catalog_for_request
+    with _authed_client(app, tmp_path / "tasterr.db") as client:
+        home = client.get("/api/v1/home")
+        extra = client.get("/api/v1/rails")
+        detail = client.get("/api/v1/title/movie/1")
+        search = client.get("/api/v1/search?q=Title")
+    assert home.status_code == extra.status_code == detail.status_code == search.status_code == 200
+    assert all(
+        item["id"] % 2 == 0
+        for rail in home.json()["rails"] + extra.json()["rails"]
+        for item in rail["items"]
+    )
+    assert all(slide["item"]["id"] % 2 == 0 for slide in home.json()["hero"])
+    assert [item["id"] for item in detail.json()["recommendations"]] == [2]
+    assert [item["id"] for item in detail.json()["similar"]] == [4]
+    assert detail.json()["id"] == 1
+    assert [item["id"] for item in search.json()["results"]] == [1, 2]
+
+
+@pytest.mark.parametrize("environment", [False, True])
+@pytest.mark.parametrize("mode", ["subscription", "library", "seerr_outage"])
+@pytest.mark.parametrize("suggestion_media", ["movie", "tv"])
+def test_production_dependencies_apply_stored_and_environment_exclusions(
+    tmp_path: Path,
+    environment: bool,
+    mode: str,
+    suggestion_media: str,
+) -> None:
+    library = mode != "subscription"
+    preferences = {"hide_library_items": library, "excluded_service_ids": [] if library else [8]}
+    overrides: dict[str, object] = {
+        "database_path": tmp_path / "tasterr.db",
+        "static_dir": tmp_path / "static",
+        "tasterr_secret_key": SECRET,
+        "tmdb_api_key": "fixture-key",
+        "seerr_internal_url": "http://seerr:5055",
+        "seerr_api_key": "fixture-key",
+    }
+    if environment:
+        overrides.update({f"tasterr_{key}": value for key, value in preferences.items()})
+    app = create_app(Settings.model_validate(overrides))
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path)
+    _record_signals(db_path, ["request", "watchlist"], tmdb_id=1001)
+    _record_signals(db_path, ["request"], seerr_user_id=7, tmdb_id=1001)
+
+    async def persist(region: str = "US") -> None:
+        engine = create_engine(db_path)
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                await save_runtime_settings(
+                    db,
+                    RuntimeSettings.model_validate(
+                        {"region": region, **({} if environment else preferences)}
+                    ),
+                )
+                await db.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(persist())
+
+    def results(start: int, media: str = "movie") -> list[dict[str, object]]:
+        return [
+            {
+                "id": i,
+                "title": f"Title {i}",
+                "name": f"Title {i}",
+                "media_type": media,
+                "backdrop_path": "/fixture.jpg",
+            }
+            for i in range(start, start + 20)
+        ]
+
+    def expected_ids(start: int) -> list[int]:
+        return list(
+            range(
+                start if mode == "seerr_outage" else start + 1,
+                start + 20,
+                1 if mode == "seerr_outage" else 2,
+            )
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.url.host == "seerr":
+            if mode == "seerr_outage":
+                return httpx.Response(401, json={})
+            tmdb_id = int(path.rsplit("/", 1)[-1])
+            variant = "status" if "/tv/" in path else "status4k"
+            return httpx.Response(200, json={"mediaInfo": {variant: 4 if tmdb_id % 2 else 1}})
+        if path.endswith("/genre/movie/list") or path.endswith("/genre/tv/list"):
+            return httpx.Response(200, json={"genres": [{"id": 18, "name": "Drama"}]})
+        if "/trending/" in path or "/search/" in path:
+            return httpx.Response(200, json={"results": results(1)})
+        if "/discover/" in path:
+            assert request.url.params["watch_region"] == "US"
+            assert request.url.params["page"] == "1"
+            assert "with_watch_providers" not in request.url.params
+            sort = request.url.params["sort_by"]
+            start = (
+                801
+                if "primary_release_date.gte" in request.url.params
+                else 301
+                if sort == "primary_release_date.desc"
+                else 501
+                if sort == "vote_average.desc" and path.endswith("tv")
+                else 401
+                if sort == "vote_average.desc"
+                else 201
+                if path.endswith("tv")
+                else 101
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "total_pages": 1,
+                    "results": results(start, "tv" if path.endswith("tv") else "movie"),
+                },
+            )
+        if "/movie/" in path or "/tv/" in path:
+            tmdb_id = int(path.rsplit("/", 1)[-1])
+            return httpx.Response(
+                200,
+                json={
+                    "id": tmdb_id,
+                    "title": f"Title {tmdb_id}",
+                    "genres": [{"id": 18, "name": "Drama"}]
+                    if tmdb_id >= 601
+                    else [{"id": 35, "name": "Comedy"}],
+                    "vote_count": 1000,
+                    "recommendations": {"results": results(601, suggestion_media)},
+                    "similar": {"results": results(701, suggestion_media)},
+                    "watch/providers": {
+                        "results": {"US": {"flatrate": [{"provider_id": 8}] if tmdb_id % 2 else []}}
+                    },
+                },
+            )
+        raise AssertionError(f"unexpected fixture route: {path}")
+
+    with TestClient(app) as client:
+        client.cookies.set("tasterr_session", token)
+        fixture_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        app.state.http = fixture_http
+        try:
+            members = client.get("/api/v1/recommendations/household-members").json()
+            home = client.get("/api/v1/home")
+            extra = client.get("/api/v1/rails")
+            title = client.get("/api/v1/title/movie/1001")
+            search = client.get("/api/v1/search?q=Title")
+            blend = client.post(
+                "/api/v1/recommendations/household-blend",
+                json={"user_ids": [member["id"] for member in members]},
+            )
+            assert (
+                home.status_code
+                == extra.status_code
+                == title.status_code
+                == search.status_code
+                == blend.status_code
+                == 200
+            )
+            assert blend.json() is not None
+            discovery_rails = (
+                [rail for rail in home.json()["rails"] if rail["id"] != "my-list"]
+                + extra.json()["rails"]
+                + [blend.json()]
+            )
+            assert discovery_rails
+            assert mode == "seerr_outage" or all(
+                item["id"] % 2 == 0 for rail in discovery_rails for item in rail["items"]
+            )
+            home_rails = {rail["id"]: rail["items"] for rail in home.json()["rails"]}
+            assert {
+                "my-list",
+                "recommended-for-you",
+                "trending",
+                "popular",
+                "popular-tv",
+                "recently-added",
+            } <= home_rails.keys()
+            for rail_id, start in (
+                ("trending", 1),
+                ("popular", 101),
+                ("popular-tv", 201),
+                ("recently-added", 301),
+            ):
+                assert [item["id"] for item in home_rails[rail_id]] == expected_ids(start)
+            assert home.json()["hero"]
+            assert [slide["item"]["id"] for slide in home.json()["hero"]] == expected_ids(1)[:5]
+            extra_rails = {rail["id"]: rail["items"] for rail in extra.json()["rails"]}
+            assert {
+                "top-rated-movie",
+                "top-rated-tv",
+                "decade-2020",
+                "decade-2010",
+            } == extra_rails.keys()
+            assert [item["id"] for item in extra_rails["top-rated-movie"]] == expected_ids(401)
+            assert [item["id"] for item in extra_rails["top-rated-tv"]] == expected_ids(501)
+            assert all(rail["items"] for rail in discovery_rails)
+            assert (
+                next(rail for rail in home.json()["rails"] if rail["id"] == "my-list")["items"][0][
+                    "id"
+                ]
+                == 1001
+            )
+            assert title.json()["id"] == 1001
+            assert [item["id"] for item in title.json()["recommendations"]] == expected_ids(601)
+            assert [item["id"] for item in title.json()["similar"]] == expected_ids(701)
+            assert [item["id"] for item in search.json()["results"]] == list(range(1, 21))
+            if environment and not library:
+                asyncio.run(persist("GB"))
+                changed = client.get("/api/v1/title/movie/1001")
+                assert changed.status_code == 200
+                assert [item["id"] for item in changed.json()["recommendations"]] == list(
+                    range(601, 621)
+                )
+        finally:
+            asyncio.run(fixture_http.aclose())
+
+
+@pytest.mark.parametrize(
+    "rail_type", [RailType.RECOMMENDED, RailType.MORE_LIKE, RailType.UNEXPECTED_PICKS]
+)
+@pytest.mark.parametrize("mode", ["empty", "failed", "no_signals", "ordinary_failed"])
+def test_personalized_only_home_classifies_actual_candidate_sources(
+    tmp_path: Path,
+    rail_type: RailType,
+    mode: str,
+) -> None:
+    from tasterr.recommend.store import save_profile
+
+    db_path = tmp_path / "tasterr.db"
+    app = create_app(
+        Settings.model_validate(
+            {
+                "database_path": db_path,
+                "static_dir": tmp_path / "static",
+                "tasterr_secret_key": SECRET,
+                "tmdb_api_key": "fixture-key",
+            }
+        )
+    )
+    token = _seed_session(db_path)
+    if mode != "no_signals":
+        _record_signals(db_path, ["request"], tmdb_id=1001)
+
+    async def seed() -> None:
+        engine = create_engine(db_path)
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+                await save_runtime_settings(
+                    db,
+                    RuntimeSettings(
+                        excluded_service_ids=[8],
+                        disabled_rail_types=[
+                            rail
+                            for rail in RailType
+                            if rail != rail_type
+                            and not (
+                                mode == "ordinary_failed"
+                                and rail in (RailType.TRENDING, RailType.POPULAR, RailType.RECENT)
+                            )
+                        ],
+                    ),
+                )
+                if mode != "no_signals" and not (
+                    mode == "ordinary_failed" and rail_type == RailType.UNEXPECTED_PICKS
+                ):
+                    await save_profile(db, 1, {"genre:drama": 1.0})
+                await db.commit()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(seed())
+    source_calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if "/genre/" in path:
+            return httpx.Response(200, json={"genres": [{"id": 18, "name": "Drama"}]})
+        source_calls.append(path)
+        if mode == "failed":
+            return httpx.Response(404, json={})
+        if "/movie/" in path:
+            return httpx.Response(
+                200,
+                json={
+                    "id": 1001,
+                    "title": "Source",
+                    "genres": [{"id": 18, "name": "Drama"}],
+                    "recommendations": {"results": []},
+                    "similar": {"results": []},
+                },
+            )
+        if "/discover/" in path or "/trending/" in path:
+            if mode == "ordinary_failed":
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json={"results": [], "total_pages": 1})
+        raise AssertionError(f"unexpected fixture route: {path}")
+
+    with TestClient(app) as client:
+        client.cookies.set("tasterr_session", token)
+        fixture_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        app.state.http = fixture_http
+        try:
+            response = client.get("/api/v1/home")
+            succeeds = mode == "empty" or (
+                mode == "ordinary_failed" and rail_type != RailType.UNEXPECTED_PICKS
+            )
+            assert response.status_code == (200 if succeeds else 502)
+            if succeeds:
+                assert response.json() == {"hero": [], "rails": []}
+                assert source_calls
+                count = len(source_calls)
+                assert client.get("/api/v1/home").status_code == 200
+                if mode == "empty":
+                    assert len(source_calls) == count
+                else:
+                    assert source_calls.count("/3/movie/1001") == 1
+                    assert any("/discover/" in path for path in source_calls)
+                    assert any("/trending/" in path for path in source_calls)
+            elif mode == "no_signals":
+                assert source_calls == []
+            elif mode == "ordinary_failed":
+                assert "/3/movie/1001" in source_calls
+                assert any("/discover/" in path for path in source_calls)
+                assert any("/trending/" in path for path in source_calls)
+        finally:
+            asyncio.run(fixture_http.aclose())
+
+
+@pytest.mark.parametrize("stage", ["detail", "suggestions", "cancelled"])
+async def test_title_drains_parallel_availability_on_every_error(
+    monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from tasterr.recommend import store
+
+    started = asyncio.Event()
+    checking = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class StalledAvailability:
+        async def status(self, media: str, tmdb_id: int) -> Never:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+            raise AssertionError("unreachable")
+
+    class BrokenCatalog(FakeCatalog):
+        async def detail(self, media: str, tmdb_id: int) -> MediaDetail:
+            await started.wait()
+            if stage == "detail":
+                raise UpstreamUnavailable("catalog unavailable")
+            return _detail(tmdb_id).model_copy(update={"recommendations": [_summary(2)]})
+
+        async def title_facts(self, media: str, tmdb_id: int) -> Never:
+            checking.set()
+            if stage == "cancelled":
+                await asyncio.Event().wait()
+            raise ValueError("invalid internal facts")
+
+    async def toggles(
+        db: AsyncSession, user_id: int, media: str, tmdb_id: int
+    ) -> tuple[bool, bool]:
+        return False, False
+
+    monkeypatch.setattr(store, "title_toggles", toggles)
+    catalog = cast("CatalogService", BrokenCatalog())
+    catalog.discovery_filter = DiscoveryFilter(catalog, None, False, [8])
+    task = asyncio.create_task(
+        get_title(
+            "movie",
+            1,
+            catalog,
+            cast("AvailabilityService", StalledAvailability()),
+            AuthedSession(user=User(id=1), session=UserSession()),
+            cast("AsyncSession", object()),
+        )
+    )
+    async with asyncio.timeout(0.5):
+        if stage == "cancelled":
+            await checking.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            with pytest.raises(UpstreamUnavailable if stage == "detail" else ExceptionGroup):
+                await task
+    assert cancelled.is_set()
+    assert task.done()
 
 
 def _app(tmp_path: Path, *, tmdb: bool = True, plex_max_connection_probes: int = 6) -> FastAPI:

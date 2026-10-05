@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	skipToken,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import {
 	getRegions,
 	getServices,
@@ -10,6 +15,16 @@ import {
 import { captureSession, isSessionCurrent } from "./auth";
 
 export const SETTINGS_QUERY_KEY = ["admin", "settings"] as const;
+const DISCOVERY_REVISION_KEY = ["discovery-settings-revision"] as const;
+
+export function useDiscoveryRevision() {
+	return useQuery({
+		queryKey: DISCOVERY_REVISION_KEY,
+		queryFn: skipToken,
+		initialData: 0,
+		enabled: false,
+	}).data;
+}
 
 export function useSettings(enabled = true) {
 	return useQuery({
@@ -42,15 +57,24 @@ export function useSaveSettings() {
 	return useMutation({
 		mutationFn: (settings: RuntimeSettings) => saveSettings(settings),
 		onMutate: () => captureSession(queryClient),
-		onSuccess: (response, _settings, sessionEpoch) => {
+		onSuccess: async (response, _settings, sessionEpoch) => {
 			if (!isSessionCurrent(queryClient, sessionEpoch)) return;
+			const keys = [["config"], ["home"], ["rails"], ["title"]];
+			await Promise.all(
+				keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+			);
+			if (!isSessionCurrent(queryClient, sessionEpoch)) return;
+			queryClient.setQueryData<number>(
+				DISCOVERY_REVISION_KEY,
+				(revision = 0) => revision + 1,
+			);
 			queryClient.setQueryData(SETTINGS_QUERY_KEY, response);
 			queryClient.setQueryData(["config"], (current: object | undefined) =>
 				current
 					? { ...current, appearance: response.settings.appearance }
 					: current,
 			);
-			for (const key of [["config"], ["home"], ["rails"], ["title"]]) {
+			for (const key of keys) {
 				void queryClient.invalidateQueries({ queryKey: key });
 			}
 		},

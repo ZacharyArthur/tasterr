@@ -20,8 +20,9 @@ from tasterr.catalog.models import RegionOption, ServiceOption
 from tasterr.clients.errors import UpstreamError
 from tasterr.clients.seerr import SeerrClient
 from tasterr.clients.tmdb import CatalogNotConfigured, TmdbClient
-from tasterr.db.runtime_settings import save_runtime_settings
+from tasterr.db.runtime_settings import load_runtime_settings, save_runtime_settings
 from tasterr.runtime_settings import (
+    DiscoverySetting,
     RailTypeDescriptor,
     RuntimeSettings,
     rail_type_descriptors,
@@ -34,6 +35,7 @@ router = APIRouter()
 class SettingsResponse(BaseModel):
     settings: RuntimeSettings
     rail_types: list[RailTypeDescriptor]
+    locked_fields: list[DiscoverySetting] = []
 
 
 class RegionsResponse(BaseModel):
@@ -64,8 +66,13 @@ class ConnectionTestResponse(BaseModel):
 async def get_admin_settings(
     runtime: RuntimeSettingsDep,
     _admin: Annotated[AuthedSession, Depends(require_admin)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SettingsResponse:
-    return SettingsResponse(settings=runtime, rail_types=rail_type_descriptors())
+    return SettingsResponse(
+        settings=runtime,
+        rail_types=rail_type_descriptors(),
+        locked_fields=settings.locked_discovery_fields,
+    )
 
 
 @router.put(
@@ -77,10 +84,19 @@ async def put_admin_settings(
     payload: RuntimeSettings,
     _admin: Annotated[AuthedSession, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SettingsResponse:
+    stored = await load_runtime_settings(db)
+    payload = payload.model_copy(
+        update={field: getattr(stored, field) for field in settings.locked_discovery_fields}
+    )
     saved = await save_runtime_settings(db, payload)
     await db.commit()
-    return SettingsResponse(settings=saved, rail_types=rail_type_descriptors())
+    return SettingsResponse(
+        settings=settings.resolve_runtime(saved),
+        rail_types=rail_type_descriptors(),
+        locked_fields=settings.locked_discovery_fields,
+    )
 
 
 @router.get("/regions", response_model=RegionsResponse)

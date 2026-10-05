@@ -17,6 +17,7 @@ from itertools import zip_longest
 
 from pydantic import SecretStr
 
+from tasterr.catalog.discovery import DiscoveryFilter
 from tasterr.catalog.models import MediaSummary, MediaType, RailKind, ServiceOption
 from tasterr.catalog.plex import PlexCatalogService
 from tasterr.catalog.service import CatalogService
@@ -48,6 +49,11 @@ class RailContext:
     plex: PlexCatalogService | None = None
     plex_account_token: SecretStr | None = None
     disabled_rail_types: frozenset[RailType] = frozenset()
+    catalog_succeeded: bool = False
+
+    @property
+    def discovery_filter(self) -> DiscoveryFilter | None:
+        return self.catalog.discovery_filter
 
     def enabled(self, rail_type: RailType) -> bool:
         return rail_type not in self.disabled_rail_types

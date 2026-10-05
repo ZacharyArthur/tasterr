@@ -98,6 +98,8 @@ test("admin settings replacement uses a typed JSON PUT with same-origin credenti
 	const body = {
 		region: "US",
 		service_ids: [8],
+		hide_library_items: false,
+		excluded_service_ids: [],
 		disabled_rail_types: ["genres" as const],
 		appearance: { theme: "light" as const, accent: "azure" as const },
 	};

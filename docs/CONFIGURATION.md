@@ -27,6 +27,8 @@ or place secret values directly in a Compose file.
 | `TASTERR_PORT` | No | `8000` | Uvicorn container port and healthcheck target. |
 | `TASTERR_FORWARDED_ALLOW_IPS` | No | `127.0.0.1` | Comma-separated direct proxy-peer IP addresses or CIDRs allowed to supply forwarded client/scheme headers. |
 | `TASTERR_PLEX_MAX_CONNECTION_PROBES` | No | `6` | Maximum unauthenticated Plex identity probes per advertised server resource. Accepts 3–12. Up to four resources are probed concurrently, so raising it can increase aggregate bounded discovery traffic. |
+| `TASTERR_HIDE_LIBRARY_ITEMS` | No | unset | Override household library hiding with `true` or `false`; locks the admin control. |
+| `TASTERR_EXCLUDED_SERVICE_IDS` | No | unset | Override subscription-service exclusions with a JSON array of up to eight unique positive TMDB provider IDs, e.g. `[8]`; `[]` explicitly clears exclusions and locks the control. |
 
 Empty or missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
 The proxy allowlist accepts literal IP addresses and CIDRs only; empty entries,
@@ -91,11 +93,41 @@ Administrators manage these non-secret values in the Settings screen:
 
 - two-letter TMDB region (default `US`);
 - up to eight streaming service identifiers;
+- library hiding and up to eight excluded subscription-service identifiers (both off by default);
 - enabled/disabled rail types;
 - dark/light theme and crimson, azure, violet, emerald, or amber accent.
 
 They are stored in SQLite, returned through an explicit public response model, and
 never accept URLs, keys, tokens, cookies, or credentials.
+
+Discovery exclusions apply to Home, additional rails, featured heroes, household
+picks, and related-title suggestions. Search, My List, Continue Watching, and direct
+title details remain accessible. Library hiding includes partially available TV and
+either regular or 4K availability reported by Seerr; pending/processing requests
+remain eligible. Excluded services match subscription availability in the configured
+region, even when another service also offers the title. Rental, purchase, free, and
+ad-supported listings alone do not hide it. Exclusions win over selected services;
+a conflicting service rail is omitted and other discovery may become thin or empty.
+
+Verification is best-effort with one five-second budget across a request's checks,
+concurrency eight, and at most three pages per discover source for replacements.
+Additional refill page fetches share the remaining budget; expiry retains earlier results.
+Unverified titles remain visible during outages or budget expiry. Library results
+use the existing 60-second availability cache; streaming membership uses TMDB's
+six-hour detail cache and existing stale-on-error window (up to 48 additional hours),
+so upstream metadata changes may take time to appear. The shared catalog cache holds
+up to 4,096 entries, giving household discovery checks more room alongside other catalog
+reads. This is an entry limit rather than a byte limit; larger households may still evict
+entries and hit the best-effort verification deadline. Seerr's separate cache is unchanged.
+
+Environment overrides take effect on restart and override only explicitly supplied
+fields, including `false` and `[]`. The admin screen shows effective values and locks;
+saving other preferences preserves the underlying stored values, which take effect
+again after removing overrides. Invalid exclusion IDs or malformed environment
+values (including empty strings, JSON `null`, booleans/numeric strings/floats in the
+ID array) fail validation; omit the variable entirely to leave a preference editable.
+Changing region clears editable excluded services; locked provider IDs remain fixed
+and are evaluated in the new region.
 
 The rail list includes independent switches for **Continue Watching**, **Picks You
 Wouldn't Usually Watch**, and **Something for Everyone Tonight**. All three default

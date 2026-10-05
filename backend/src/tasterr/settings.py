@@ -2,13 +2,21 @@
 
 from functools import lru_cache
 from ipaddress import ip_address, ip_network
+from json import loads
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, SecretStr, StrictInt, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from tasterr.runtime_settings import Appearance, RuntimeSettings
+from tasterr.runtime_settings import (
+    MAX_SELECTED_SERVICES,
+    Appearance,
+    DiscoverySetting,
+    RuntimeSettings,
+    validate_service_ids,
+)
 
 
 class Settings(BaseSettings):
@@ -32,6 +40,41 @@ class Settings(BaseSettings):
     tasterr_port: int = 8000
     tasterr_forwarded_allow_ips: str = "127.0.0.1"
     tasterr_plex_max_connection_probes: int = Field(default=6, ge=3, le=12)
+    tasterr_hide_library_items: bool | None = None
+    tasterr_excluded_service_ids: Annotated[list[StrictInt] | None, NoDecode] = Field(
+        default=None, max_length=MAX_SELECTED_SERVICES, validate_default=False
+    )
+
+    @field_validator("tasterr_excluded_service_ids", mode="before")
+    @classmethod
+    def _excluded_services_input(cls, value: object) -> object:
+        # Decode here because the settings source discards JSON null before
+        # validation. The default None means absent; an explicit null is invalid.
+        decoded: object = loads(value) if isinstance(value, str) else value
+        if decoded is None:
+            raise ValueError("excluded services must be a JSON array, not null")
+        return decoded
+
+    @field_validator("tasterr_excluded_service_ids")
+    @classmethod
+    def _excluded_services(cls, value: list[int] | None) -> list[int] | None:
+        return validate_service_ids(value) if value is not None else None
+
+    @property
+    def locked_discovery_fields(self) -> list[DiscoverySetting]:
+        fields: list[DiscoverySetting] = []
+        if self.tasterr_hide_library_items is not None:
+            fields.append("hide_library_items")
+        if self.tasterr_excluded_service_ids is not None:
+            fields.append("excluded_service_ids")
+        return fields
+
+    def resolve_runtime(self, runtime: RuntimeSettings) -> RuntimeSettings:
+        return runtime.model_copy(
+            update={
+                field: getattr(self, f"tasterr_{field}") for field in self.locked_discovery_fields
+            }
+        )
 
     @field_validator("seerr_internal_url", "seerr_external_url")
     @classmethod

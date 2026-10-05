@@ -59,6 +59,7 @@ class TasteService:
         self._db = db
         self._catalog = catalog
         self._availability = availability
+        self.discovery_source_succeeded = False
 
     async def rollback(self) -> None:
         """Restore the shared session after a degraded operation, so a failed
@@ -167,6 +168,7 @@ class TasteService:
                 detail = await self._catalog.detail(*source_key)
             except UpstreamError:
                 continue
+            self.discovery_source_succeeded = True
             pool: dict[TitleKey, MediaSummary] = {}
             for summary in detail.recommendations + detail.similar:
                 key: TitleKey = (summary.media_type, summary.id)
@@ -291,6 +293,7 @@ class TasteService:
         with suppress(UpstreamError):
             sources.append(await self._catalog.trending())
         pool: dict[TitleKey, MediaSummary] = {}
+        self.discovery_source_succeeded |= bool(sources)
         for summaries in sources:
             for summary in summaries:
                 key: TitleKey = (summary.media_type, summary.id)
@@ -311,6 +314,7 @@ class TasteService:
                 summaries = await source
             except UpstreamError:
                 return False
+            self.discovery_source_succeeded = True
             for summary in summaries:
                 key: TitleKey = (summary.media_type, summary.id)
                 if key in excluded or key in pool:
@@ -391,6 +395,9 @@ class TasteService:
         return [by_lower[label] for label in labels if label in by_lower]
 
     async def _to_candidates(self, keys: list[TitleKey]) -> list[Candidate]:
+        if self._catalog.discovery_filter is not None:
+            eligible = await self._catalog.discovery_filter.eligible(keys)
+            keys = [key for key in keys if key in eligible]
         records = await self.ensure_vectors(keys)
         available = await self._in_library(list(records))
         selected = set(self._catalog.selected_service_ids)
@@ -410,6 +417,8 @@ class TasteService:
     async def _in_library(self, keys: list[TitleKey]) -> set[TitleKey]:
         """Titles earning the availability boost; Seerr unconfigured/down
         degrades to no boost, never an error."""
+        if self._catalog.discovery_filter is not None:
+            return await self._catalog.discovery_filter.in_library(keys)
         if self._availability is None or not keys:
             return set()
         statuses = await self._availability.batch(keys)

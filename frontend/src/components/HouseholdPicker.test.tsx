@@ -93,6 +93,67 @@ test("starts collapsed and can be opened and hidden", async () => {
 	expect(heading.closest("details")?.open).toBe(false);
 });
 
+test("ordinary member refetch preserves a completed household result", async () => {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).endsWith("household-members"))
+				return jsonResponse([member(1), member(2)]);
+			if (String(input).endsWith("household-blend"))
+				return jsonResponse(blendRail(21, 22, 23, 24));
+			return jsonResponse({});
+		}),
+	);
+	const queryClient = new QueryClient();
+	renderPicker(1, queryClient);
+	await openPicker();
+	fireEvent.click(await screen.findByRole("checkbox", { name: "Viewer 2" }));
+	fireEvent.click(
+		screen.getByRole("button", { name: "Find something for us" }),
+	);
+	expect(await screen.findAllByText("Title 21")).toHaveLength(2);
+	await queryClient.invalidateQueries({ queryKey: ["household-members"] });
+	expect(screen.getAllByText("Title 21")).toHaveLength(2);
+});
+
+test("member refetch preserves a pending blend and navigation remount clears its result", async () => {
+	let resolveBlend!: (response: Response) => void;
+	const pendingBlend = new Promise<Response>((resolve) => {
+		resolveBlend = resolve;
+	});
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).endsWith("household-members"))
+				return jsonResponse([member(1), member(2)]);
+			if (String(input).endsWith("household-blend")) return pendingBlend;
+			return jsonResponse({});
+		}),
+	);
+	const queryClient = new QueryClient();
+	const view = renderPicker(1, queryClient);
+	await openPicker();
+	fireEvent.click(await screen.findByRole("checkbox", { name: "Viewer 2" }));
+	fireEvent.click(
+		screen.getByRole("button", { name: "Find something for us" }),
+	);
+	await screen.findByRole("button", { name: "Finding a shared pick…" });
+	await queryClient.invalidateQueries({ queryKey: ["household-members"] });
+	expect(
+		(
+			screen.getByRole("button", {
+				name: "Finding a shared pick…",
+			}) as HTMLButtonElement
+		).disabled,
+	).toBe(true);
+	resolveBlend(jsonResponse(blendRail(21, 22, 23, 24)));
+	expect(await screen.findAllByText("Title 21")).toHaveLength(2);
+	view.unmount();
+	renderPicker(1, queryClient);
+	await openPicker();
+	expect(screen.queryByText("Title 21")).toBeNull();
+});
+
 test("locks the caller, enforces the six-person limit, and submits sorted ids", async () => {
 	const posts: unknown[] = [];
 	vi.stubGlobal(
