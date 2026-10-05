@@ -6,11 +6,21 @@ makes the env/DB boundary structural rather than convention-based.
 """
 
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictInt, field_validator
 
 DEFAULT_REGION = "US"
 MAX_SELECTED_SERVICES = 8
+DiscoverySetting = Literal["hide_library_items", "excluded_service_ids"]
+
+
+def validate_service_ids(value: list[int]) -> list[int]:
+    if any(service_id <= 0 for service_id in value):
+        raise ValueError("service ids must be positive")
+    if len(value) != len(set(value)):
+        raise ValueError("service ids must be unique")
+    return value
 
 
 class Theme(StrEnum):
@@ -69,6 +79,8 @@ class Appearance(BaseModel):
 class RuntimeSettings(BaseModel):
     region: str = DEFAULT_REGION
     service_ids: list[int] = Field(default=[], max_length=MAX_SELECTED_SERVICES)
+    hide_library_items: bool = False
+    excluded_service_ids: list[StrictInt] = Field(default=[], max_length=MAX_SELECTED_SERVICES)
     disabled_rail_types: list[RailType] = []
     appearance: Appearance = Field(default_factory=Appearance)
 
@@ -86,14 +98,10 @@ class RuntimeSettings(BaseModel):
             raise ValueError("region must be a two-letter country code")
         return value
 
-    @field_validator("service_ids")
+    @field_validator("service_ids", "excluded_service_ids")
     @classmethod
     def validate_service_ids(cls, value: list[int]) -> list[int]:
-        if any(service_id <= 0 for service_id in value):
-            raise ValueError("service ids must be positive")
-        if len(value) != len(set(value)):
-            raise ValueError("service ids must be unique")
-        return value
+        return validate_service_ids(value)
 
     @field_validator("disabled_rail_types")
     @classmethod

@@ -54,11 +54,15 @@ def build_taste(
         request.app.state.catalog_cache,
     )
     resolved = runtime if runtime is not None else RuntimeSettings()
-    return TasteService(
-        db,
-        CatalogService(client, resolved.region, resolved.service_ids),
-        availability,
+    catalog = CatalogService(
+        client,
+        resolved.region,
+        resolved.service_ids,
+        availability=availability,
+        hide_library_items=resolved.hide_library_items,
+        excluded_service_ids=resolved.excluded_service_ids,
     )
+    return TasteService(db, catalog, availability)
 
 
 async def refresh_profile(

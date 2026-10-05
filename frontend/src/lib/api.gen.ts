@@ -923,6 +923,16 @@ export interface components {
              */
             service_ids: number[];
             /**
+             * Hide Library Items
+             * @default false
+             */
+            hide_library_items: boolean;
+            /**
+             * Excluded Service Ids
+             * @default []
+             */
+            excluded_service_ids: number[];
+            /**
              * Disabled Rail Types
              * @default []
              */
@@ -971,6 +981,11 @@ export interface components {
             settings: components["schemas"]["RuntimeSettings"];
             /** Rail Types */
             rail_types: components["schemas"]["RailTypeDescriptor"][];
+            /**
+             * Locked Fields
+             * @default []
+             */
+            locked_fields: ("hide_library_items" | "excluded_service_ids")[];
         };
         /** SignalBody */
         SignalBody: {

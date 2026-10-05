@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import tasterr.recommend.service as service_mod
 from tasterr.catalog.availability import Availability, AvailabilityService
+from tasterr.catalog.discovery import DiscoveryFilter
 from tasterr.catalog.facts import TitleFacts
 from tasterr.catalog.models import MediaDetail, MediaSummary, MediaType, WatchProviders
 from tasterr.catalog.service import CatalogService
@@ -58,6 +59,8 @@ def _detail(tmdb_id: int, recommendations: list[MediaSummary]) -> MediaDetail:
 
 
 class FakeCatalog:
+    discovery_filter: DiscoveryFilter | None = None
+
     def __init__(self) -> None:
         self.region = "US"
         self.selected_service_ids: tuple[int, ...] = ()
@@ -167,6 +170,37 @@ async def test_warm_vectors_skip_facts_fetches(db: AsyncSession) -> None:
 
     assert catalog.facts_calls == []
     assert records == {("movie", 1): record}
+
+
+async def test_exclusions_use_current_metadata_before_ranking_and_preserve_my_list(
+    db: AsyncSession,
+) -> None:
+    user_id = await _user(db)
+    catalog = FakeCatalog()
+    catalog.providers_by_title = {("movie", 1): [8], ("movie", 3): [8]}
+    catalog.details[("movie", 3)] = _detail(3, [_summary(1), _summary(2)])
+    catalog.trending_items = [_summary(1), _summary(2)]
+    catalog.discover_items = [_summary(1), _summary(2)]
+    await store.record_signal(db, user_id, "movie", 3, "request")
+    await store.record_signal(db, user_id, "movie", 3, "watchlist")
+    await store.save_features(
+        db,
+        ("movie", 2),
+        FeatureRecord(vector={"genre:drama": 1.0}, watch_region="US", flatrate_provider_ids=[8]),
+    )
+    domain_catalog = cast("CatalogService", catalog)
+    domain_catalog.discovery_filter = DiscoveryFilter(domain_catalog, None, False, [8])
+    taste = TasteService(db, domain_catalog)
+    assert [item.id for item in await taste.recommended_for_you(user_id)] == [2]
+    more_like = await taste.more_like(user_id)
+    assert more_like is not None
+    assert [item.id for item in more_like[2]] == [2]
+    assert [item.id for item in await taste.my_list(user_id)] == [3]
+    second = User(seerr_user_id=2, display_name="member", auth_type="plex")
+    db.add(second)
+    await db.flush()
+    await store.record_signal(db, second.id, "movie", 3, "request")
+    assert [item.id for item in await taste.household_blend([user_id, second.id])] == [2]
 
 
 async def test_stale_vector_is_rebuilt_and_persisted(db: AsyncSession) -> None:

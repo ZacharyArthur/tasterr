@@ -1,5 +1,8 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
-import { RegionServicePicker } from "../components/RegionServicePicker";
+import {
+	MAX_SERVICES,
+	RegionServicePicker,
+} from "../components/RegionServicePicker";
 import {
 	useConnectionTest,
 	useRegions,
@@ -37,6 +40,8 @@ export function Settings() {
 			setDraft({
 				...settings.data.settings,
 				appearance: settings.data.settings.appearance ?? DEFAULT_APPEARANCE,
+				hide_library_items: settings.data.settings.hide_library_items ?? false,
+				excluded_service_ids: settings.data.settings.excluded_service_ids ?? [],
 			});
 		}
 	}, [settings.data]);
@@ -63,6 +68,28 @@ export function Settings() {
 
 	const appearance = draft.appearance ?? DEFAULT_APPEARANCE;
 	const pending = save.isPending;
+	const lockedFields = settings.data.locked_fields ?? [];
+	const libraryLocked = lockedFields.includes("hide_library_items");
+	const servicesLocked = lockedFields.includes("excluded_service_ids");
+	const excludedIds = draft.excluded_service_ids ?? [];
+	const exclusionServices = [
+		...(services.data?.services ?? []),
+		...excludedIds
+			.filter(
+				(id) =>
+					!services.data?.services.some(
+						(service) => service.provider_id === id,
+					),
+			)
+			.map((id) => ({
+				provider_id: id,
+				name: services.isPending
+					? `Service ${id} (loading options…)`
+					: services.isError
+						? `Service ${id} (options unavailable)`
+						: `Service ${id} (not in current options)`,
+			})),
+	];
 	const submit = (event: FormEvent) => {
 		event.preventDefault();
 		setSaved(false);
@@ -88,12 +115,126 @@ export function Settings() {
 						servicesError={services.isError}
 						disabled={pending}
 						onRegionChange={(region) =>
-							setDraft({ ...draft, region, service_ids: [] })
+							setDraft({
+								...draft,
+								region,
+								service_ids: [],
+								excluded_service_ids: servicesLocked ? excludedIds : [],
+							})
 						}
 						onSelectedIdsChange={(service_ids) =>
 							setDraft({ ...draft, service_ids })
 						}
 					/>
+				</SettingsSection>
+
+				<SettingsSection title="Discovery exclusions">
+					<p className="mb-4 text-sm text-app-subtle">
+						Hide titles from discovery rails, the featured hero, household
+						picks, and related suggestions. Search, My List, and Continue
+						Watching stay available. Unknown availability stays visible if a
+						service is unavailable or verification takes too long.
+					</p>
+					<label className="flex min-h-11 items-center gap-3 text-app-text">
+						<input
+							type="checkbox"
+							checked={draft.hide_library_items ?? false}
+							disabled={pending || libraryLocked}
+							onChange={(event) =>
+								setDraft({ ...draft, hide_library_items: event.target.checked })
+							}
+							className="h-5 w-5 accent-app-accent"
+						/>
+						Hide titles already in the library
+					</label>
+					<p className="text-sm text-app-subtle">
+						Includes partially available TV series and either regular or 4K
+						copies.
+					</p>
+					{libraryLocked && (
+						<p className="mt-2 text-sm text-app-subtle">
+							Library hiding is controlled by an environment variable.
+						</p>
+					)}
+					<fieldset disabled={pending || servicesLocked} className="mt-6">
+						<legend className="font-medium text-app-text">
+							Excluded streaming services
+						</legend>
+						<p className="text-sm text-app-subtle">
+							Choose up to {MAX_SERVICES} services. Subscription matches in your
+							region are hidden; rental, purchase, free, and ad-supported
+							listings alone are kept. Exclusions win over selected streaming
+							services, so overlapping choices can leave fewer or empty rails.
+						</p>
+						{servicesLocked && (
+							<p className="mt-2 text-sm text-app-subtle">
+								Service exclusions are controlled by an environment variable.
+							</p>
+						)}
+						{excludedIds.length > 0 && (
+							<p className="mt-2 text-sm text-app-subtle">
+								Excluded:{" "}
+								{excludedIds
+									.map(
+										(id) =>
+											services.data?.services.find(
+												(service) => service.provider_id === id,
+											)?.name ?? `Service ${id}`,
+									)
+									.join(", ")}
+							</p>
+						)}
+						{services.isPending && (
+							<output className="mt-3 block text-sm text-app-subtle">
+								Loading exclusion services…
+							</output>
+						)}
+						{services.isError && (
+							<p role="alert" className="mt-3 text-sm text-status-error">
+								Exclusion services are unavailable. Your current draft is
+								unchanged.
+							</p>
+						)}
+						{exclusionServices.length > 0 && (
+							<div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+								{exclusionServices.map((service) => {
+									const checked = excludedIds.includes(service.provider_id);
+									return (
+										<label
+											key={service.provider_id}
+											className="flex min-h-11 items-center gap-3 rounded border border-app-border bg-app-surface px-3 text-sm text-app-text"
+										>
+											<input
+												type="checkbox"
+												checked={checked}
+												disabled={
+													!checked && excludedIds.length >= MAX_SERVICES
+												}
+												onChange={() =>
+													setDraft({
+														...draft,
+														excluded_service_ids: checked
+															? excludedIds.filter(
+																	(id) => id !== service.provider_id,
+																)
+															: [...excludedIds, service.provider_id],
+													})
+												}
+												className="h-5 w-5 accent-app-accent"
+											/>
+											Exclude {service.name}
+										</label>
+									);
+								})}
+							</div>
+						)}
+						{!servicesLocked && excludedIds.length >= MAX_SERVICES && (
+							<output className="mt-2 block text-sm text-status-warning">
+								Exclusion limit reached ({MAX_SERVICES} services). Remove one to
+								choose another.
+							</output>
+						)}
+					</fieldset>
 				</SettingsSection>
 
 				<SettingsSection title="Home rails">

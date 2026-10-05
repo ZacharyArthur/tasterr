@@ -22,6 +22,8 @@ const SETTINGS = {
 		service_ids: [8],
 		disabled_rail_types: [],
 		appearance: { theme: "dark", accent: "crimson" },
+		hide_library_items: false,
+		excluded_service_ids: [],
 	},
 	rail_types: [
 		{ id: "popular", label: "Popular" },
@@ -123,6 +125,8 @@ test("initializes the complete draft and saves only the typed runtime document",
 		service_ids: [8, 9],
 		disabled_rail_types: ["popular"],
 		appearance: { theme: "light", accent: "azure" },
+		hide_library_items: false,
+		excluded_service_ids: [],
 	});
 	for (const key of [["config"], ["home"], ["rails"], ["title"]]) {
 		expect(queryClient.getQueryState(key)?.isInvalidated ?? true).toBe(true);
@@ -146,6 +150,197 @@ test("changing region clears selections and loads region services", async () => 
 	expect(screen.queryByText(/Selected:/)).toBeNull();
 });
 
+test("saves exclusions separately from selected services and clears them on region change", async () => {
+	const fetchMock = routeAdminFetch();
+	renderSettings(fetchMock);
+	await screen.findByLabelText("Exclude Netflix");
+	fireEvent.click(screen.getByLabelText("Hide titles already in the library"));
+	fireEvent.click(screen.getByLabelText("Exclude Netflix"));
+	expect((screen.getByLabelText("Netflix") as HTMLInputElement).checked).toBe(
+		true,
+	);
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByText("Settings saved.");
+	const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+	expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({
+		service_ids: [8],
+		hide_library_items: true,
+		excluded_service_ids: [8],
+	});
+	fireEvent.change(screen.getByLabelText("Region"), {
+		target: { value: "GB" },
+	});
+	await waitFor(() =>
+		expect(
+			(screen.getByLabelText("Exclude Netflix") as HTMLInputElement).checked,
+		).toBe(false),
+	);
+});
+
+test("shows environment locks and preserves locked exclusions when changing region", async () => {
+	const excludedIds = [8, 99, 100, 101, 102, 103, 104, 105];
+	const baseFetch = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && !init?.method)
+				return response({
+					...SETTINGS,
+					settings: {
+						...SETTINGS.settings,
+						hide_library_items: true,
+						excluded_service_ids: excludedIds,
+					},
+					locked_fields: ["hide_library_items", "excluded_service_ids"],
+				});
+			return baseFetch(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	await screen.findByLabelText("Exclude Netflix");
+	expect(screen.queryByText(/Exclusion limit reached/)).toBeNull();
+	expect(
+		(
+			screen.getByLabelText(
+				"Hide titles already in the library",
+			) as HTMLInputElement
+		).disabled,
+	).toBe(true);
+	expect(
+		(
+			screen
+				.getByLabelText("Exclude Netflix")
+				.closest("fieldset") as HTMLFieldSetElement
+		).disabled,
+	).toBe(true);
+	expect(
+		screen.getByText(
+			"Service exclusions are controlled by an environment variable.",
+		),
+	).toBeTruthy();
+	fireEvent.change(screen.getByLabelText("Region"), {
+		target: { value: "GB" },
+	});
+	await screen.findByLabelText("Exclude Netflix");
+	expect(
+		(screen.getByLabelText("Exclude Netflix") as HTMLInputElement).checked,
+	).toBe(true);
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByText("Settings saved.");
+	const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+	expect(JSON.parse(String(put?.[1]?.body))).toMatchObject({
+		region: "GB",
+		excluded_service_ids: excludedIds,
+	});
+});
+
+test("missing excluded services stay removable at the eight-service limit", async () => {
+	const missingIds = Array.from({ length: 8 }, (_, index) => 99 + index);
+	const baseFetch = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && !init?.method)
+				return response({
+					...SETTINGS,
+					settings: { ...SETTINGS.settings, excluded_service_ids: missingIds },
+				});
+			return baseFetch(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	await screen.findByLabelText("Exclude Netflix");
+	expect(screen.getByText(/Exclusion limit reached/)).toBeTruthy();
+	expect(
+		(screen.getByLabelText("Exclude Netflix") as HTMLInputElement).disabled,
+	).toBe(true);
+	fireEvent.click(
+		screen.getByLabelText("Exclude Service 99 (not in current options)"),
+	);
+	expect(screen.queryByText(/Exclusion limit reached/)).toBeNull();
+	expect(
+		(screen.getByLabelText("Exclude Netflix") as HTMLInputElement).disabled,
+	).toBe(false);
+	fireEvent.click(screen.getByLabelText("Exclude Netflix"));
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByText("Settings saved.");
+	const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+	expect(JSON.parse(String(put?.[1]?.body)).excluded_service_ids).toEqual([
+		...missingIds.slice(1),
+		8,
+	]);
+});
+
+test("saved exclusion labels wait for regional options without losing the selection", async () => {
+	const options = deferred<Response>();
+	const baseFetch = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && !init?.method)
+				return response({
+					...SETTINGS,
+					settings: { ...SETTINGS.settings, excluded_service_ids: [8] },
+				});
+			if (String(input).includes("/api/v1/services")) return options.promise;
+			return baseFetch(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	expect(
+		(
+			(await screen.findByLabelText(
+				"Exclude Service 8 (loading options…)",
+			)) as HTMLInputElement
+		).checked,
+	).toBe(true);
+	expect(
+		screen.queryByLabelText("Exclude Service 8 (not in current options)"),
+	).toBeNull();
+	options.resolve(response(SERVICES));
+	expect(
+		((await screen.findByLabelText("Exclude Netflix")) as HTMLInputElement)
+			.checked,
+	).toBe(true);
+});
+
+test.each([
+	false,
+	true,
+])("missing exclusions remain visible when options fail and honor locks=%s", async (locked) => {
+	const baseFetch = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && !init?.method)
+				return response({
+					...SETTINGS,
+					settings: {
+						...SETTINGS.settings,
+						excluded_service_ids: Array.from(
+							{ length: 8 },
+							(_, index) => 99 + index,
+						),
+					},
+					locked_fields: locked ? ["excluded_service_ids"] : [],
+				});
+			if (String(input).includes("/api/v1/services")) return response({}, 502);
+			return baseFetch(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	const checkbox = await screen.findByLabelText(
+		"Exclude Service 99 (options unavailable)",
+	);
+	await screen.findByText(/Exclusion services are unavailable/);
+	expect((checkbox as HTMLInputElement).checked).toBe(true);
+	expect((checkbox.closest("fieldset") as HTMLFieldSetElement).disabled).toBe(
+		locked,
+	);
+	expect(Boolean(screen.queryByText(/Exclusion limit reached/))).toBe(!locked);
+	if (!locked) {
+		fireEvent.click(checkbox);
+		expect((checkbox as HTMLInputElement).checked).toBe(false);
+		expect(screen.queryByText(/Exclusion limit reached/)).toBeNull();
+	}
+});
+
 test("connection results are announced without exposing configuration", async () => {
 	const fetchMock = routeAdminFetch();
 	renderSettings(fetchMock);
@@ -158,8 +353,12 @@ test("connection results are announced without exposing configuration", async ()
 	expect(JSON.parse(String(post?.[1]?.body))).toEqual({ target: "tmdb" });
 });
 
-test("a late save cannot repopulate cache after the session changes", async () => {
+test.each([
+	"request",
+	"cancellation",
+])("a late save cannot repopulate cache after the session changes during %s", async (phase) => {
 	const lateSave = deferred<Response>();
+	const cancellation = deferred<void>();
 	const baseFetch = routeAdminFetch();
 	const fetchMock = vi.fn(
 		async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -172,6 +371,9 @@ test("a late save cannot repopulate cache after the session changes", async () =
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
+	const cancelQueries = vi.spyOn(queryClient, "cancelQueries");
+	if (phase === "cancellation")
+		cancelQueries.mockImplementationOnce(() => cancellation.promise);
 	queryClient.setQueryData(["auth", "me"], {
 		id: 1,
 		display_name: "Viewer A",
@@ -189,6 +391,13 @@ test("a late save cannot repopulate cache after the session changes", async () =
 		),
 	);
 	expect(queryClient.getMutationCache().getAll()).toHaveLength(1);
+	if (phase === "cancellation") {
+		lateSave.resolve(response({ ...SETTINGS, owner: "A-late" }));
+		await waitFor(() => expect(cancelQueries).toHaveBeenCalledTimes(4));
+		expect(
+			cancelQueries.mock.calls.map(([filters]) => filters?.queryKey),
+		).toEqual([["config"], ["home"], ["rails"], ["title"]]);
+	}
 	await setConfirmedSession(queryClient, {
 		id: 2,
 		display_name: "Viewer B",
@@ -197,7 +406,9 @@ test("a late save cannot repopulate cache after the session changes", async () =
 	});
 	expect(queryClient.getMutationCache().getAll()).toEqual([]);
 
-	lateSave.resolve(response({ ...SETTINGS, owner: "A-late" }));
+	if (phase === "request")
+		lateSave.resolve(response({ ...SETTINGS, owner: "A-late" }));
+	else cancellation.resolve();
 	await waitFor(() =>
 		expect(
 			(
@@ -209,5 +420,8 @@ test("a late save cannot repopulate cache after the session changes", async () =
 	);
 	expect(
 		queryClient.getQueryData<{ owner?: string }>(["admin", "settings"])?.owner,
+	).toBeUndefined();
+	expect(
+		queryClient.getQueryData(["discovery-settings-revision"]),
 	).toBeUndefined();
 });

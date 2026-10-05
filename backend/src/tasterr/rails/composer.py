@@ -3,8 +3,8 @@
 Each provider fetch degrades independently (an error yields no rail, never a
 failed request); initial Home titles are de-duped across rails, while paginated
 category rails de-dupe only internally; rails below the minimum size are dropped.
-A home feed with no rails at all means the catalog is effectively down — surfaced
-as an upstream failure (→ 502).
+A rail-less Home surfaces catalog failure (→ 502), unless active filtering leaves
+an empty feed after a discovery source was successfully read.
 """
 
 import asyncio
@@ -64,10 +64,21 @@ async def build_home(ctx: RailContext) -> HomeFeed:
     providers = _enabled_providers(ctx, providers)
     rails = await _compose_rails(ctx, providers)
     if not rails:
-        if not providers:
+        if not providers or (
+            ctx.discovery_filter is not None
+            and (
+                ctx.catalog_succeeded
+                or (ctx.taste is not None and ctx.taste.discovery_source_succeeded)
+            )
+        ):
             return HomeFeed()
         raise UpstreamUnavailable("home feed unavailable")
-    hero = await _build_hero(ctx, _hero_pool(rails)) if ctx.enabled(RailType.HERO) else []
+    hero_rails = rails
+    if ctx.discovery_filter is not None:
+        hero_rails = [
+            rail for rail in rails if rail.id not in (RailType.MY_LIST, RailType.CONTINUE_WATCHING)
+        ]
+    hero = await _build_hero(ctx, _hero_pool(hero_rails)) if ctx.enabled(RailType.HERO) else []
     return HomeFeed(hero=hero, rails=rails)
 
 
@@ -86,6 +97,12 @@ def _enabled_providers(ctx: RailContext, providers: list[RailProvider]) -> list[
 
 async def _selected_services(ctx: RailContext) -> list[ServiceOption]:
     selected = ctx.catalog.selected_service_ids
+    if ctx.discovery_filter is not None:
+        selected = tuple(
+            service_id
+            for service_id in selected
+            if service_id not in ctx.discovery_filter.excluded_service_ids
+        )
     if not selected:
         return []
     try:
@@ -108,6 +125,11 @@ async def _compose_rails(
     seen: set[TitleKey] = set()
     rails: list[Rail] = []
     for provider, items in zip(providers, fetched, strict=True):
+        if ctx.discovery_filter is not None and provider.rail_type not in (
+            RailType.MY_LIST,
+            RailType.CONTINUE_WATCHING,
+        ):
+            items = await ctx.discovery_filter.filter(items)
         picked = _dedupe(items, seen if dedupe_across_rails else set())
         if len(picked) >= provider.min_items:
             if dedupe_across_rails:
@@ -157,9 +179,17 @@ def _dedupe(items: list[MediaSummary], seen: set[TitleKey]) -> list[MediaSummary
 
 async def _safe_fetch(provider: RailProvider, ctx: RailContext) -> list[MediaSummary]:
     try:
-        return await provider.fetch(ctx)
+        items = await provider.fetch(ctx)
     except UpstreamError:
         return []  # one dead source drops its rail, never the whole feed
+    # Engine wrappers return [] on failure or absent signals. Only nonempty
+    # engine results or a successful catalog source establish browsing success.
+    # Home catalog providers must propagate upstream failures to this boundary.
+    if provider.rail_type not in (RailType.MY_LIST, RailType.CONTINUE_WATCHING) and (
+        not provider.exclusive or items
+    ):
+        ctx.catalog_succeeded = True
+    return items
 
 
 def _hero_pool(rails: list[Rail]) -> list[MediaSummary]:
@@ -170,6 +200,8 @@ def _hero_pool(rails: list[Rail]) -> list[MediaSummary]:
 
 
 async def _build_hero(ctx: RailContext, pool: list[MediaSummary]) -> list[HeroSlide]:
+    if ctx.discovery_filter is not None:
+        pool = await ctx.discovery_filter.filter(pool)
     candidates = [s for s in pool if s.backdrop_path][:HERO_SIZE]
     return list(await asyncio.gather(*(_hero_slide(ctx, s) for s in candidates)))
 

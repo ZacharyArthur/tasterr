@@ -4,6 +4,7 @@ import { Hero } from "../components/Hero";
 import { HouseholdPicker } from "../components/HouseholdPicker";
 import { Rail } from "../components/Rail";
 import { TastePicker } from "../components/TastePicker";
+import { useDiscoveryRevision } from "../lib/admin";
 import type { MediaSummary } from "../lib/api";
 import { useMe } from "../lib/auth";
 import { AvailabilityContext, useAvailabilityMap } from "../lib/availability";
@@ -13,6 +14,7 @@ export function Home() {
 	const home = useHome();
 	const rails = useRails();
 	const me = useMe();
+	const discoveryRevision = useDiscoveryRevision();
 	const sentinel = useRef<HTMLDivElement>(null);
 
 	const { hasNextPage, isFetchingNextPage, fetchNextPage } = rails;
@@ -70,7 +72,8 @@ export function Home() {
 							Your home feed is empty
 						</h1>
 						<p className="mt-2 text-app-subtle">
-							An administrator may have disabled every home rail.
+							Discovery settings may have hidden available titles or disabled
+							home rails.
 						</p>
 						{me.data?.is_admin && (
 							<Link
@@ -84,7 +87,12 @@ export function Home() {
 				)}
 				<Hero slides={home.data.hero} />
 				<TastePicker items={items} userId={me.data?.id} />
-				{me.data && <HouseholdPicker key={me.data.id} callerId={me.data.id} />}
+				{me.data && (
+					<HouseholdPicker
+						key={`${me.data.id}:${discoveryRevision}`}
+						callerId={me.data.id}
+					/>
+				)}
 				<div className="flex flex-col gap-8">
 					{home.data.rails.map((rail) => (
 						<Rail key={rail.id} rail={rail} />

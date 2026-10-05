@@ -107,7 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Loose authenticated mutation bucket: per-user, shared across ordinary writes.
     app.state.mutation_bucket = TokenBucket(capacity=60, refill_per_second=60 / 60)
     app.state.admin_bucket = TokenBucket(capacity=30, refill_per_second=30 / 60)
-    app.state.catalog_cache = Cache()
+    app.state.catalog_cache = Cache(maxsize=4096)
     # A separate bounded cache for short-TTL Seerr availability reads, so they
     # never evict the longer-lived TMDB entries (and vice versa).
     app.state.seerr_cache = Cache()

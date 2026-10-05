@@ -7,6 +7,8 @@ from typing import cast
 import pytest
 from pydantic import SecretStr
 
+from tasterr.catalog.discovery import DiscoveryFilter
+from tasterr.catalog.facts import TitleFacts
 from tasterr.catalog.models import (
     Genre,
     MediaDetail,
@@ -77,6 +79,8 @@ def _detail(i: int) -> MediaDetail:
 
 
 class FakeCatalog:
+    discovery_filter: DiscoveryFilter | None = None
+
     def __init__(self) -> None:
         self.region = "US"
         self.selected_service_ids: tuple[int, ...] = ()
@@ -575,6 +579,104 @@ async def test_build_home_returns_hero_and_rails() -> None:
     assert feed.hero[0].logo_path == "/logo.png"
     assert feed.hero[0].genres == ["Drama"]
     assert "trending" in {r.id for r in feed.rails}
+
+
+class ExcludedCatalog(FakeCatalog):
+    async def title_facts(self, media: MediaType, tmdb_id: int) -> TitleFacts:
+        return TitleFacts(
+            tmdb_id=tmdb_id,
+            media_type=media,
+            title="Title",
+            watch_region=self.region,
+            flatrate_provider_ids=[8],
+        )
+
+
+async def test_filtered_empty_is_valid_but_total_failure_is_not() -> None:
+    fake = ExcludedCatalog()
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    feed = await build_home(ctx)
+    assert feed.rails == [] and feed.hero == []
+    fake.fail_trending = fake.fail_discover = True
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    with pytest.raises(UpstreamUnavailable):
+        await build_home(ctx)
+
+
+async def test_successfully_empty_catalog_is_valid_with_active_filter() -> None:
+    fake = ExcludedCatalog()
+    fake.trending_items = []
+    fake.fixed_discover = []
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    feed = await build_home(ctx)
+    assert feed.rails == [] and feed.hero == []
+
+
+async def test_thin_exempt_rail_does_not_mask_total_catalog_failure() -> None:
+    fake = ExcludedCatalog()
+    fake.fail_trending = fake.fail_discover = True
+    ctx = _plex_ctx(fake, FakePlexCatalog(_resume(1, 2, 3)))
+    ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    with pytest.raises(UpstreamUnavailable):
+        await build_home(ctx)
+
+
+async def test_candidate_verification_alone_does_not_mask_catalog_failure() -> None:
+    fake = ExcludedCatalog()
+    fake.fail_trending = fake.fail_discover = True
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    assert await ctx.catalog.discovery_filter.eligible([("movie", 1)]) == set()
+    with pytest.raises(UpstreamUnavailable):
+        await build_home(ctx)
+
+
+async def test_exempt_continue_watching_cannot_seed_excluded_hero() -> None:
+    fake = ExcludedCatalog()
+    ctx = _plex_ctx(fake, FakePlexCatalog(_resume(1, 2, 3, 4)))
+    ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    feed = await build_home(ctx)
+    assert [rail.id for rail in feed.rails] == ["continue-watching"]
+    assert [item.id for item in feed.rails[0].items] == [1, 2, 3, 4]
+    assert feed.hero == []
+
+
+@pytest.mark.parametrize("filtering", [False, True])
+async def test_hero_fallback_prefers_discovery_when_filtering_is_active(filtering: bool) -> None:
+    class SelectivelyExcludedCatalog(ExcludedCatalog):
+        async def title_facts(self, media: MediaType, tmdb_id: int) -> TitleFacts:
+            return TitleFacts(
+                tmdb_id=tmdb_id,
+                media_type=media,
+                title="Title",
+                watch_region=self.region,
+                flatrate_provider_ids=[8] if tmdb_id < 100 else [],
+            )
+
+    fake = SelectivelyExcludedCatalog()
+    fake.trending_items = [_summary(5), _summary(6), _summary(7)]
+    ctx = _plex_ctx(fake, FakePlexCatalog(_resume(1, 2, 3, 4)))
+    if filtering:
+        ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    feed = await build_home(ctx)
+    assert feed.rails[0].id == "continue-watching"
+    assert "trending" not in {rail.id for rail in feed.rails}
+    assert [slide.item.id for slide in feed.hero] == (
+        [item.id for item in feed.rails[1].items[:HERO_SIZE]] if filtering else [1, 2, 3, 4]
+    )
+    assert feed.hero
+
+
+async def test_excluded_selected_service_is_not_fetched() -> None:
+    fake = ExcludedCatalog()
+    fake.selected_service_ids = (8,)
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(ctx.catalog, None, False, [8])
+    await _all_extra_rails(ctx)
+    assert not any(call.get("service_ids") == [8] for call in fake.discover_calls)
 
 
 async def test_one_failing_provider_still_yields_the_rest() -> None:

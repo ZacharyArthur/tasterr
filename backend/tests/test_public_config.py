@@ -60,9 +60,12 @@ CLIENT_SAFE_FIELDS = {
 
 
 def _sentineled_settings() -> Settings:
-    values: dict[str, object] = {}
+    values: dict[str, object] = {
+        "tasterr_hide_library_items": True,
+        "tasterr_excluded_service_ids": [8],
+    }
     for name, field in Settings.model_fields.items():
-        if name in CLIENT_SAFE_FIELDS:
+        if name in CLIENT_SAFE_FIELDS or name in values:
             continue
         annotation = str(field.annotation)
         if "SecretStr" in annotation:
@@ -78,6 +81,8 @@ def test_serialized_output_contains_no_secret_values() -> None:
     runtime = RuntimeSettings(
         region="GB",
         service_ids=[8],
+        hide_library_items=True,
+        excluded_service_ids=[9],
         appearance=Appearance(theme=Theme.LIGHT, accent=Accent.AZURE),
     )
     dumped = PublicConfig.from_settings(_sentineled_settings(), runtime).model_dump_json()
@@ -86,6 +91,21 @@ def test_serialized_output_contains_no_secret_values() -> None:
     assert '"theme":"light"' in dumped
     assert '"accent":"azure"' in dumped
     assert "service_ids" not in dumped
+    assert "hide_library_items" not in dumped
+    assert "excluded_service_ids" not in dumped
+
+
+def test_discovery_override_fields_are_not_public() -> None:
+    names = _property_names(PublicConfig.model_json_schema())
+    assert names.isdisjoint(
+        {
+            "hide_library_items",
+            "excluded_service_ids",
+            "locked_fields",
+            "tasterr_hide_library_items",
+            "tasterr_excluded_service_ids",
+        }
+    )
 
 
 def test_public_config_has_no_secretstr_fields() -> None:

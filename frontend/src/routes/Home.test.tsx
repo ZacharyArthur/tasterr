@@ -6,9 +6,10 @@ import {
 	screen,
 	waitFor,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
 import { Home } from "./Home";
+import { Settings } from "./Settings";
 
 afterEach(() => {
 	cleanup();
@@ -243,4 +244,194 @@ test("household work does not block Home and its rail may repeat a Home title", 
 			.getAllByRole("link")
 			.filter((link) => link.getAttribute("href") === "/title/movie/1"),
 	).toHaveLength(2);
+});
+
+test.each([
+	"completed-blend",
+	"pending-blend",
+	"initial-feed",
+])("save completion clears stale discovery obtained after leaving Settings, mode=%s", async (mode) => {
+	const pendingBlend = mode === "pending-blend";
+	const pendingFeed = mode === "initial-feed";
+	vi.stubGlobal("IntersectionObserver", FiringIntersectionObserver);
+	let resolveHome!: (response: Response) => void;
+	const homeResponse = new Promise<Response>((resolve) => {
+		resolveHome = resolve;
+	});
+	let resolveRails!: (response: Response) => void;
+	const railsResponse = new Promise<Response>((resolve) => {
+		resolveRails = resolve;
+	});
+	let resolveSave!: (response: Response) => void;
+	const saveResponse = new Promise<Response>((resolve) => {
+		resolveSave = resolve;
+	});
+	let resolveBlend!: (response: Response) => void;
+	const blendResponse = new Promise<Response>((resolve) => {
+		resolveBlend = resolve;
+	});
+	const settings = {
+		settings: {
+			region: "US",
+			service_ids: [],
+			disabled_rail_types: [],
+			hide_library_items: false,
+			excluded_service_ids: [],
+			appearance: { theme: "dark", accent: "crimson" },
+		},
+		rail_types: [],
+	};
+	let homeReads = 0;
+	let railsReads = 0;
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url === "/api/v1/settings")
+				return init?.method === "PUT" ? saveResponse : jsonResponse(settings);
+			if (url === "/api/v1/regions")
+				return jsonResponse({
+					regions: [{ code: "US", name: "United States" }],
+				});
+			if (url.startsWith("/api/v1/services"))
+				return jsonResponse({ region: "US", services: [] });
+			if (url === "/api/v1/home") {
+				homeReads++;
+				if (pendingFeed && homeReads === 1) return homeResponse;
+				return jsonResponse({
+					hero: [],
+					rails: [rail("trending", "Trending Now")],
+				});
+			}
+			if (url.startsWith("/api/v1/rails")) {
+				railsReads++;
+				if (pendingFeed && railsReads === 1) return railsResponse;
+				return jsonResponse({ rails: [], next_cursor: null });
+			}
+			if (url === "/api/v1/taste-onboarding")
+				return jsonResponse({ state: "done" });
+			if (url.endsWith("household-members"))
+				return jsonResponse(
+					[1, 2].map((id) => ({
+						id,
+						display_name: `Viewer ${id}`,
+						avatar_url: null,
+						has_taste_signals: true,
+					})),
+				);
+			if (url.endsWith("household-blend"))
+				return pendingBlend
+					? blendResponse
+					: jsonResponse({
+							...rail("household-blend", "Something for Everyone Tonight"),
+							items: [card(901), card(902), card(903), card(904)],
+						});
+			if (url === "/api/v1/availability" || url === "/api/v1/config")
+				return jsonResponse({});
+			throw new Error(`unexpected fixture route: ${url}`);
+		}),
+	);
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	});
+	queryClient.setQueryData(["auth", "me"], {
+		id: 1,
+		display_name: "Admin",
+		avatar_url: null,
+		is_admin: true,
+	});
+	render(
+		<QueryClientProvider client={queryClient}>
+			<MemoryRouter initialEntries={["/settings"]}>
+				<Link to="/">Return Home</Link>
+				<Routes>
+					<Route path="/settings" element={<Settings />} />
+					<Route path="/" element={<Home />} />
+				</Routes>
+			</MemoryRouter>
+		</QueryClientProvider>,
+	);
+	fireEvent.click(
+		await screen.findByLabelText("Hide titles already in the library"),
+	);
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByRole("button", { name: "Saving…" });
+	fireEvent.click(screen.getByRole("link", { name: "Return Home" }));
+	if (pendingFeed) {
+		await waitFor(() => expect(homeReads).toBe(1));
+		await waitFor(() => expect(railsReads).toBe(1));
+		expect(queryClient.getQueryData(["home"])).toBeUndefined();
+	} else {
+		fireEvent.click(
+			await screen.findByRole("heading", {
+				name: "Something for Everyone Tonight",
+			}),
+		);
+		fireEvent.click(await screen.findByRole("checkbox", { name: "Viewer 2" }));
+		fireEvent.click(
+			screen.getByRole("button", { name: "Find something for us" }),
+		);
+		if (pendingBlend)
+			await screen.findByRole("button", { name: "Finding a shared pick…" });
+		else await screen.findAllByText("T901");
+	}
+	resolveSave(
+		jsonResponse({
+			...settings,
+			settings: { ...settings.settings, hide_library_items: true },
+		}),
+	);
+	await waitFor(() => expect(homeReads).toBe(2));
+	await screen.findByText("Trending Now");
+	if (pendingFeed) {
+		await waitFor(() => expect(railsReads).toBe(2));
+		const oldHome = {
+			hero: [],
+			rails: [{ ...rail("old-home", "Old Home"), items: [card(901)] }],
+		};
+		const oldRails = {
+			rails: [{ ...rail("old-rails", "Old Rails"), items: [card(902)] }],
+			next_cursor: null,
+		};
+		const homeJson = vi.fn(async () => oldHome);
+		const railsJson = vi.fn(async () => oldRails);
+		resolveHome({ ...jsonResponse(oldHome), json: homeJson } as Response);
+		resolveRails({ ...jsonResponse(oldRails), json: railsJson } as Response);
+		await waitFor(() => expect(homeJson).toHaveBeenCalled());
+		await waitFor(() => expect(railsJson).toHaveBeenCalled());
+		expect(queryClient.getQueryData(["home"])).toEqual({
+			hero: [],
+			rails: [rail("trending", "Trending Now")],
+		});
+		expect(queryClient.getQueryData(["rails"])).toEqual({
+			pages: [{ rails: [], next_cursor: null }],
+			pageParams: [0],
+		});
+		expect(queryClient.getQueryState(["home"])?.isInvalidated).toBe(false);
+		expect(screen.queryByText("T902")).toBeNull();
+	}
+	await waitFor(() =>
+		expect(
+			(screen.getByRole("checkbox", { name: "Viewer 2" }) as HTMLInputElement)
+				.checked,
+		).toBe(false),
+	);
+	expect(screen.queryByText("T901")).toBeNull();
+	if (pendingBlend) {
+		resolveBlend(
+			jsonResponse({
+				...rail("household-blend", "Something for Everyone Tonight"),
+				items: [card(901), card(902), card(903), card(904)],
+			}),
+		);
+		await waitFor(() =>
+			expect(
+				queryClient
+					.getMutationCache()
+					.getAll()
+					.some((mutation) => mutation.state.status === "pending"),
+			).toBe(false),
+		);
+		expect(screen.queryByText("T901")).toBeNull();
+	}
 });
