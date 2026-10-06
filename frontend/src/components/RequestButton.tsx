@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type {
 	Availability,
 	MediaType,
 	RequestDestinationOverride,
+	RequestSelection,
+	SeasonSummary,
 } from "../lib/api";
 import {
 	useConfig,
@@ -10,15 +12,18 @@ import {
 	useRequest,
 	variantRequestable,
 } from "../lib/availability";
+import { SeasonPicker } from "./SeasonPicker";
 
 export function RequestButton({
 	type,
 	id,
 	availability,
+	seasons = [],
 }: {
 	type: MediaType;
 	id: number;
 	availability?: Availability | null;
+	seasons?: SeasonSummary[];
 }) {
 	const config = useConfig();
 	const missingStandard = variantRequestable(availability, false);
@@ -31,6 +36,8 @@ export function RequestButton({
 	const request = useRequest(type, id);
 	const [quality, setQuality] = useState<boolean | null>(null);
 	const [advancedOpen, setAdvancedOpen] = useState(false);
+	const [pickingSeasons, setPickingSeasons] = useState(false);
+	const closeSeasons = useCallback(() => setPickingSeasons(false), []);
 	const [selection, setSelection] = useState<RequestDestinationOverride | null>(
 		null,
 	);
@@ -93,6 +100,22 @@ export function RequestButton({
 	const pending = request.isPending || destinations.isPending;
 	const canOverride = Boolean(options?.available && options.can_override);
 	const defaultAllowed = !is4k || Boolean(options?.can_request_4k_default);
+	const canSubmit =
+		!pending &&
+		variantAllowed &&
+		validSelection &&
+		(selection ? canOverride : defaultAllowed);
+	const selectable = seasons.filter(
+		(season) =>
+			season.episode_count > 0 &&
+			(season.season_number > 0 ||
+				(options?.can_request_partial === true &&
+					options.can_request_specials === true)),
+	);
+	const pickSeasons =
+		type === "tv" &&
+		options?.can_request_partial === true &&
+		selectable.length > 1;
 
 	function selectServer(value: string) {
 		if (value === "default") {
@@ -108,28 +131,53 @@ export function RequestButton({
 			});
 	}
 	function submit() {
-		if (
-			pending ||
-			!variantAllowed ||
-			!validSelection ||
-			(!selection && !defaultAllowed) ||
-			(selection && !canOverride)
-		)
+		if (!canSubmit) return;
+		if (pickSeasons) {
+			setQuality(is4k);
+			setPickingSeasons(true);
 			return;
-		request.mutate(
-			selection
-				? { ...selection, ...(is4k ? { is_4k: true } : {}) }
-				: is4k
-					? { is_4k: true }
-					: undefined,
+		}
+		send(
+			type === "tv" &&
+				selectable.length === 1 &&
+				selectable[0].season_number === 0
+				? [0]
+				: undefined,
 		);
+	}
+	function send(chosen?: number[]) {
+		if (!canSubmit || (chosen && options?.can_request_partial !== true)) return;
+		const regular = selectable
+			.map((season) => season.season_number)
+			.filter((number) => number > 0);
+		// The default choice (every regular season, no Specials) stays Seerr's "all".
+		const whole =
+			!chosen ||
+			(chosen.length === regular.length &&
+				chosen.every((number) => number > 0));
+		const body: RequestSelection = {
+			...selection,
+			...(is4k ? { is_4k: true } : {}),
+			...(whole ? {} : { seasons: chosen }),
+		};
+		request.mutate(Object.keys(body).length > 0 ? body : undefined);
 	}
 	return (
 		<div className="flex flex-col items-start gap-2">
+			{pickingSeasons && (
+				<SeasonPicker
+					seasons={selectable}
+					onCancel={closeSeasons}
+					onConfirm={(chosen) => {
+						setPickingSeasons(false);
+						send(chosen);
+					}}
+				/>
+			)}
 			{submitted && (
 				<p className="text-sm font-medium text-emerald-400">Requested ✓</p>
 			)}
-			{(fourKAllowed || quality !== null) && (
+			{(fourKAllowed || quality === true) && (
 				<label className="flex flex-col gap-1 text-sm">
 					<span>Quality</span>
 					<select
@@ -264,13 +312,7 @@ export function RequestButton({
 			<button
 				type="button"
 				onClick={submit}
-				disabled={
-					pending ||
-					!variantAllowed ||
-					!validSelection ||
-					(!selection && !defaultAllowed) ||
-					Boolean(selection && !canOverride)
-				}
+				disabled={!canSubmit}
 				className="min-h-11 w-fit rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
 			>
 				{request.isPending

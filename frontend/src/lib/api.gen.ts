@@ -832,6 +832,8 @@ export interface components {
             profile_id?: number | null;
             /** Root Folder */
             root_folder?: string | null;
+            /** Seasons */
+            seasons?: number[] | null;
         };
         /** RequestDestination */
         RequestDestination: {
@@ -879,6 +881,16 @@ export interface components {
              * @default false
              */
             can_override: boolean;
+            /**
+             * Can Request Specials
+             * @default false
+             */
+            can_request_specials: boolean;
+            /**
+             * Can Request Partial
+             * @default false
+             */
+            can_request_partial: boolean;
             /**
              * Destinations
              * @default []

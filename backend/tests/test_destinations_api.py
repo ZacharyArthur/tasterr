@@ -123,6 +123,8 @@ def test_single_server_shape(tmp_path: Path) -> None:
         "can_request_4k": False,
         "can_request_4k_default": False,
         "can_override": True,
+        "can_request_specials": False,
+        "can_request_partial": False,
         "destinations": [
             {
                 "server_id": 0,
@@ -176,6 +178,8 @@ def test_unconfigured_seerr_yields_empty_list_without_a_call(tmp_path: Path) -> 
         "can_request_4k": False,
         "can_request_4k_default": False,
         "can_override": False,
+        "can_request_specials": False,
+        "can_request_partial": False,
         "destinations": [],
     }
 
@@ -197,6 +201,8 @@ def test_seerr_down_yields_empty_list(tmp_path: Path) -> None:
         "can_request_4k": False,
         "can_request_4k_default": False,
         "can_override": False,
+        "can_request_specials": False,
+        "can_request_partial": False,
         "destinations": [],
     }
 
@@ -285,3 +291,38 @@ def test_4k_discovery_requires_a_default_or_advanced_destination(
     assert body["can_request_4k"] is allowed
     assert body["can_request_4k_default"] is (configuration == "default")
     assert bool(body["destinations"]) is (advanced and allowed)
+
+
+@pytest.mark.parametrize(
+    "enabled,status,expected", [(True, 200, True), (False, 200, False), (True, 503, False)]
+)
+@pytest.mark.parametrize("partial", [True, False])
+def test_tv_request_policy_preserves_ordinary_destinations(
+    tmp_path: Path, enabled: bool, status: int, expected: bool, partial: bool
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(
+                status,
+                json={
+                    "enableSpecialEpisodes": enabled,
+                    "partialRequestsEnabled": partial,
+                    "ignored": "value",
+                },
+            )
+        if request.url.path == "/api/v1/service/sonarr":
+            return httpx.Response(200, json=[SERVER_FIXTURE])
+        assert request.url.path == "/api/v1/service/sonarr/0"
+        return httpx.Response(200, json=DETAIL_FIXTURE)
+
+    app = _app(tmp_path)
+    _override(app, handler)
+    with _authed_client(app, tmp_path / "tasterr.db") as client:
+        response = client.get("/api/v1/tv/7/destinations")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["can_request_specials"] is (expected and partial)
+    assert body["can_request_partial"] is (partial and status == 200)
+    assert body["available"] and body["can_request_standard"]
+    assert len(body["destinations"]) == 1
+    assert not {"ignored", "enableSpecialEpisodes", "partialRequestsEnabled"} & body.keys()

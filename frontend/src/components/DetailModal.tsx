@@ -110,6 +110,8 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 	const cast = detail.cast.slice(0, 10);
 	const more =
 		detail.recommendations.length > 0 ? detail.recommendations : detail.similar;
+	// Specials (season 0) are offered in the request picker, not listed here.
+	const seasons = detail.seasons.filter((season) => season.season_number > 0);
 	return (
 		<div className="flex flex-col gap-6 pb-8">
 			<div className="relative aspect-video w-full overflow-hidden bg-app-bg sm:rounded-t-lg">
@@ -176,6 +178,7 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 							type={detail.media_type}
 							id={detail.id}
 							availability={detail.availability}
+							seasons={detail.seasons}
 						/>
 					</div>
 					{providers.length > 0 && (
@@ -226,11 +229,11 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 					</section>
 				)}
 
-				{detail.seasons.length > 0 && (
+				{seasons.length > 0 && (
 					<section className="flex flex-col gap-2">
 						<h3 className="text-sm font-semibold text-app-text">Seasons</h3>
 						<ul className="flex flex-col gap-1 text-sm text-app-subtle">
-							{detail.seasons.map((season) => (
+							{seasons.map((season) => (
 								<li key={season.season_number}>
 									{season.name} — {season.episode_count} episodes
 								</li>

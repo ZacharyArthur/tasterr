@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.api.runtime_settings import RuntimeSettingsDep
@@ -33,6 +33,9 @@ from tasterr.settings import Settings, get_settings
 logger = logging.getLogger("tasterr.request")
 router = APIRouter()
 
+# Generous ceiling for a season number; long-running daily shows reach the hundreds.
+MAX_SEASON_NUMBER = 1000
+
 RequestStatus = Literal["ok", "re_auth_required", "unavailable", "failed"]
 
 
@@ -45,6 +48,18 @@ class RequestBody(BaseModel):
     server_id: int | None = Field(default=None, ge=0, le=MAX_TMDB_ID)
     profile_id: int | None = Field(default=None, ge=0, le=MAX_TMDB_ID)
     root_folder: str | None = Field(default=None, min_length=1, max_length=4096)
+    # Optional TV season list (tv-season-selection); 0 is Specials. Omitted
+    # keeps Seerr's whole-series "all".
+    seasons: list[Annotated[int, Field(ge=0, le=MAX_SEASON_NUMBER)]] | None = Field(
+        default=None, min_length=1, max_length=MAX_SEASON_NUMBER
+    )
+
+    @field_validator("seasons")
+    @classmethod
+    def _unique_seasons(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("duplicate season")
+        return sorted(value) if value is not None else None
 
 
 class RequestResponse(BaseModel):
@@ -114,6 +129,8 @@ async def create_request(
     request: Request,
 ) -> RequestResponse:
     seerr_url = _external_url(settings.seerr_external_url, payload.media_type, payload.tmdb_id)
+    if payload.seasons is not None and payload.media_type != "tv":
+        raise HTTPException(status_code=422, detail="Seasons apply to TV requests only")
     if ctx is None:
         return RequestResponse(status="unavailable", seerr_url=seerr_url)
     has_override = any(
@@ -129,6 +146,12 @@ async def create_request(
             raise HTTPException(status_code=403, detail="Request permission required")
         if has_override and not user.can_override:
             raise HTTPException(status_code=403, detail="Advanced request permission required")
+        if payload.seasons is not None:
+            policy = await ctx.client.request_settings()
+            if not policy.partial_requests_enabled:
+                raise HTTPException(status_code=422, detail="Season selection is disabled in Seerr")
+            if 0 in payload.seasons and not policy.enable_special_episodes:
+                raise HTTPException(status_code=422, detail="Specials are disabled in Seerr")
         info = await ctx.client.media_status(payload.media_type, payload.tmdb_id)
         code = (info.status_4k if payload.is_4k else info.status) if info else 0
         if code in (2, 3, 4, 5):
@@ -155,6 +178,7 @@ async def create_request(
         server_id=payload.server_id,
         profile_id=payload.profile_id,
         root_folder=payload.root_folder,
+        seasons=payload.seasons,
     )
     if outcome.status == "ok":
         await request.app.state.seerr_cache.invalidate(
@@ -243,6 +267,7 @@ async def _request_with_reauth(
     server_id: int | None = None,
     profile_id: int | None = None,
     root_folder: str | None = None,
+    seasons: list[int] | None = None,
 ) -> _Outcome:
     try:
         code = await ctx.client.create_request(
@@ -253,6 +278,7 @@ async def _request_with_reauth(
             server_id=server_id,
             profile_id=profile_id,
             root_folder=root_folder,
+            seasons=seasons,
         )
         return _Outcome("ok", availability_from_code(code, is_4k=is_4k))
     except UpstreamUnavailable:
@@ -276,6 +302,7 @@ async def _request_with_reauth(
             server_id=server_id,
             profile_id=profile_id,
             root_folder=root_folder,
+            seasons=seasons,
         )
         return _Outcome("ok", availability_from_code(code, is_4k=is_4k))
     except (UpstreamRejected, UpstreamUnavailable):

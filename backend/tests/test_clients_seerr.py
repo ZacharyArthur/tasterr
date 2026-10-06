@@ -389,6 +389,14 @@ async def test_create_request_tv_asks_for_all_seasons() -> None:
     assert code == 3
 
 
+async def test_create_request_tv_asks_for_only_the_selected_seasons() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.read()) == {"mediaType": "tv", "mediaId": 7, "seasons": [4, 5]}
+        return httpx.Response(201, json={"id": 2, "media": {"status": 2}})
+
+    await _media_client(handler).create_request("connect.sid=abc", "tv", 7, seasons=[4, 5])
+
+
 async def test_create_request_includes_override_fields_when_given() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert json.loads(request.read()) == {
@@ -613,3 +621,73 @@ async def test_4k_payload_and_result_use_selected_variant(media_type: MediaType)
             )
             == 2
         )
+
+
+@pytest.mark.parametrize(
+    "specials,partial", [(True, True), (False, True), (True, False), (False, False)]
+)
+async def test_request_settings_reads_only_strict_booleans_with_read_auth(
+    specials: bool, partial: bool
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/settings/public"
+        assert request.headers["x-api-key"] == "seerr-api-key"
+        assert "cookie" not in request.headers
+        assert request.extensions["timeout"]["read"] == 5.0
+        return httpx.Response(
+            200,
+            json={
+                "enableSpecialEpisodes": specials,
+                "partialRequestsEnabled": partial,
+                "ignored": "value",
+            },
+        )
+
+    policy = await _media_client(handler).request_settings()
+    assert policy.enable_special_episodes is specials
+    assert policy.partial_requests_enabled is partial
+    assert policy.model_dump() == {
+        "enable_special_episodes": specials,
+        "partial_requests_enabled": partial,
+    }
+
+
+@pytest.mark.parametrize("body", [{}, {"enableSpecialEpisodes": False}])
+async def test_missing_request_settings_are_disabled(body: dict[str, object]) -> None:
+    policy = await _media_client(lambda _: httpx.Response(200, json=body)).request_settings()
+    assert not policy.enable_special_episodes
+    assert not policy.partial_requests_enabled
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(503),
+        httpx.Response(200, text="invalid"),
+        httpx.Response(200, json={"enableSpecialEpisodes": "true"}),
+        httpx.Response(200, json={"enableSpecialEpisodes": 1}),
+        httpx.Response(200, json={"partialRequestsEnabled": "true"}),
+        httpx.Response(200, json={"partialRequestsEnabled": 1}),
+        httpx.Response(200, json={"partialRequestsEnabled": None}),
+    ],
+)
+async def test_request_settings_failure_is_unavailable(response: httpx.Response) -> None:
+    with pytest.raises(UpstreamUnavailable):
+        await _media_client(lambda _: response).request_settings()
+
+
+async def test_request_settings_timeout_is_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    with pytest.raises(UpstreamUnavailable) as excinfo:
+        await _media_client(handler).request_settings()
+    assert BASE_URL not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
+
+
+async def test_create_request_no_seasons_202_is_rejected() -> None:
+    client = _media_client(lambda _: httpx.Response(202, json={"message": "No seasons available"}))
+    with pytest.raises(UpstreamRejected) as excinfo:
+        await client.create_request("connect.sid=abc", "tv", 7, seasons=[0])
+    assert excinfo.value.status_code == 202

@@ -8,6 +8,7 @@
 .opencode/
 .aider*
 .zcode
+braid/
 
 # Python
 __pycache__/

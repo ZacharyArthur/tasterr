@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 
 const FOCUSABLE = [
 	"a[href]",
@@ -11,14 +11,27 @@ const FOCUSABLE = [
 	"[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+// Open traps, innermost last: only the top one handles keys, and the page
+// behind stays inert until the last one closes.
+const openTraps: { node: HTMLElement; previous: HTMLElement | null }[] = [];
+
 export function useFocusTrap(
 	container: RefObject<HTMLElement | null>,
 	onEscape: () => void,
 ): void {
+	const handleEscape = useEffectEvent(onEscape);
 	useEffect(() => {
 		const node = container.current;
 		if (!node) return;
-		const previous = document.activeElement as HTMLElement | null;
+		const innerIndex = openTraps.findIndex((trap) => node.contains(trap.node));
+		const trap = {
+			node,
+			previous:
+				innerIndex < 0
+					? (document.activeElement as HTMLElement | null)
+					: openTraps[innerIndex].previous,
+		};
+		openTraps.splice(innerIndex < 0 ? openTraps.length : innerIndex, 0, trap);
 		const background = document.getElementById("shell-background");
 		if (background) background.inert = true;
 		const focusable = () =>
@@ -26,11 +39,12 @@ export function useFocusTrap(
 				(element) =>
 					!element.hidden && element.getAttribute("aria-hidden") !== "true",
 			);
-		(focusable()[0] ?? node).focus();
+		if (openTraps.at(-1) === trap) (focusable()[0] ?? node).focus();
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (openTraps.at(-1) !== trap) return;
 			if (event.key === "Escape") {
 				event.preventDefault();
-				onEscape();
+				handleEscape();
 				return;
 			}
 			if (event.key !== "Tab") return;
@@ -56,8 +70,21 @@ export function useFocusTrap(
 		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown);
-			if (background) background.inert = false;
-			previous?.focus?.();
+			const active = openTraps.at(-1) === trap;
+			openTraps.splice(openTraps.indexOf(trap), 1);
+			for (const remaining of openTraps) {
+				if (remaining.previous && node.contains(remaining.previous))
+					remaining.previous = trap.previous;
+			}
+			if (background && openTraps.length === 0) background.inert = false;
+			if (!active) return;
+			const remaining = openTraps.at(-1)?.node;
+			if (
+				trap.previous?.isConnected &&
+				(!remaining || remaining.contains(trap.previous))
+			)
+				trap.previous.focus();
+			else remaining?.focus();
 		};
-	}, [container, onEscape]);
+	}, [container]);
 }

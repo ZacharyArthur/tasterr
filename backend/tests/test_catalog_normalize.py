@@ -153,7 +153,7 @@ def test_to_detail_maps_movie_fields() -> None:
     assert detail.watch.flatrate[0].name == "Netflix"
 
 
-def test_to_detail_tv_drops_specials_and_reads_content_rating() -> None:
+def test_to_detail_tv_keeps_specials_and_reads_content_rating() -> None:
     raw = TmdbDetail(
         id=5,
         name="Show",
@@ -167,7 +167,7 @@ def test_to_detail_tv_drops_specials_and_reads_content_rating() -> None:
     )
     detail = to_detail(raw, "tv", "US")
     assert detail.external_url == "https://www.themoviedb.org/tv/5"
-    assert [s.season_number for s in detail.seasons] == [1]
+    assert [s.season_number for s in detail.seasons] == [0, 1]  # Specials stay requestable
     assert detail.certification == "TV-MA"
 
 

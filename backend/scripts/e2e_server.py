@@ -44,7 +44,7 @@ class LocalLoginBody(BaseModel):
 class RequestBody(BaseModel):
     mediaType: Literal["movie", "tv"]
     mediaId: int
-    seasons: str | None = None
+    seasons: Literal["all"] | list[int] | None = None
     is4k: bool = False
     serverId: int | None = None
     profileId: int | None = None
@@ -86,6 +86,21 @@ def _page(media_type: Literal["movie", "tv"] = "movie") -> dict[str, object]:
     }
 
 
+MULTI_SEASON_SHOW = 106
+
+
+def _seasons() -> list[dict[str, object]]:
+    return [
+        {
+            "season_number": n,
+            "name": "Specials" if n == 0 else f"Season {n}",
+            "episode_count": 4 if n == 0 else 10,
+            "air_date": "2026-01-15",
+        }
+        for n in range(4)
+    ]
+
+
 def _detail(tmdb_id: int, media_type: Literal["movie", "tv"]) -> dict[str, object]:
     title = f"Fixture {'Movie' if media_type == 'movie' else 'Show'} {tmdb_id}"
     detail: dict[str, object] = {
@@ -118,8 +133,8 @@ def _detail(tmdb_id: int, media_type: Literal["movie", "tv"]) -> dict[str, objec
             name=title,
             first_air_date="2026-01-15",
             episode_run_time=[45],
-            number_of_seasons=1,
-            seasons=[],
+            number_of_seasons=3 if tmdb_id == MULTI_SEASON_SHOW else 1,
+            seasons=_seasons() if tmdb_id == MULTI_SEASON_SHOW else [],
             created_by=[],
         )
     return detail
@@ -137,6 +152,10 @@ def build_fixture_router() -> APIRouter:
             | SeerrPermission.REQUEST_4K
             | SeerrPermission.REQUEST_ADVANCED,
         }
+
+    @router.get("/seerr/api/v1/settings/public")
+    async def _public_settings() -> dict[str, bool]:
+        return {"enableSpecialEpisodes": True, "partialRequestsEnabled": True}
 
     @router.get("/seerr/api/v1/service/{service}")
     async def _servers(service: Literal["radarr", "sonarr"]) -> list[dict[str, object]]:
@@ -194,7 +213,9 @@ def build_fixture_router() -> APIRouter:
     ) -> JSONResponse:
         if cookie != E2E_SEERR_COOKIE:
             return JSONResponse(status_code=403, content={"message": "Invalid session"})
-        if payload.mediaType == "tv" and payload.seasons != "all":
+        if payload.mediaType == "tv" and not payload.seasons:
+            return JSONResponse(status_code=422, content={"message": "Seasons required"})
+        if payload.mediaType == "tv" and payload.mediaId == 105 and payload.seasons != "all":
             return JSONResponse(status_code=422, content={"message": "Whole series required"})
         if payload.mediaId < 1:
             return JSONResponse(status_code=422, content={"message": "Invalid title"})
