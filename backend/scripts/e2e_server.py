@@ -153,6 +153,10 @@ def build_fixture_router() -> APIRouter:
             | SeerrPermission.REQUEST_ADVANCED,
         }
 
+    @router.get("/seerr/api/v1/settings/public")
+    async def _public_settings() -> dict[str, bool]:
+        return {"enableSpecialEpisodes": True, "partialRequestsEnabled": True}
+
     @router.get("/seerr/api/v1/service/{service}")
     async def _servers(service: Literal["radarr", "sonarr"]) -> list[dict[str, object]]:
         return [
@@ -211,6 +215,8 @@ def build_fixture_router() -> APIRouter:
             return JSONResponse(status_code=403, content={"message": "Invalid session"})
         if payload.mediaType == "tv" and not payload.seasons:
             return JSONResponse(status_code=422, content={"message": "Seasons required"})
+        if payload.mediaType == "tv" and payload.mediaId == 105 and payload.seasons != "all":
+            return JSONResponse(status_code=422, content={"message": "Whole series required"})
         if payload.mediaId < 1:
             return JSONResponse(status_code=422, content={"message": "Invalid title"})
         info = states.setdefault(

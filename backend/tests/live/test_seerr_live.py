@@ -211,6 +211,14 @@ async def test_plex_stored_token_login_contract() -> None:
         assert login.user.resolved_display_name
 
 
+@pytest.mark.skipif(not (URL and API_KEY), reason="TASTERR_LIVE_SEERR_URL/API_KEY not set")
+async def test_public_request_settings_contract() -> None:
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        policy = await SeerrClient(http, URL, API_KEY).request_settings()
+        assert isinstance(policy.enable_special_episodes, bool)
+        assert isinstance(policy.partial_requests_enabled, bool)
+
+
 @requires_availability
 async def test_availability_read_smoke_and_not_in_library() -> None:
     """A well-known title parses without error, and the operator-supplied valid,

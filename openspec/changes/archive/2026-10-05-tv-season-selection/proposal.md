@@ -66,7 +66,9 @@ Tasterr for Seerr's UI for that one action.
 - **Requesting more seasons of a partially available or already requested
   show.** Such titles are not requestable today (`409` / no Request button);
   per-season status and top-up requests are a separate change.
-- **Validating season numbers against TMDB on the server.** Seerr validates the
-  seasons it receives against its own record and a rejection surfaces as the
-  existing generic failure with fallback; a second catalog read would add an
-  upstream dependency for no new protection.
+- **Validating season numbers against TMDB on the server.** Explicit arrays
+  are bounded and unique but are not checked for existence. Seerr 3.5.0 removes
+  disabled Specials and already requested or available seasons; it does not
+  validate the remaining numbers against TMDB. A hand-crafted nonexistent
+  season can consume the member's own quota. Server-side catalog validation
+  remains outside this change.

@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -91,9 +92,17 @@ def _stored_cookie(db_path: Path, token: str) -> str:
 
 
 def _override_ctx(
-    app: FastAPI, handler: Callable[[httpx.Request], httpx.Response], *, preflight: bool = True
+    app: FastAPI,
+    handler: Callable[[httpx.Request], httpx.Response],
+    *,
+    preflight: bool = True,
+    settings: bool = True,
 ) -> None:
     def wrapped(request: httpx.Request) -> httpx.Response:
+        if settings and request.url.path == "/api/v1/settings/public":
+            return httpx.Response(
+                200, json={"enableSpecialEpisodes": True, "partialRequestsEnabled": True}
+            )
         if preflight and request.url.path == "/api/v1/user/99":
             return httpx.Response(200, json={"id": 99, "permissions": 2})
         if (
@@ -745,15 +754,20 @@ def test_override_input_bounds_reject_before_reads(
         {"media_type": "tv", "tmdb_id": 7, "seasons": [2, 2]},
     ],
 )
-def test_invalid_seasons_reject_before_reads(tmp_path: Path, body: dict[str, object]) -> None:
+@pytest.mark.parametrize("configured", [True, False])
+def test_invalid_seasons_reject_before_reads(
+    tmp_path: Path, body: dict[str, object], configured: bool
+) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("invalid input must not reach Seerr")
 
-    app = _app(tmp_path)
-    _override_ctx(app, handler, preflight=False)
+    app = _app(tmp_path, seerr=configured)
+    if configured:
+        _override_ctx(app, handler, preflight=False)
     token = _seed_session(tmp_path / "tasterr.db")
     with _client(app, token) as client:
         assert client.post("/api/v1/request", json=body).status_code == 422
+    assert _stored_taste_signals(tmp_path / "tasterr.db") == []
 
 
 def test_4k_override_survives_reauth_exactly(tmp_path: Path) -> None:
@@ -838,3 +852,110 @@ def test_bare_4k_requires_default_before_request_creation(
         assert response.status_code == 422
     assert len(writes) == (1 if configuration == "default" else 0)
     assert "private" not in response.text
+
+
+@pytest.mark.parametrize("seasons", [None, [1], [0], [0, 1]])
+def test_no_seasons_202_is_failure_without_success_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seasons: list[int] | None
+) -> None:
+    writes: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(
+                200, json={"enableSpecialEpisodes": True, "partialRequestsEnabled": True}
+            )
+        writes.append(json.loads(request.read()))
+        return httpx.Response(202, json={"message": "No seasons available to request"})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, settings=False)
+    token = _seed_session(tmp_path / "tasterr.db", plex_token="plex-token")
+    with _client(app, token) as client:
+        invalidate = AsyncMock()
+        monkeypatch.setattr(app.state.seerr_cache, "invalidate", invalidate)
+        response = client.post("/api/v1/request", json={**_body("tv", 7), "seasons": seasons})
+        invalidate.assert_not_awaited()
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "failed",
+        "availability": None,
+        "seerr_url": "https://requests.example/tv/7",
+    }
+    assert len(writes) == 1
+    assert _stored_taste_signals(tmp_path / "tasterr.db") == []
+
+
+@pytest.mark.parametrize("seasons", [[0], [0, 1]])
+@pytest.mark.parametrize(
+    "enabled,upstream_status,expected", [(True, 200, 200), (False, 200, 422), (True, 503, 200)]
+)
+def test_specials_support_is_checked_before_creation(
+    tmp_path: Path, seasons: list[int], enabled: bool, upstream_status: int, expected: int
+) -> None:
+    writes: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(
+                upstream_status,
+                json={"enableSpecialEpisodes": enabled, "partialRequestsEnabled": True},
+            )
+        writes.append(json.loads(request.read()))
+        return httpx.Response(201, json={"media": {"status": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, settings=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body("tv", 7), "seasons": seasons})
+    assert response.status_code == expected
+    accepted = enabled and upstream_status == 200
+    if expected == 200:
+        assert response.json()["status"] == ("ok" if accepted else "failed")
+    assert writes == ([{"mediaType": "tv", "mediaId": 7, "seasons": seasons}] if accepted else [])
+    assert _stored_taste_signals(tmp_path / "tasterr.db") == (
+        [("tv", 7, "request")] if accepted else []
+    )
+
+
+@pytest.mark.parametrize("seasons", [None, [1], [1, 2, 3], [0], [0, 1]])
+@pytest.mark.parametrize("mode", ["disabled", "missing", "unavailable", "malformed"])
+def test_partial_policy_blocks_explicit_lists_but_preserves_bare_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seasons: list[int] | None, mode: str
+) -> None:
+    reads: list[str] = []
+    writes: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            reads.append(request.url.path)
+            if mode == "unavailable":
+                return httpx.Response(503)
+            body: dict[str, object] = {"enableSpecialEpisodes": True}
+            if mode != "missing":
+                body["partialRequestsEnabled"] = "true" if mode == "malformed" else False
+            return httpx.Response(200, json=body)
+        writes.append(json.loads(request.read()))
+        return httpx.Response(201, json={"media": {"status": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, settings=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        invalidate = AsyncMock()
+        monkeypatch.setattr(app.state.seerr_cache, "invalidate", invalidate)
+        response = client.post("/api/v1/request", json={**_body("tv", 7), "seasons": seasons})
+        if seasons is not None:
+            invalidate.assert_not_awaited()
+    if seasons is None:
+        assert response.status_code == 200 and response.json()["status"] == "ok"
+        assert reads == []
+        assert writes == [{"mediaType": "tv", "mediaId": 7, "seasons": "all"}]
+        assert _stored_taste_signals(tmp_path / "tasterr.db") == [("tv", 7, "request")]
+    else:
+        assert response.status_code == (422 if mode in ("disabled", "missing") else 200)
+        if response.status_code == 200:
+            assert response.json()["status"] == "failed"
+        assert len(reads) == 1 and writes == []
+        assert _stored_taste_signals(tmp_path / "tasterr.db") == []

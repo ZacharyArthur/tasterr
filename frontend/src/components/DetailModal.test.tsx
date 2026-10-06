@@ -5,6 +5,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -674,4 +675,48 @@ test("explain shows the honest empty state when not personalized", async () => {
 	);
 
 	expect(await screen.findByText(/Not personalized yet/)).toBeTruthy();
+});
+
+test("TV detail omits Specials and nested Escape closes only the picker", async () => {
+	const calls = stubTasteFetch({
+		"/api/v1/config": { seerr_configured: true },
+		"/destinations": {
+			available: true,
+			can_request_standard: true,
+			can_request_4k: false,
+			can_request_specials: true,
+			can_request_partial: true,
+			destinations: [],
+		},
+		"/api/v1/signals": { recorded: true },
+		"/api/v1/title/": {
+			...DETAIL,
+			media_type: "tv",
+			title: "Deep Show",
+			availability: { known: true, status: "not_requested" },
+			seasons: [0, 1, 2].map((season_number) => ({
+				season_number,
+				name: season_number === 0 ? "Specials" : `Season ${season_number}`,
+				episode_count: 10,
+				air_date: null,
+			})),
+		},
+	});
+	renderModal(["/title/tv/42"]);
+	await screen.findByRole("heading", { name: "Deep Show" });
+	expect(screen.getByText("Season 1 — 10 episodes")).toBeTruthy();
+	expect(screen.getByText("Season 2 — 10 episodes")).toBeTruthy();
+	expect(screen.queryByText(/Specials/)).toBeNull();
+	const request = await screen.findByRole("button", { name: "Request" });
+	request.focus();
+	fireEvent.click(request);
+	const picker = screen.getByRole("dialog", { name: "Choose seasons" });
+	expect(within(picker).getByRole("switch", { name: /Specials/ })).toBeTruthy();
+	fireEvent.keyDown(document, { key: "Escape" });
+	expect(screen.queryByRole("dialog", { name: "Choose seasons" })).toBeNull();
+	expect(screen.getByRole("dialog", { name: "Deep Show" })).toBeTruthy();
+	expect(document.activeElement).toBe(request);
+	expect(calls.some((call) => call.url.endsWith("/api/v1/request"))).toBe(
+		false,
+	);
 });

@@ -5,8 +5,9 @@ request history — server-initiated, explicitly scoped by parameter), while
 user-attributed **mutations** (creating requests) ride only the member's own
 session cookie — the two are never crossed (privilege confusion: the key on a
 mutation would forge attribution and bypass quota; a cookie on a read would
-break when the member's Seerr session lapses). Contract validated against
-Seerr 3.3.0 (docs/SEERR-AUTH-SPIKE.md).
+break when the member's Seerr session lapses). Auth contract validated against
+Seerr 3.3.0 (docs/SEERR-AUTH-SPIKE.md); public season-request settings follow the
+Seerr 3.5.0 source contract, with an opt-in live check.
 """
 
 from dataclasses import dataclass
@@ -161,6 +162,15 @@ class _SeerrStatus(BaseModel):
     version: str
 
 
+class SeerrRequestSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enable_special_episodes: bool = Field(default=False, alias="enableSpecialEpisodes", strict=True)
+    partial_requests_enabled: bool = Field(
+        default=False, alias="partialRequestsEnabled", strict=True
+    )
+
+
 class _SeerrRequestResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -306,6 +316,23 @@ class SeerrClient:
             raise UpstreamUnavailable("unexpected seerr user identity")
         return user
 
+    async def request_settings(self) -> SeerrRequestSettings:
+        """Read only the public season-request policy; drop all other settings."""
+        try:
+            response = await self._http.get(
+                f"{self._base}/api/v1/settings/public",
+                headers={"X-Api-Key": self._api_key, "Accept": "application/json"},
+                timeout=SEERR_TIMEOUT_SECONDS,
+            )
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
+        if response.status_code >= 400:
+            raise UpstreamUnavailable("seerr settings read failed")
+        try:
+            return SeerrRequestSettings.model_validate(response.json())
+        except ValueError as error:
+            raise UpstreamUnavailable("unexpected seerr response shape") from error
+
     async def list_servers(self, media_type: MediaType) -> list[SeerrServer]:
         """Every configured destination for this media type (`radarr` for movies,
         `sonarr` for TV) — household configuration, read with the global key.
@@ -408,7 +435,7 @@ class SeerrClient:
         destinations first — this method forwards them as-is). Returns the
         resulting media-status code. Raises UpstreamRejected(403) for an
         invalid session or denied request (the caller runs the re-auth ladder),
-        UpstreamRejected for other 4xx, UpstreamUnavailable for transport/5xx."""
+        UpstreamRejected for no-op 202 or other 4xx, UpstreamUnavailable for transport/5xx."""
         url = f"{self._base}/api/v1/request"
         payload: dict[str, object] = {"mediaType": media_type, "mediaId": tmdb_id}
         if is_4k:
@@ -430,7 +457,7 @@ class SeerrClient:
             raise UpstreamUnavailable("seerr request failed") from None
         if response.status_code >= 500:
             raise UpstreamUnavailable(f"seerr returned {response.status_code}")
-        if response.status_code >= 400:
+        if response.status_code == 202 or response.status_code >= 400:
             raise UpstreamRejected(response.status_code)
         try:
             result = _SeerrRequestResult.model_validate(response.json())

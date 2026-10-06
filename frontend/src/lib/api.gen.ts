@@ -882,6 +882,16 @@ export interface components {
              */
             can_override: boolean;
             /**
+             * Can Request Specials
+             * @default false
+             */
+            can_request_specials: boolean;
+            /**
+             * Can Request Partial
+             * @default false
+             */
+            can_request_partial: boolean;
+            /**
              * Destinations
              * @default []
              */

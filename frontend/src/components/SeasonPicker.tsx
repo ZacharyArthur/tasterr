@@ -56,7 +56,8 @@ export function SeasonPicker({
 			),
 	);
 	useFocusTrap(dialogRef, onCancel);
-	const all = seasons.every((season) => chosen.has(season.season_number));
+	const selected = seasons.filter((season) => chosen.has(season.season_number));
+	const all = selected.length === seasons.length;
 
 	function toggle(number: number) {
 		const next = new Set(chosen);
@@ -100,7 +101,7 @@ export function SeasonPicker({
 						/>
 					))}
 				</div>
-				{chosen.size === 0 && (
+				{selected.length === 0 && (
 					<p role="alert" className="text-sm text-status-warning">
 						Choose at least one season.
 					</p>
@@ -115,13 +116,9 @@ export function SeasonPicker({
 					</button>
 					<button
 						type="button"
-						disabled={chosen.size === 0}
+						disabled={selected.length === 0}
 						onClick={() =>
-							onConfirm(
-								seasons
-									.map((season) => season.season_number)
-									.filter((number) => chosen.has(number)),
-							)
+							onConfirm(selected.map((season) => season.season_number))
 						}
 						className="min-h-11 rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
 					>

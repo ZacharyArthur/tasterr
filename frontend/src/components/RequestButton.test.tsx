@@ -8,7 +8,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Availability, RequestOptions } from "../lib/api";
+import type { Availability, RequestOptions, SeasonSummary } from "../lib/api";
 import { RequestButton } from "./RequestButton";
 
 afterEach(() => {
@@ -57,6 +57,8 @@ const OPTIONS: RequestOptions = {
 	can_request_4k: false,
 	can_request_4k_default: false,
 	can_override: true,
+	can_request_specials: true,
+	can_request_partial: true,
 	destinations: [SERVER],
 };
 const BOTH: RequestOptions = {
@@ -491,7 +493,7 @@ test("losing the 4K default during refetch blocks bare confirmation", async () =
 	expect(bodies).toEqual([]);
 });
 
-const SEASONS = [0, 1, 2, 3].map((n) => ({
+const SEASONS: SeasonSummary[] = [0, 1, 2, 3].map((n) => ({
 	season_number: n,
 	name: n === 0 ? "Specials" : `Season ${n}`,
 	episode_count: 10,
@@ -501,12 +503,11 @@ function toggle(name: RegExp | string): HTMLElement {
 	return screen.getByRole("switch", { name });
 }
 function renderTv(seasons = SEASONS) {
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	});
 	render(
-		<QueryClientProvider
-			client={
-				new QueryClient({ defaultOptions: { queries: { retry: false } } })
-			}
-		>
+		<QueryClientProvider client={client}>
 			<RequestButton
 				type="tv"
 				id={7}
@@ -515,6 +516,7 @@ function renderTv(seasons = SEASONS) {
 			/>
 		</QueryClientProvider>,
 	);
+	return client;
 }
 
 test("request opens a season dialog with regular seasons on and Specials off", async () => {
@@ -575,7 +577,7 @@ test("cancel closes the dialog without requesting and resets choices", async () 
 	expect(bodies).toEqual([]);
 });
 
-test("escape closes only the season dialog", async () => {
+test("escape cancels the season request", async () => {
 	fixture();
 	renderTv();
 	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
@@ -589,4 +591,287 @@ test("a single-season show requests directly without a dialog", async () => {
 	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
 	await screen.findByText("Requested ✓");
 	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});
+
+test.each([
+	{ ...OPTIONS, can_request_specials: false },
+	{ ...OPTIONS, available: false, can_request_specials: false },
+])("disabled or unknown Specials are not selectable", async (options) => {
+	const { bodies } = fixture(options);
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	expect(screen.queryByRole("switch", { name: /Specials/ })).toBeNull();
+	fireEvent.click(toggle(/Season 1/));
+	fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	await screen.findByText("Requested ✓");
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7, seasons: [2, 3] }]);
+});
+
+const EMPTY_AND_FUTURE = [
+	...SEASONS,
+	{
+		season_number: 4,
+		name: "Empty season",
+		episode_count: 0,
+		air_date: "2099-01-01",
+	},
+	{
+		season_number: 5,
+		name: "Future season",
+		episode_count: 8,
+		air_date: "2099-01-01",
+	},
+];
+
+test("default equivalence excludes empty seasons but keeps future seasons with episodes", async () => {
+	const { bodies } = fixture();
+	renderTv(EMPTY_AND_FUTURE);
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	expect(screen.queryByRole("switch", { name: /Empty season/ })).toBeNull();
+	expect(toggle(/Future season/).getAttribute("aria-checked")).toBe("true");
+	fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	await screen.findByText("Requested ✓");
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});
+
+test("All seasons and explicit subsets exclude zero-episode seasons", async () => {
+	const { bodies } = fixture();
+	renderTv(EMPTY_AND_FUTURE);
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(toggle("All seasons"));
+	fireEvent.click(toggle(/Season 1/));
+	fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	await screen.findByText("Requested ✓");
+	expect(bodies).toEqual([
+		{ media_type: "tv", tmdb_id: 7, seasons: [0, 2, 3, 5] },
+	]);
+});
+
+test("one eligible regular season requests directly when Specials are disabled", async () => {
+	const { bodies } = fixture({ ...OPTIONS, can_request_specials: false });
+	renderTv([SEASONS[0], SEASONS[1], EMPTY_AND_FUTURE[4]]);
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	await screen.findByText("Requested ✓");
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});
+
+test("losing Specials support while open blocks an empty visible choice", async () => {
+	const { bodies } = fixture();
+	const client = renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(toggle("All seasons"));
+	for (const name of [/Season 1/, /Season 2/, /Season 3/])
+		fireEvent.click(toggle(name));
+	act(() =>
+		client.setQueryData(["destinations", "tv"], {
+			...OPTIONS,
+			can_request_specials: false,
+		}),
+	);
+	await screen.findByText("Choose at least one season.");
+	expect(screen.queryByRole("switch", { name: /Specials/ })).toBeNull();
+	expect(
+		(screen.getByRole("button", { name: "OK" }) as HTMLButtonElement).disabled,
+	).toBe(true);
+	expect(bodies).toEqual([]);
+});
+
+test.each([
+	{
+		name: "4K permission",
+		options: { ...BOTH, can_request_4k: false },
+		advanced: false,
+	},
+	{
+		name: "4K default",
+		options: { ...BOTH, can_request_4k_default: false },
+		advanced: false,
+	},
+	{
+		name: "discovery availability",
+		options: { ...BOTH, available: false },
+		advanced: false,
+	},
+	{
+		name: "advanced permission",
+		options: { ...BOTH, can_override: false },
+		advanced: true,
+	},
+	{
+		name: "server",
+		options: { ...BOTH, destinations: [SERVER] },
+		advanced: true,
+	},
+	{
+		name: "profile",
+		options: {
+			...BOTH,
+			destinations: [{ ...FOUR_K, quality_profiles: [] }, SERVER],
+		},
+		advanced: true,
+	},
+	{
+		name: "root folder",
+		options: {
+			...BOTH,
+			destinations: [{ ...FOUR_K, root_folders: [] }, SERVER],
+		},
+		advanced: true,
+	},
+])("season confirmation respects refreshed $name", async ({
+	options,
+	advanced,
+}) => {
+	const { bodies } = fixture(BOTH);
+	const client = renderTv();
+	await screen.findByRole("button", { name: "Request" });
+	fireEvent.change(screen.getByRole("combobox", { name: "Quality" }), {
+		target: { value: "4k" },
+	});
+	if (advanced) {
+		fireEvent.click(screen.getByRole("button", { name: "Choose destination" }));
+		fireEvent.change(screen.getByRole("combobox", { name: "Server" }), {
+			target: { value: "1" },
+		});
+	}
+	const request = screen.getByRole("button", {
+		name: advanced ? "Confirm request" : "Request 4K",
+	});
+	fireEvent.click(request);
+	screen.getByRole("dialog", { name: "Choose seasons" });
+	act(() => client.setQueryData(["destinations", "tv"], options));
+	await waitFor(() =>
+		expect((request as HTMLButtonElement).disabled).toBe(true),
+	);
+	await act(async () => {
+		fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	});
+	expect(bodies).toEqual([]);
+	expect(screen.queryByText("Requested ✓")).toBeNull();
+});
+
+test.each([
+	[SEASONS[0]],
+	[SEASONS[0], { ...SEASONS[1], episode_count: 0 }],
+])("Specials as the sole eligible season requests season zero directly", async (...seasons) => {
+	const { bodies } = fixture();
+	renderTv(seasons);
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	await screen.findByText("Requested ✓");
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7, seasons: [0] }]);
+});
+
+test.each([
+	{
+		name: "Standard",
+		initial: BOTH,
+		refreshed: { ...BOTH, can_request_standard: false },
+		button: "Request",
+		value: "standard",
+	},
+	{
+		name: "4K",
+		initial: { ...BOTH, can_request_standard: false },
+		refreshed: { ...BOTH, can_request_4k: false },
+		button: "Request 4K",
+		value: "4k",
+	},
+])("picker keeps its implicit $name variant when that permission disappears", async ({
+	name,
+	initial,
+	refreshed,
+	button,
+	value,
+}) => {
+	const { bodies } = fixture(initial);
+	const client = renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: button }));
+	screen.getByRole("dialog", { name: "Choose seasons" });
+	act(() => client.setQueryData(["destinations", "tv"], refreshed));
+	await waitFor(() =>
+		expect(
+			(screen.getByRole("option", { name }) as HTMLOptionElement).disabled,
+		).toBe(true),
+	);
+	await act(async () => {
+		fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	});
+	expect(bodies).toEqual([]);
+	expect(
+		(screen.getByRole("combobox", { name: "Quality" }) as HTMLSelectElement)
+			.value,
+	).toBe(value);
+});
+
+test.each([
+	{ ...OPTIONS, can_request_partial: false },
+	{ ...OPTIONS, available: false, can_request_partial: false },
+])("disabled or unknown partial policy skips the picker and preserves whole-series requests", async (options) => {
+	const { bodies } = fixture(options);
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	await screen.findByText("Requested ✓");
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});
+
+test("partial policy disabled leaves sole Specials to the Seerr fallback", async () => {
+	const { bodies } = fixture(
+		{ ...OPTIONS, can_request_partial: false },
+		{
+			status: "failed",
+			seerr_url: "https://requests.example/tv/7",
+		},
+	);
+	renderTv([SEASONS[0], { ...SEASONS[1], episode_count: 0 }]);
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	await screen.findByRole("link", { name: "Request in Seerr ↗" });
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});
+
+test.each([
+	false,
+	true,
+])("partial policy loss blocks an open picker's default or subset (%s)", async (subset) => {
+	const { bodies } = fixture();
+	const client = renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	if (subset) fireEvent.click(toggle(/Season 1/));
+	act(() =>
+		client.setQueryData(["destinations", "tv"], {
+			...OPTIONS,
+			can_request_partial: false,
+			can_request_specials: false,
+		}),
+	);
+	await waitFor(() =>
+		expect(screen.queryByRole("switch", { name: /Specials/ })).toBeNull(),
+	);
+	await act(async () => {
+		fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	});
+	expect(bodies).toEqual([]);
+	fireEvent.click(screen.getByRole("button", { name: "Request" }));
+	await screen.findByText("Requested ✓");
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(bodies).toEqual([{ media_type: "tv", tmdb_id: 7 }]);
+});
+
+test.each([
+	"Cancel",
+	"Escape",
+])("Standard-only requests keep Quality hidden while picking and after %s", async (action) => {
+	const { bodies } = fixture();
+	renderTv();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	screen.getByRole("dialog", { name: "Choose seasons" });
+	expect(screen.queryByRole("combobox", { name: "Quality" })).toBeNull();
+	if (action === "Escape") fireEvent.keyDown(document, { key: "Escape" });
+	else fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(screen.queryByRole("combobox", { name: "Quality" })).toBeNull();
+	expect(bodies).toEqual([]);
 });

@@ -19,8 +19,12 @@ def _text(name: str) -> str:
     return (WORKFLOWS / name).read_text(encoding="utf-8")
 
 
-def test_repository_has_only_gate_and_image_workflows() -> None:
-    assert {path.name for path in WORKFLOWS.glob("*.yml")} == {"gate.yml", "image.yml"}
+def test_repository_has_only_delivery_and_security_workflows() -> None:
+    assert {path.name for path in WORKFLOWS.glob("*.yml")} == {
+        "gate.yml",
+        "image.yml",
+        "codeql.yml",
+    }
 
 
 def test_workflows_are_valid_yaml() -> None:
@@ -130,3 +134,32 @@ def test_image_workflow_publishes_only_after_native_smoke() -> None:
     assert "type=semver,pattern={{major}}" in image
     assert "type=raw,value=latest" in image
     assert "build-args:" not in image
+
+
+def test_codeql_scans_fork_prs_without_privileged_checkout_or_publish() -> None:
+    text = _text("codeql.yml")
+    config = yaml.safe_load(text)
+    events = config[True]
+    assert events["pull_request"] == {"branches": ["main"]}
+    assert events["push"] == {"branches": ["main"]}
+    assert len(events["schedule"]) == 1
+    assert "pull_request_target" not in events
+    assert "paths-ignore" not in text and "paths:" not in text
+    assert config["permissions"] == {"contents": "read"}
+    assert set(config["jobs"]) == {"analyze"}
+    job = config["jobs"]["analyze"]
+    assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 15
+    assert job["permissions"] == {"contents": "read", "security-events": "write"}
+    assert set(job["strategy"]["matrix"]["language"]) == {
+        "actions",
+        "javascript-typescript",
+        "python",
+    }
+    steps = job["steps"]
+    assert len(steps) == 3 and all("run" not in step for step in steps)
+    assert steps[0]["with"]["persist-credentials"] is False
+    assert steps[1]["uses"].startswith("github/codeql-action/init@")
+    assert steps[1]["with"] == {"languages": "${{ matrix.language }}", "build-mode": "none"}
+    assert steps[2]["uses"].startswith("github/codeql-action/analyze@")
+    assert steps[2]["with"] == {"category": "/language:${{ matrix.language }}"}
+    assert "secrets." not in text

@@ -100,7 +100,22 @@ export function RequestButton({
 	const pending = request.isPending || destinations.isPending;
 	const canOverride = Boolean(options?.available && options.can_override);
 	const defaultAllowed = !is4k || Boolean(options?.can_request_4k_default);
-	const pickSeasons = type === "tv" && seasons.length > 1;
+	const canSubmit =
+		!pending &&
+		variantAllowed &&
+		validSelection &&
+		(selection ? canOverride : defaultAllowed);
+	const selectable = seasons.filter(
+		(season) =>
+			season.episode_count > 0 &&
+			(season.season_number > 0 ||
+				(options?.can_request_partial === true &&
+					options.can_request_specials === true)),
+	);
+	const pickSeasons =
+		type === "tv" &&
+		options?.can_request_partial === true &&
+		selectable.length > 1;
 
 	function selectServer(value: string) {
 		if (value === "default") {
@@ -116,22 +131,23 @@ export function RequestButton({
 			});
 	}
 	function submit() {
-		if (
-			pending ||
-			!variantAllowed ||
-			!validSelection ||
-			(!selection && !defaultAllowed) ||
-			(selection && !canOverride)
-		)
-			return;
+		if (!canSubmit) return;
 		if (pickSeasons) {
+			setQuality(is4k);
 			setPickingSeasons(true);
 			return;
 		}
-		send();
+		send(
+			type === "tv" &&
+				selectable.length === 1 &&
+				selectable[0].season_number === 0
+				? [0]
+				: undefined,
+		);
 	}
 	function send(chosen?: number[]) {
-		const regular = seasons
+		if (!canSubmit || (chosen && options?.can_request_partial !== true)) return;
+		const regular = selectable
 			.map((season) => season.season_number)
 			.filter((number) => number > 0);
 		// The default choice (every regular season, no Specials) stays Seerr's "all".
@@ -150,7 +166,7 @@ export function RequestButton({
 		<div className="flex flex-col items-start gap-2">
 			{pickingSeasons && (
 				<SeasonPicker
-					seasons={seasons}
+					seasons={selectable}
 					onCancel={closeSeasons}
 					onConfirm={(chosen) => {
 						setPickingSeasons(false);
@@ -161,7 +177,7 @@ export function RequestButton({
 			{submitted && (
 				<p className="text-sm font-medium text-emerald-400">Requested ✓</p>
 			)}
-			{(fourKAllowed || quality !== null) && (
+			{(fourKAllowed || quality === true) && (
 				<label className="flex flex-col gap-1 text-sm">
 					<span>Quality</span>
 					<select
@@ -296,13 +312,7 @@ export function RequestButton({
 			<button
 				type="button"
 				onClick={submit}
-				disabled={
-					pending ||
-					!variantAllowed ||
-					!validSelection ||
-					(!selection && !defaultAllowed) ||
-					Boolean(selection && !canOverride)
-				}
+				disabled={!canSubmit}
 				className="min-h-11 w-fit rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
 			>
 				{request.isPending

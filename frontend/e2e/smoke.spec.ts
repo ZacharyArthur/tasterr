@@ -127,7 +127,16 @@ test("4K TV request keeps the whole-series contract", async ({ page }) => {
 	await page
 		.getByRole("combobox", { name: "Quality", exact: true })
 		.selectOption("4k");
+	const sent = page.waitForRequest(
+		(request) =>
+			request.url().endsWith("/api/v1/request") && request.method() === "POST",
+	);
 	await page.getByRole("button", { name: "Request 4K", exact: true }).click();
+	expect((await sent).postDataJSON()).toEqual({
+		media_type: "tv",
+		tmdb_id: 105,
+		is_4k: true,
+	});
 	await expect(page.getByText("Requested ✓", { exact: true })).toBeVisible();
 });
 
@@ -162,7 +171,15 @@ test("phone TV season dialog sends only the chosen seasons", async ({
 	await expect(
 		page.getByRole("dialog", { name: "Fixture Show 106" }),
 	).toBeVisible();
-	await page.getByRole("button", { name: "Request", exact: true }).click();
+	const request = page.getByRole("button", { name: "Request", exact: true });
+	await request.click();
+	await page.keyboard.press("Escape");
+	await expect(picker).toHaveCount(0);
+	await expect(
+		page.getByRole("dialog", { name: "Fixture Show 106" }),
+	).toBeVisible();
+	await expect(request).toBeFocused();
+	await request.click();
 	await picker.getByRole("switch", { name: /Season 1/ }).click();
 	const sent = page.waitForRequest(
 		(request) =>

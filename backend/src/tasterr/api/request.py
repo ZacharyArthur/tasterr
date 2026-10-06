@@ -129,6 +129,8 @@ async def create_request(
     request: Request,
 ) -> RequestResponse:
     seerr_url = _external_url(settings.seerr_external_url, payload.media_type, payload.tmdb_id)
+    if payload.seasons is not None and payload.media_type != "tv":
+        raise HTTPException(status_code=422, detail="Seasons apply to TV requests only")
     if ctx is None:
         return RequestResponse(status="unavailable", seerr_url=seerr_url)
     has_override = any(
@@ -138,14 +140,18 @@ async def create_request(
         value is None for value in (payload.server_id, payload.profile_id, payload.root_folder)
     ):
         raise HTTPException(status_code=422, detail="Incomplete destination override")
-    if payload.seasons is not None and payload.media_type != "tv":
-        raise HTTPException(status_code=422, detail="Seasons apply to TV requests only")
     try:
         user = await ctx.client.user(authed.user.seerr_user_id)
         if not user.can_request(payload.media_type, is_4k=payload.is_4k):
             raise HTTPException(status_code=403, detail="Request permission required")
         if has_override and not user.can_override:
             raise HTTPException(status_code=403, detail="Advanced request permission required")
+        if payload.seasons is not None:
+            policy = await ctx.client.request_settings()
+            if not policy.partial_requests_enabled:
+                raise HTTPException(status_code=422, detail="Season selection is disabled in Seerr")
+            if 0 in payload.seasons and not policy.enable_special_episodes:
+                raise HTTPException(status_code=422, detail="Specials are disabled in Seerr")
         info = await ctx.client.media_status(payload.media_type, payload.tmdb_id)
         code = (info.status_4k if payload.is_4k else info.status) if info else 0
         if code in (2, 3, 4, 5):

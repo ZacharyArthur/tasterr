@@ -1,6 +1,7 @@
 """Permission-scoped request options; discovery failures never block browsing."""
 
 import asyncio
+from contextlib import suppress
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Request
@@ -42,6 +43,8 @@ class RequestOptions(BaseModel):
     can_request_4k: bool = False
     can_request_4k_default: bool = False
     can_override: bool = False
+    can_request_specials: bool = False
+    can_request_partial: bool = False
     destinations: list[RequestDestination] = []
 
 
@@ -93,12 +96,22 @@ async def get_destinations(
     )
     allowed = [s for s in servers if (four_k if s.is_4k else standard)]
     destinations = await list_destinations(client, media_type, allowed) if user.can_override else []
+    specials = False
+    partial = False
+    if media_type == "tv":
+        # A settings failure disables selection; ordinary whole-series requests survive.
+        with suppress(UpstreamError):
+            policy = await client.request_settings()
+            partial = policy.partial_requests_enabled
+            specials = partial and policy.enable_special_episodes
     return RequestOptions(
         available=True,
         can_request_standard=standard,
         can_request_4k=four_k,
         can_request_4k_default=four_k_default,
         can_override=user.can_override,
+        can_request_specials=specials,
+        can_request_partial=partial,
         destinations=destinations,
     )
 
