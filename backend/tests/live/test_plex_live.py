@@ -389,15 +389,16 @@ async def test_movie_and_episode_to_show_guid_mapping() -> None:
             for item in candidates:
                 if checked >= GUID_CANDIDATE_MAX or (movie_mapped and show_mapped):
                     break
-                checked += 1
                 try:
                     if item.media_type == "movie" and not movie_mapped:
+                        checked += 1
                         key = _rating_key(item.rating_key)
                         movie_mapped = (
                             key is not None
                             and _tmdb_guid(await client.metadata(state.server, key)) is not None
                         )
                     elif item.media_type == "episode" and not show_mapped:
+                        checked += 1
                         show_key = _rating_key(item.grandparent_rating_key)
                         if show_key is None:
                             episode_key = _rating_key(item.rating_key)

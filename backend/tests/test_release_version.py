@@ -6,14 +6,14 @@ from pathlib import Path
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 
 class PackageManifest(BaseModel):
     version: str
 
 
-def test_package_and_lock_metadata_are_v2_2_0() -> None:
+def test_package_and_lock_metadata_are_v2_3_0() -> None:
     pyproject = (ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
     uv_lock = (ROOT / "backend" / "uv.lock").read_text(encoding="utf-8")
     frontend = PackageManifest.model_validate_json(
@@ -41,10 +41,11 @@ def test_image_workflow_maps_v2_tag_to_release_aliases() -> None:
 
 def test_release_documents_name_the_current_stable_tag() -> None:
     releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
-    evidence = (ROOT / "docs" / "releases" / "v2.2.0.md").read_text(encoding="utf-8")
+    evidence = (ROOT / "docs" / "releases" / "v2.3.0.md").read_text(encoding="utf-8")
 
     assert f"package version is\n`{VERSION}`" in releasing
     assert f"Git tag is `v{VERSION}`" in releasing
     assert f"Git tag: `v{VERSION}`" in evidence
     assert re.search(r"(?m)^- Release date: \d{4}-\d{2}-\d{2}$", evidence)
     assert "pending GitHub Release" not in evidence
+    assert f"`{VERSION}`, `{VERSION.rsplit('.', 1)[0]}`, `2`, and `latest`" in releasing
