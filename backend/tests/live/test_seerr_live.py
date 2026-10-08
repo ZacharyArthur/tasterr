@@ -45,7 +45,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tasterr.catalog.availability import to_availability
 from tasterr.clients.errors import UpstreamRejected
-from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
+from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrUser
 
 pytestmark = pytest.mark.live
 
@@ -175,6 +175,11 @@ async def test_local_login_contract_and_version() -> None:
         me = await http.get(f"{URL}/api/v1/auth/me", headers={"Cookie": login.cookie})
         assert me.status_code == 200
         assert me.json()["id"] == login.user.id
+        assert me.json()["permissions"] == login.user.permissions
+        assert (
+            SeerrUser.model_validate(me.json()).resolved_display_name
+            == login.user.resolved_display_name
+        )
 
     print(f"\nSeerr version tested: {version}")
 

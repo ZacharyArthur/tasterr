@@ -23,16 +23,19 @@ def test_factory_sets_default_timeout() -> None:
 
 
 async def test_shared_client_never_replays_upstream_cookies() -> None:
-    """Two users' logins on the one shared client: the second request must not
-    carry the first login's connect.sid (cross-user session bleed)."""
+    """Only the explicit identity read carries its user's freshly issued cookie."""
     seen_cookie_headers: list[str | None] = []
+    user_id = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal user_id
         seen_cookie_headers.append(request.headers.get("cookie"))
+        if request.method == "POST":
+            user_id += 1
         return httpx.Response(
             200,
-            json={"id": len(seen_cookie_headers), "permissions": 0},
-            headers={"set-cookie": "connect.sid=s%3Aleaky; Path=/; HttpOnly"},
+            json={"id": user_id, "permissions": 0},
+            headers={"set-cookie": f"connect.sid=s%3Auser-{user_id}; Path=/; HttpOnly"},
         )
 
     client = create_http_client(transport=httpx.MockTransport(handler))
@@ -43,9 +46,10 @@ async def test_shared_client_never_replays_upstream_cookies() -> None:
     finally:
         await client.aclose()
 
-    assert seen_cookie_headers == [None, None]
+    assert seen_cookie_headers == [None, "connect.sid=s%3Auser-1", None, "connect.sid=s%3Auser-2"]
     # Extraction from each response still works with the jar disabled.
-    assert first.cookie == second.cookie == "connect.sid=s%3Aleaky"
+    assert first.cookie == "connect.sid=s%3Auser-1"
+    assert second.cookie == "connect.sid=s%3Auser-2"
 
 
 def test_lifespan_owns_the_shared_client(tmp_path: Path) -> None:

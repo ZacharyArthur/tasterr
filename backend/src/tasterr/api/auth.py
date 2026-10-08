@@ -199,6 +199,7 @@ async def local_login(
         logger.info("auth: local login rejected")
         raise HTTPException(status_code=401, detail="Invalid email or password") from error
     except UpstreamUnavailable as error:
+        logger.warning("auth: local login unavailable")
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
 
     user, token, _plex_token_enc = await complete_login(db, ctx.secret_key, login, "local", None)
