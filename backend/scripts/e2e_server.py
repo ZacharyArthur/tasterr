@@ -190,18 +190,15 @@ def build_fixture_router() -> APIRouter:
     async def _local_login(payload: LocalLoginBody) -> JSONResponse:
         if payload.email != E2E_EMAIL or payload.password != E2E_PASSWORD:
             return JSONResponse(status_code=401, content={"message": "Invalid credentials"})
-        response = JSONResponse(
-            {
-                "id": 7001,
-                "displayName": "E2E Viewer",
-                "email": E2E_EMAIL,
-                "permissions": SeerrPermission.REQUEST
-                | SeerrPermission.REQUEST_4K
-                | SeerrPermission.REQUEST_ADVANCED,
-            }
-        )
+        response = JSONResponse({"id": 7001, "email": E2E_EMAIL})
         response.set_cookie("connect.sid", "e2e-session", httponly=True)
         return response
+
+    @router.get("/seerr/api/v1/auth/me")
+    async def _auth_me(cookie: Annotated[str | None, Header()] = None) -> JSONResponse:
+        if cookie != E2E_SEERR_COOKIE:
+            return JSONResponse(status_code=403, content={"message": "Invalid session"})
+        return JSONResponse({**await _user(7001), "displayName": "E2E Viewer", "email": E2E_EMAIL})
 
     @router.get("/seerr/api/v1/request")
     async def _request_history() -> dict[str, list[object]]:

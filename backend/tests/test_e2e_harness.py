@@ -40,13 +40,25 @@ def test_harness_is_ready_and_serves_only_invented_upstreams(
                 json={"email": E2E_EMAIL, "password": "wrong"},
             )
             assert rejected.status_code == 401
+            assert client.get("/api/_e2e/seerr/api/v1/auth/me").status_code == 403
 
             login = client.post(
                 "/api/_e2e/seerr/api/v1/auth/local",
                 json={"email": E2E_EMAIL, "password": E2E_PASSWORD},
             )
             assert login.status_code == 200
-            assert login.json()["displayName"] == "E2E Viewer"
+            assert login.json() == {"id": 7001, "email": E2E_EMAIL}
+            me = client.get("/api/_e2e/seerr/api/v1/auth/me")
+            assert me.status_code == 200
+            assert me.json()["id"] == login.json()["id"]
+            assert me.json()["displayName"] == "E2E Viewer"
+            assert me.json()["permissions"] > 0
+            assert (
+                client.get(
+                    "/api/_e2e/seerr/api/v1/auth/me", headers={"Cookie": "invalid"}
+                ).status_code
+                == 403
+            )
 
             catalog = client.get("/api/_e2e/tmdb/3/trending/all/day")
             assert catalog.status_code == 200
