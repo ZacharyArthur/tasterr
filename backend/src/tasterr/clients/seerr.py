@@ -101,7 +101,28 @@ class SeerrAuthClient:
         return await self._login("/api/v1/auth/plex", {"authToken": auth_token})
 
     async def login_local(self, email: str, password: str) -> SeerrLogin:
-        return await self._login("/api/v1/auth/local", {"email": email, "password": password})
+        login = await self._login("/api/v1/auth/local", {"email": email, "password": password})
+        # Local sign-in returns only a partial identity; permissions come from /me.
+        try:
+            response = await self._http.get(
+                f"{self._base}/api/v1/auth/me",
+                headers={"Cookie": login.cookie},
+                timeout=SEERR_TIMEOUT_SECONDS,
+                follow_redirects=False,
+            )
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("seerr request failed") from None
+        if response.status_code != 200:
+            raise UpstreamUnavailable("seerr identity read failed")
+        try:
+            user = SeerrUser.model_validate(response.json(), strict=True)
+        except ValueError:
+            raise UpstreamUnavailable("unexpected seerr response shape") from None
+        if user.id <= 0 or user.id != login.user.id:
+            raise UpstreamUnavailable("unexpected seerr user identity")
+        if "permissions" not in user.model_fields_set:
+            raise UpstreamUnavailable("seerr identity omitted permissions")
+        return SeerrLogin(user=user, cookie=login.cookie)
 
     async def _login(self, path: str, payload: dict[str, str]) -> SeerrLogin:
         try:

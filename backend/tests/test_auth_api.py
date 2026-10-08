@@ -21,6 +21,7 @@ from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import mint_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.http import create_http_client
 from tasterr.clients.plex import PlexAuthClient, PlexPin
 from tasterr.clients.seerr import SeerrAuthClient, SeerrLogin, SeerrUser
 from tasterr.db.engine import create_engine
@@ -444,6 +445,64 @@ def test_local_login_mints_session(tmp_path: Path) -> None:
         assert SEERR_COOKIE not in response.text
         assert "connect.sid" not in response.headers.get("set-cookie", "")
         assert client.get("/api/v1/auth/me").status_code == 200
+
+
+def test_local_login_refreshes_full_identity_before_minting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    profile: dict[str, object] = {"id": 7, "displayName": "Owner", "permissions": 2}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/local":
+            return httpx.Response(
+                200,
+                json={"id": 7, "email": "a@b.c"},
+                headers={"set-cookie": f"{SEERR_COOKIE}; Path=/; HttpOnly"},
+            )
+        assert request.url.path == "/api/v1/auth/me"
+        assert request.headers["cookie"] == SEERR_COOKIE
+        return httpx.Response(200, json=profile)
+
+    monkeypatch.setattr(
+        "tasterr.main.create_http_client",
+        lambda: create_http_client(transport=httpx.MockTransport(handler)),
+    )
+    harness = _harness(tmp_path)
+    del harness.app.dependency_overrides[get_auth_context]
+    credentials = {"email": "a@b.c", "password": "hunter2-password-sentinel"}
+    with caplog.at_level("INFO", logger="tasterr.api.auth"), TestClient(harness.app) as client:
+        first = client.post("/api/v1/auth/local", json=credentials)
+        assert first.status_code == 200
+        assert first.json()["display_name"] == "Owner"
+        assert first.json()["is_admin"] is True
+
+        profile = {"id": 7, "displayName": "Renamed", "permissions": 0}
+        second = client.post("/api/v1/auth/local", json=credentials)
+        assert second.status_code == 200
+        assert second.json()["id"] == first.json()["id"]
+        assert second.json()["display_name"] == "Renamed"
+        assert second.json()["is_admin"] is False
+        assert _session_count(harness.db_path) == 2
+
+        profile = {"id": 7, "displayName": "Incomplete"}
+        failed = client.post("/api/v1/auth/local", json=credentials)
+        assert failed.status_code == 502
+        assert failed.json() == {"detail": "Sign-in service unavailable"}
+        assert "set-cookie" not in failed.headers
+        assert _session_count(harness.db_path) == 2
+        assert client.get("/api/v1/auth/me").json() == second.json()
+
+    records = [record for record in caplog.records if record.name == "tasterr.api.auth"]
+    assert [record.getMessage() for record in records] == [
+        "auth: local login succeeded",
+        "auth: local login succeeded",
+        "auth: local login unavailable",
+    ]
+    assert records[-1].levelname == "WARNING"
+    assert records[-1].exc_info is None
+    assert records[-1].args == ()
+    assert credentials["password"] not in caplog.text
+    assert SEERR_COOKIE not in caplog.text
 
 
 def test_local_login_failures_are_indistinguishable(tmp_path: Path) -> None:

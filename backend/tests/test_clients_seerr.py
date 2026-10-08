@@ -63,15 +63,78 @@ async def test_login_plex_returns_user_and_cookie() -> None:
     assert login.cookie == "connect.sid=s%3Aredacted.sig"
 
 
-async def test_login_local_forwards_credentials_verbatim() -> None:
+@pytest.mark.parametrize("permissions", [0, 2, 32])
+async def test_login_local_reads_full_identity_with_its_session(permissions: int) -> None:
+    calls: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/auth/local"
-        assert json.loads(request.read()) == {"email": "a@b.c", "password": "hunter2"}
-        return httpx.Response(200, json=USER_FIXTURE, headers={"set-cookie": COOKIE_HEADER})
+        calls.append(request.url.path)
+        assert "x-api-key" not in request.headers
+        if request.method == "POST":
+            assert request.url.path == "/api/v1/auth/local"
+            assert json.loads(request.read()) == {"email": "a@b.c", "password": "hunter2"}
+            assert "cookie" not in request.headers
+            return httpx.Response(
+                200, json={"id": 1, "email": "a@b.c"}, headers={"set-cookie": COOKIE_HEADER}
+            )
+        assert request.method == "GET"
+        assert request.url.path == "/api/v1/auth/me"
+        assert request.headers["cookie"] == "connect.sid=s%3Aredacted.sig"
+        assert request.content == b""
+        assert request.extensions["timeout"]["read"] == 5.0
+        return httpx.Response(200, json={**USER_FIXTURE, "permissions": permissions})
 
     login = await _client(handler).login_local("a@b.c", "hunter2")
 
     assert login.user.id == 1
+    assert login.user.permissions == permissions
+    assert login.user.resolved_display_name == "Viewer"
+    assert login.user.avatar == USER_FIXTURE["avatar"]
+    assert login.cookie == "connect.sid=s%3Aredacted.sig"
+    assert calls == ["/api/v1/auth/local", "/api/v1/auth/me"]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(403),
+        httpx.Response(503),
+        httpx.Response(302, headers={"location": "https://elsewhere.example/auth"}),
+        httpx.Response(200, text="not json"),
+        httpx.Response(200, json={"id": 1}),
+        httpx.Response(200, json={"permissions": 2}),
+        httpx.Response(200, json={"id": 2, "permissions": 2}),
+        httpx.Response(200, json={"id": 0, "permissions": 2}),
+        httpx.Response(200, json={"id": 1, "permissions": -1}),
+        httpx.Response(200, json={"id": 1, "permissions": "2"}),
+        httpx.Response(200, json={"id": 1, "permissions": True}),
+        httpx.Response(200, json={"id": 1, "permissions": None}),
+    ],
+)
+async def test_local_identity_failure_is_unavailable(response: httpx.Response) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/local":
+            return httpx.Response(200, json={"id": 1}, headers={"set-cookie": COOKIE_HEADER})
+        assert request.url.path == "/api/v1/auth/me"
+        return response
+
+    with pytest.raises(UpstreamUnavailable):
+        await _client(handler).login_local("a@b.c", "hunter2")
+
+
+@pytest.mark.parametrize("error_type", [httpx.ReadTimeout, httpx.ConnectError])
+async def test_local_identity_transport_failure_is_generic(
+    error_type: type[httpx.HTTPError],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/local":
+            return httpx.Response(200, json={"id": 1}, headers={"set-cookie": COOKIE_HEADER})
+        raise error_type("internal-url-and-cookie-sentinel")
+
+    with pytest.raises(UpstreamUnavailable) as excinfo:
+        await _client(handler).login_local("a@b.c", "hunter2")
+    assert "sentinel" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
 
 
 async def test_rejection_is_typed_with_status() -> None:
