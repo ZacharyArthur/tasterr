@@ -1,7 +1,7 @@
 # Releasing
 
 This procedure is for stable releases. The current package version is
-`2.3.0`, its Git tag is `v2.3.0`, and its image is published by the `image` workflow
+`2.3.1`, its Git tag is `v2.3.1`, and its image is published by the `image` workflow
 only after all release changes are squash-merged to protected `main`.
 
 ## 1. Prepare the required devcontainer
@@ -42,7 +42,7 @@ native image/Compose smoke sequentially. Any failure blocks the release.
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-Record the date and result in `docs/releases/v2.3.0.md`. This command intentionally
+Record the date and result in `docs/releases/v2.3.1.md`. This command intentionally
 does not imply that audits, security review, or live contracts passed.
 
 The committed evidence file is the pre-tag record. Write it so it remains true after
@@ -194,35 +194,35 @@ pushes.
 After every pre-tag release-record field is final, create and push the annotated tag:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . git tag -a v2.3.0 -m "v2.3.0"
-npx @devcontainers/cli exec --workspace-folder . git push origin v2.3.0
+npx @devcontainers/cli exec --workspace-folder . git tag -a v2.3.1 -m "v2.3.1"
+npx @devcontainers/cli exec --workspace-folder . git push origin v2.3.1
 ```
 
-Wait for the image workflow. It must publish `2.3.0`, `2.3`, `2`, and `latest`, and
+Wait for the image workflow. It must publish `2.3.1`, `2.3`, `2`, and `latest`, and
 leave the existing `sha-<full-commit>` candidate unchanged. Inspect the stable
 manifest and confirm both platforms:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:2.3.0
+npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:2.3.1
 ```
 
 Verify the stable image attestation:
 
 ```console
-gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:2.3.0 -R ZacharyArthur/tasterr
+gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:2.3.1 -R ZacharyArthur/tasterr
 ```
 
 Perform a fresh install in an empty directory with a new external network, disposable
 `.env`, and new Compose project. Set
-`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:2.3.0`, run `docker compose pull` and
+`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:2.3.1`, run `docker compose pull` and
 `docker compose up -d --no-build`, then verify health, SPA serving, non-root uid, and
 named-volume persistence. Delete every disposable resource after verification.
 
 Publish release notes only after the applicable manifest, attestation, and fresh
 install checks pass. Summarize user-visible changes, upgrade steps, and known
-limitations; then pin the `2.3.0` digest as the released artifact without reproducing
-private evidence. Publish v2.3.0 with repository immutability enabled only after
-`2.3.0`, `2.3`, `2`, and `latest`
+limitations; then pin the `2.3.1` digest as the released artifact without reproducing
+private evidence. Publish v2.3.1 with repository immutability enabled only after
+`2.3.1`, `2.3`, `2`, and `latest`
 resolve to the expected release commit, the `sha-<full-commit>` candidate retains its
 recorded pre-tag digest, and the tagged clean-install smoke passes.
 

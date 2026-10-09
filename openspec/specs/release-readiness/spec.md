@@ -21,7 +21,7 @@ lifecycle, generated API types, identity/secrets, and independent Seerr/Plex
 degradation without replacing the frozen founding documents. Root and package
 metadata SHALL identify the selected AGPL-3.0-only license and the published image
 SHALL include its license text. The root quick start SHALL include a copyable Compose
-example using the current `2.3.0` GHCR image, loopback host publication, and the named
+example using the current `2.3.1` GHCR image, loopback host publication, and the named
 data volume. It SHALL distinguish Tasterr's ordinary process environment from the
 bundled Compose file's explicit environment-file loading and document how another
 container platform or Compose service can inject the same variable names without a
@@ -32,7 +32,7 @@ file.
 - **WHEN** an operator starts with the root README and an existing Seerr instance
 - **THEN** the linked configuration guide contains every required step and variable
   needed to start, expose intentionally, secure, keep logs private, back up, restore,
-  upgrade to v2.3.0, roll back across migration `0006`, and troubleshoot Tasterr
+  upgrade to v2.3.1, roll back across migration `0006`, and troubleshoot Tasterr
 
 #### Scenario: Maintainer can locate architectural boundaries
 
@@ -51,7 +51,7 @@ file.
 
 - **WHEN** an operator deploys the README's published-image Compose example beside a
   populated `.env`
-- **THEN** Compose pulls `ghcr.io/zacharyarthur/tasterr:2.3.0`, publishes it on host
+- **THEN** Compose pulls `ghcr.io/zacharyarthur/tasterr:2.3.1`, publishes it on host
   loopback, and persists `/data` in the documented named volume
 
 #### Scenario: Environment sources are unambiguous
@@ -85,7 +85,7 @@ releases, and protected version tags before stable publication.
 
 #### Scenario: Public release checks repository security features
 
-- **WHEN** the operator prepares the v2.3.0 tag
+- **WHEN** the operator prepares the v2.3.1 tag
 - **THEN** the release checklist requires private reporting, secret scanning,
   dependency maintenance, immutable releases, and protected version tags first
 
@@ -197,17 +197,17 @@ GitHub Release rather than a post-release source commit.
 
 ### Requirement: Stable versioning and release order are explicit
 
-The current feature release SHALL use SemVer `2.3.0` in backend/frontend package and
-lock metadata and Git tag `v2.3.0`. Its release-readiness change and living specs
-SHALL be archived and squash-merged through required `check`, `e2e`,
+The current stable release SHALL use SemVer `2.3.1` in backend/frontend package and
+lock metadata and Git tag `v2.3.1`. Its release preparation and any applicable archived
+OpenSpec changes SHALL be squash-merged through required `check`, `e2e`,
 `container-smoke`, and CodeQL gates before tagging. The main workflow SHALL publish
 an immutable commit-SHA candidate with verifiable provenance. Before the stable tag,
 the release procedure SHALL verify that candidate's amd64/arm64 manifest, artifact
 attestation, public package visibility, anonymous pull, clean deployment, non-root
 runtime, health, SPA, and named-volume persistence. The tag workflow SHALL publish
-`2.3.0`, `2.3`, `2`, and `latest` while leaving the SHA candidate unchanged; those
+`2.3.1`, `2.3`, `2`, and `latest` while leaving the SHA candidate unchanged; those
 stable aliases, their attestation, and a fresh tagged deployment SHALL be verified
-before the immutable GitHub Release. Rollback to v2.2.0 SHALL use the immutable prior
+before the immutable GitHub Release. Rollback to v2.3.0 SHALL use the immutable prior
 image digest; rollback across migration `0006` to v1.1 SHALL first downgrade to
 `0005` with a v2 image or restore a validated pre-upgrade SQLite backup. Every
 template owner/repository marker MUST be replaced by the final coordinate before
@@ -215,8 +215,8 @@ publication.
 
 #### Scenario: Stable tag follows the atomic merge
 
-- **WHEN** the v2.3.0 release-readiness change has passed review and been squash-merged
-- **THEN** the operator tags that releasable main commit `v2.3.0`, not an unmerged
+- **WHEN** the v2.3.1 release preparation has passed review and been squash-merged
+- **THEN** the operator tags that releasable main commit `v2.3.1`, not an unmerged
   change-branch commit
 
 #### Scenario: First stable tag follows the atomic merge
@@ -244,7 +244,7 @@ publication.
 - **WHEN** the release-readiness change is merged and the main workflow publishes its
   immutable candidate
 - **THEN** the operator verifies both architectures, attestation, public visibility,
-  anonymous pull, and a disposable clean installation before creating `v2.3.0`
+  anonymous pull, and a disposable clean installation before creating `v2.3.1`
 
 #### Scenario: Public candidate precedes the stable tag
 
@@ -255,14 +255,14 @@ publication.
 
 #### Scenario: Published image is verified
 
-- **WHEN** the stable image workflow finishes for `v2.3.0`
-- **THEN** the operator confirms `2.3.0`, `2.3`, `2`, `latest`, and the unchanged SHA
+- **WHEN** the stable image workflow finishes for `v2.3.1`
+- **THEN** the operator confirms `2.3.1`, `2.3`, `2`, `latest`, and the unchanged SHA
   candidate resolve to the release commit, verifies the stable manifest and
   attestation, and completes a fresh tagged-image deployment before publishing the
   immutable GitHub Release
 
 #### Scenario: Failed publication fixes forward
 
-- **WHEN** any verification fails after `v2.3.0` is published
+- **WHEN** any verification fails after `v2.3.1` is published
 - **THEN** the tag is never moved, deleted, or reused and remediation ships through
   protected main as the next patch release
