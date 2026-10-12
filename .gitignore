@@ -8,7 +8,7 @@
 .opencode/
 .aider*
 .zcode
-braid/
+braid/reviews/
 
 # Python
 __pycache__/
