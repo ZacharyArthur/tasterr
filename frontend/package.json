@@ -14,26 +14,26 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
-		"@tailwindcss/vite": "^4.3.2",
-		"@tanstack/react-query": "^5.101.2",
-		"react": "^19.2.7",
-		"react-dom": "^19.2.7",
-		"react-router": "^8.3.0",
+		"@tailwindcss/vite": "^4.3.3",
+		"@tanstack/react-query": "^5.104.1",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
+		"react-router": "^8.4.0",
 		"tailwindcss": "^4.3.2"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.4.2",
-		"@playwright/test": "1.61.1",
-		"@testing-library/react": "^16.3.2",
-		"@types/node": "^24.13.2",
-		"@types/react": "^19.2.17",
-		"@types/react-dom": "^19.2.3",
-		"@vitejs/plugin-react": "^6.0.3",
-		"jsdom": "^29.1.1",
+		"@biomejs/biome": "2.5.15",
+		"@playwright/test": "1.64.0",
+		"@testing-library/react": "^16.3.3",
+		"@types/node": "^26.6.4",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
+		"@vitejs/plugin-react": "^6.1.2",
+		"jsdom": "^30.1.2",
 		"openapi-typescript": "^7.13.0",
-		"typescript": "~5.9.0",
-		"vite": "^8.1.1",
-		"vitest": "^4.1.11"
+		"typescript": "~7.0.2",
+		"vite": "^8.3.4",
+		"vitest": "^5.0.3"
 	},
 	"overrides": {
 		"@redocly/openapi-core@1.34.17": {
