@@ -32,3 +32,6 @@ test-results/
 # OS
 Thumbs.db
 .DS_Store
+
+# Local feature backlog (not committed)
+TODO-FEATURES.md
