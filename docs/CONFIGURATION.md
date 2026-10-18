@@ -131,14 +131,15 @@ and are evaluated in the new region.
 
 The rail list includes independent switches for **Continue Watching**, **Picks You
 Wouldn't Usually Watch**, and **Something for Everyone Tonight**. All three default
-enabled. Plex-backed sessions reuse their encrypted sign-in token, while local-login
-sessions perform no live Plex read. `TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
+enabled. Any user with a Plex link reuses its encrypted account token, including
+after local sign-in. Users without a Plex link perform no live Plex read.
+`TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
 bounded server-side discovery and is never exposed to the browser.
 
 ## Plex-aware operation
 
 Plex history sync is best-effort and never blocks sign-in or Home. Tasterr evaluates
-one bounded import per Plex-backed user at most every six hours. Continue Watching is
+one bounded import per user with a Plex link at most every six hours. Continue Watching is
 live, caller-scoped presentation data cached for five minutes; raw history, progress,
 server URLs, account ids, rating keys, and resource tokens are not stored. Plex
 failure removes the affected rail/import only. TMDB or Seerr degradation keeps its
@@ -194,14 +195,15 @@ same headers as defense-in-depth but must not weaken them.
 
 - TMDB unset or unavailable: health still responds, but catalog browsing reports a
   generic unavailable state until TMDB recovers or is configured.
-- Seerr unset: TMDB browsing remains available; availability is Unknown and request
-  controls are disabled.
+- Seerr unset: TMDB browsing remains available to existing sessions; availability
+  is Unknown and request controls are disabled. Seerr is still the sign-in bridge
+  in this release, so removing its configuration prevents new sign-ins.
 - Seerr temporarily down: browsing and learned recommendations continue; badges
   degrade to Unknown and request attempts fail generically or offer the validated
   external Seerr link.
-- A local user's Seerr session expires: a request asks them to sign in again. A Plex
-  user's request performs one silent re-authentication attempt with the encrypted
-  stored token.
+- A Seerr cookie expires: a member with a Plex link gets one silent re-authentication
+  attempt with its encrypted token. Otherwise the request opens **Connect Seerr**;
+  successful linking retries the original selection once.
 - Plex token invalid, plex.tv down, or every advertised server unreachable: ordinary
   Home rails remain available; Continue Watching is omitted and history retries only
   after the attempt throttle.
@@ -244,6 +246,18 @@ Keep backups encrypted and access-controlled: they contain identities, taste
 signals, session material, and household viewing behavior.
 
 ## Upgrade and rollback
+
+Migration `0007` makes identities local and moves external accounts into
+`linked_accounts`. It signs everyone out once; sign in again after upgrading.
+Taste signals, profiles, watchlists, and onboarding state are preserved. Credentials
+are stored encrypted on links after signing in, survive logout, and are removed by
+unlink or account deletion.
+
+An image-only rollback across `0007` is unsupported. Stop the writer and restore
+the matching pre-upgrade backup, or use the current image to downgrade to `0006`
+before starting the previous image. The downgrade deletes users without a Seerr
+link and all their local data, restores Seerr identities for retained users,
+and deletes every session. Back up and validate the database first.
 
 Before upgrading, take and validate a backup, record the current immutable image
 digest, then set `TASTERR_IMAGE` to the new stable tag or digest. Run

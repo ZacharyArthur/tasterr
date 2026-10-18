@@ -54,6 +54,8 @@ class PlexCloudAccount(BaseModel):
 
     id: PositiveInt
     username: StrictStr
+    title: StrictStr | None = None
+    thumb: StrictStr | None = None
 
 
 class PlexConnection(BaseModel):
@@ -221,6 +223,9 @@ class PlexAuthClient:
             "X-Plex-Product": PRODUCT,
             "X-Plex-Client-Identifier": self._client_identifier,
         }
+
+    async def account(self, token: str) -> PlexCloudAccount:
+        return await PlexMediaClient(self._http, self._client_identifier).account(token)
 
     async def create_pin(self) -> PlexPin:
         try:

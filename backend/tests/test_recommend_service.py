@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from tests.factories import user_with_links
 
 import tasterr.recommend.service as service_mod
 from tasterr.catalog.availability import Availability, AvailabilityService
@@ -19,7 +20,7 @@ from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import Profile, User, utcnow
+from tasterr.db.models import Profile, utcnow
 from tasterr.recommend import store
 from tasterr.recommend.features import FeatureRecord
 from tasterr.recommend.service import TasteService
@@ -150,8 +151,7 @@ def _service(
 
 
 async def _user(db: AsyncSession) -> int:
-    user = User(seerr_user_id=1, display_name="member", auth_type="plex")
-    db.add(user)
+    user = await user_with_links(db, seerr_user_id=1, display_name="member", auth_type="plex")
     await db.flush()
     return user.id
 
@@ -196,8 +196,7 @@ async def test_exclusions_use_current_metadata_before_ranking_and_preserve_my_li
     assert more_like is not None
     assert [item.id for item in more_like[2]] == [2]
     assert [item.id for item in await taste.my_list(user_id)] == [3]
-    second = User(seerr_user_id=2, display_name="member", auth_type="plex")
-    db.add(second)
+    second = await user_with_links(db, seerr_user_id=2, display_name="member", auth_type="plex")
     await db.flush()
     await store.record_signal(db, second.id, "movie", 3, "request")
     assert [item.id for item in await taste.household_blend([user_id, second.id])] == [2]
@@ -387,8 +386,7 @@ async def test_unexpected_picks_without_profile_does_no_catalog_work(db: AsyncSe
 
 async def test_unexpected_picks_are_user_specific(db: AsyncSession) -> None:
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -414,8 +412,7 @@ async def test_household_blend_uses_mean_profile_and_any_member_vetoes(
     db: AsyncSession,
 ) -> None:
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -448,8 +445,7 @@ async def test_household_blend_rejects_the_whole_empty_profile_audience(
     db: AsyncSession,
 ) -> None:
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -470,8 +466,7 @@ async def test_household_blend_caps_the_shared_union_before_vector_work(
 ) -> None:
     monkeypatch.setattr(service_mod, "CANDIDATE_CAP", 5)
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -507,9 +502,12 @@ async def test_concurrent_household_blends_use_independent_sessions(tmp_path: Pa
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with maker() as prepare:
-            alice = User(seerr_user_id=1, display_name="alice", auth_type="plex")
-            bob = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-            prepare.add_all((alice, bob))
+            alice = await user_with_links(
+                prepare, seerr_user_id=1, display_name="alice", auth_type="plex"
+            )
+            bob = await user_with_links(
+                prepare, seerr_user_id=2, display_name="bob", auth_type="plex"
+            )
             await prepare.flush()
             await store.record_signal(prepare, alice.id, "movie", 1, "request")
             await store.record_signal(prepare, bob.id, "movie", 2, "request")
@@ -581,8 +579,7 @@ async def test_two_users_with_different_taste_get_different_recommendations(
 ) -> None:
     """The M4 milestone bar: two users, two histories, visibly different rails."""
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     catalog = FakeCatalog()

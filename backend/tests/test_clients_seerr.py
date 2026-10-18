@@ -118,7 +118,9 @@ async def test_local_identity_failure_is_unavailable(response: httpx.Response) -
         assert request.url.path == "/api/v1/auth/me"
         return response
 
-    with pytest.raises(UpstreamUnavailable):
+    with pytest.raises(
+        UpstreamUnavailable if response.status_code in (502, 503, 504) else UpstreamRejected
+    ):
         await _client(handler).login_local("a@b.c", "hunter2")
 
 
@@ -150,7 +152,7 @@ async def test_server_error_is_unavailable() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="Internal Server Error")
 
-    with pytest.raises(UpstreamUnavailable):
+    with pytest.raises(UpstreamRejected):
         await _client(handler).login_plex("plex-token")
 
 
@@ -180,7 +182,7 @@ async def test_missing_session_cookie_is_unavailable() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=USER_FIXTURE)  # no Set-Cookie
 
-    with pytest.raises(UpstreamUnavailable):
+    with pytest.raises(UpstreamRejected):
         await _client(handler).login_plex("plex-token")
 
 
@@ -190,7 +192,7 @@ async def test_unexpected_shape_is_unavailable() -> None:
             200, json={"totally": "unexpected"}, headers={"set-cookie": COOKIE_HEADER}
         )
 
-    with pytest.raises(UpstreamUnavailable):
+    with pytest.raises(UpstreamRejected):
         await _client(handler).login_plex("plex-token")
 
 
@@ -659,7 +661,7 @@ async def test_user_permission_read_is_scoped_and_rejects_identity_mismatch() ->
         return httpx.Response(200, json={"id": 98, "permissions": 2})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        with pytest.raises(UpstreamUnavailable):
+        with pytest.raises(UpstreamRejected):
             await SeerrClient(http, "http://seerr", "key").user(99)
 
 

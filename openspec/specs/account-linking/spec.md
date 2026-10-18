@@ -1,12 +1,11 @@
-# account-linking Specification (delta)
+# account-linking Specification
 
 ## Purpose
-
 Tasterr-owned users and the external accounts (Plex, Jellyfin, Seerr) they
 link: how sign-in resolves a user, how links are proven, created, and removed,
 how admin and display identity derive from links, and the member account page.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Users are Tasterr-owned and hold linked accounts
 
@@ -331,8 +330,10 @@ current display name. It SHALL cancel and await the caller's in-flight sync task
 within their deadlines and hold the per-user scheduling guard until the delete
 commits, then delete the user; the user's cached Continue Watching entry SHALL be
 cleared; sessions, links, credentials,
-signals, and profile SHALL be removed by cascade, and the response SHALL clear
-the session cookie. Nothing SHALL be deleted in any upstream service.
+signals, and profile SHALL be removed by cascade. The response SHALL NOT set,
+clear, or refresh the session cookie: the old cookie no longer authenticates,
+and a delayed deletion response SHALL NOT overwrite a newer sign-in's cookie.
+Nothing SHALL be deleted in any upstream service.
 
 #### Scenario: Deletion removes everything local
 
@@ -344,6 +345,13 @@ the session cookie. Nothing SHALL be deleted in any upstream service.
 
 - **WHEN** the confirmation string does not match
 - **THEN** the response is 422 and nothing is deleted
+
+#### Scenario: Delayed deletion preserves a newer sign-in
+
+- **WHEN** a new sign-in completes before an earlier account-deletion response
+  arrives, including when the deleted session was due for an expiry refresh
+- **THEN** the deletion response carries no session-cookie header and the new
+  session remains authenticated
 
 #### Scenario: Deleted accounts can sign in fresh
 

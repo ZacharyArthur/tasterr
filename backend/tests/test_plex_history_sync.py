@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from starlette.requests import Request
 from starlette.types import Scope
+from tests.factories import plex_link, user_with_links
 
 import tasterr.api.taste as taste_api
 from tasterr.api.taste import cancel_plex_history, schedule_plex_history
@@ -45,7 +46,9 @@ class FakeHistory:
         self.viewed_before = viewed_before
         async with self.maker() as db:
             attempted = (
-                await db.execute(text("select plex_history_attempted_at from users"))
+                await db.execute(
+                    text("select sync_attempted_at from linked_accounts where provider = 'plex'")
+                )
             ).scalar_one()
             self.attempt_was_committed = attempted is not None
         return self.result
@@ -58,13 +61,14 @@ async def _database(
     await upgrade_to_head(engine)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
-        user = User(
+        user = await user_with_links(
+            db,
             seerr_user_id=1,
             display_name="viewer",
             auth_type="plex",
-            plex_history_synced_at=synced_at,
         )
-        db.add(user)
+        await db.flush()
+        (await plex_link(db, user.id)).sync_synced_at = synced_at
         await db.commit()
         return engine, maker, user.id
 
@@ -116,11 +120,14 @@ async def test_first_import_commits_attempt_before_reads_and_batches_writes(
         assert history.account_token == "account-token"
         assert history.attempt_was_committed is True
         assert history.viewed_before - history.viewed_after == 365 * 24 * 60 * 60
-        assert commit_sizes == [0, 100, 100, 5, 0]
+        assert commit_sizes == [0, 0, 100, 100, 5, 0]
         async with engine.connect() as connection:
             row = (
                 await connection.execute(
-                    text("select plex_history_attempted_at, plex_history_synced_at from users")
+                    text(
+                        "select sync_attempted_at, sync_synced_at from linked_accounts "
+                        "where provider = 'plex'"
+                    )
                 )
             ).one()
             assert row[0] == row[1]
@@ -152,7 +159,10 @@ async def test_partial_import_persists_facts_without_advancing_overlap_watermark
         async with engine.connect() as connection:
             row = (
                 await connection.execute(
-                    text("select plex_history_attempted_at, plex_history_synced_at from users")
+                    text(
+                        "select sync_attempted_at, sync_synced_at from linked_accounts "
+                        "where provider = 'plex'"
+                    )
                 )
             ).one()
             assert row[0] is not None
@@ -216,7 +226,9 @@ async def test_failed_attempt_commit_runs_no_network_and_leaves_no_timestamp(
         assert history.calls == 0
         async with engine.connect() as connection:
             attempted = (
-                await connection.execute(text("select plex_history_attempted_at from users"))
+                await connection.execute(
+                    text("select sync_attempted_at from linked_accounts where provider = 'plex'")
+                )
             ).scalar_one()
             assert attempted is None
     finally:
@@ -229,7 +241,7 @@ async def test_fresh_database_attempt_suppresses_a_stale_request_import(tmp_path
     async with maker() as db:
         user = await db.get(User, user_id)
         assert user is not None
-        user.plex_history_attempted_at = recent
+        (await plex_link(db, user.id)).sync_attempted_at = recent
         await db.commit()
     history = FakeHistory(PlexHistoryResult((), complete=True), maker)
     try:
@@ -245,7 +257,7 @@ async def test_fresh_database_attempt_suppresses_a_stale_request_import(tmp_path
         async with maker() as db:
             user = await db.get(User, user_id)
             assert user is not None
-            assert user.plex_history_attempted_at == recent
+            assert (await plex_link(db, user.id)).sync_attempted_at == recent
     finally:
         await engine.dispose()
 
@@ -286,7 +298,9 @@ async def test_scheduler_is_single_flight_and_waits_for_seerr_seed(
         called.set()
 
     monkeypatch.setattr(taste_api, "import_plex_history", fake_import)
-    settings = Settings.model_validate({"tasterr_secret_key": SECRET})
+    settings = Settings.model_validate(
+        {"seerr_internal_url": "http://seerr", "seerr_api_key": "key", "tasterr_secret_key": SECRET}
+    )
 
     schedule_plex_history(request, settings, 1, None, "ciphertext")
     schedule_plex_history(request, settings, 1, None, "ciphertext")
@@ -324,7 +338,12 @@ async def test_scheduler_passes_configured_plex_connection_probe_limit(
     monkeypatch.setattr(taste_api, "PlexMediaClient", RecordingPlexClient)
     monkeypatch.setattr(taste_api, "import_plex_history", fake_import)
     settings = Settings.model_validate(
-        {"tasterr_secret_key": SECRET, "tasterr_plex_max_connection_probes": 8}
+        {
+            "seerr_internal_url": "http://seerr",
+            "seerr_api_key": "key",
+            "tasterr_secret_key": SECRET,
+            "tasterr_plex_max_connection_probes": 8,
+        }
     )
 
     schedule_plex_history(request, settings, 1, None, "ciphertext")
@@ -337,7 +356,9 @@ async def test_recent_attempt_and_failed_task_creation_do_not_run_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _request()
-    settings = Settings.model_validate({"tasterr_secret_key": SECRET})
+    settings = Settings.model_validate(
+        {"seerr_internal_url": "http://seerr", "seerr_api_key": "key", "tasterr_secret_key": SECRET}
+    )
     called = False
 
     async def fake_import(*_args: object) -> None:
@@ -365,7 +386,13 @@ def test_scheduler_does_not_replace_a_reset_owned_import() -> None:
 
     schedule_plex_history(
         request,
-        Settings.model_validate({"tasterr_secret_key": SECRET}),
+        Settings.model_validate(
+            {
+                "seerr_internal_url": "http://seerr",
+                "seerr_api_key": "key",
+                "tasterr_secret_key": SECRET,
+            }
+        ),
         1,
         None,
         "ciphertext",

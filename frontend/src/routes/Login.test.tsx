@@ -609,3 +609,46 @@ test("local login failure shows the generic backend message", async () => {
 
 	expect(await screen.findByText("Invalid email or password")).toBeTruthy();
 });
+
+test.each([
+	"plex",
+	"local",
+])("%s conflict shows server guidance and stops polling", async (method) => {
+	const message =
+		"Sign in with each account, keep one, delete the other, then link again.";
+	const mock = stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: { pin_id: "conflict", auth_url: "https://app.plex.tv/auth" },
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 409,
+			body: { detail: message },
+		}),
+		"/api/v1/auth/local": () => ({ status: 409, body: { detail: message } }),
+	});
+	vi.stubGlobal("open", () => null);
+	const cache = renderLogin();
+	if (method === "plex")
+		fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	else {
+		fireEvent.change(screen.getByLabelText("Email"), {
+			target: { value: "a@b.c" },
+		});
+		fireEvent.change(screen.getByLabelText("Password"), {
+			target: { value: "pw" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+	}
+	expect(await screen.findByText(message)).toBeTruthy();
+	expect(screen.queryByText("Waiting for Plex approval…")).toBeNull();
+	expect(
+		cache
+			.getQueryCache()
+			.findAll({ type: "active" })
+			.some((query) => query.queryKey.includes("conflict")),
+	).toBe(false);
+	expect(
+		mock.mock.calls.filter(([url]) => String(url).endsWith("/pin/poll")),
+	).toHaveLength(method === "plex" ? 1 : 0);
+});

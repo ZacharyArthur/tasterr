@@ -6,10 +6,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from tests.factories import user_with_links
 
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import Signal, User, utcnow
+from tasterr.db.models import Signal, utcnow
 from tasterr.recommend import store
 from tasterr.recommend.features import FeatureRecord
 from tasterr.recommend.signals import SignalKind
@@ -26,8 +27,9 @@ async def db(tmp_path: Path) -> AsyncGenerator[AsyncSession]:
 
 
 async def _user(db: AsyncSession, seerr_id: int) -> int:
-    user = User(seerr_user_id=seerr_id, display_name=f"member-{seerr_id}", auth_type="plex")
-    db.add(user)
+    user = await user_with_links(
+        db, seerr_user_id=seerr_id, display_name=f"member-{seerr_id}", auth_type="plex"
+    )
     await db.flush()
     return user.id
 
@@ -207,8 +209,9 @@ async def test_second_session_cannot_duplicate_a_seed_row(tmp_path: Path) -> Non
         await upgrade_to_head(engine)
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db_a:
-            user = User(seerr_user_id=1, display_name="member", auth_type="plex")
-            db_a.add(user)
+            user = await user_with_links(
+                db_a, seerr_user_id=1, display_name="member", auth_type="plex"
+            )
             await db_a.commit()
             user_id = user.id
 

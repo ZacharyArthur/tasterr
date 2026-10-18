@@ -18,9 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.api.availability import AvailabilityDep
 from tasterr.api.catalog import CatalogDep
 from tasterr.api.runtime_settings import RuntimeSettingsDep
-from tasterr.api.taste import schedule_plex_history
+from tasterr.api.taste import schedule_history
 from tasterr.auth.crypto import decrypt_token, plex_client_identifier
 from tasterr.auth.deps import AuthedSession, get_db, require_session
+from tasterr.auth.login import get_link
 from tasterr.catalog.models import HomeFeed, RailsPage
 from tasterr.catalog.plex import PlexCatalogService
 from tasterr.clients.plex import PlexMediaClient
@@ -44,16 +45,11 @@ async def get_home(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> HomeFeed:
-    schedule_plex_history(
-        request,
-        settings,
-        authed.user.id,
-        authed.user.plex_history_attempted_at,
-        authed.session.plex_token_enc,
-    )
+    await schedule_history(request, settings, db, authed.user.id)
     plex: PlexCatalogService | None = None
     plex_account_token: SecretStr | None = None
-    encrypted = authed.session.plex_token_enc
+    link = await get_link(db, authed.user.id, "plex") if settings.seerr_configured else None
+    encrypted = link.credential_enc if link else None
     secret = settings.tasterr_secret_key
     if (
         RailType.CONTINUE_WATCHING not in runtime.disabled_rail_types

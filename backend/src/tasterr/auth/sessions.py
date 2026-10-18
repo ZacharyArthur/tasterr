@@ -27,8 +27,6 @@ def hash_token(token: str) -> str:
 async def mint_session(
     db: AsyncSession,
     user_id: int,
-    seerr_cookie: str,
-    plex_token_enc: str | None,
 ) -> str:
     """Create a session row and return the raw token — the only place it exists
     outside the Set-Cookie header. Every login mints fresh (no fixation)."""
@@ -38,8 +36,6 @@ async def mint_session(
         UserSession(
             token_hash=hash_token(token),
             user_id=user_id,
-            seerr_cookie=seerr_cookie,
-            plex_token_enc=plex_token_enc,
             created_at=now,
             expires_at=now + SESSION_TTL,
             last_seen_at=now,

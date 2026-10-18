@@ -2,7 +2,6 @@
 # only the unknown-type rules rather than sprinkling casts.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false
-
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
@@ -16,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import mint_linked_session, user_with_links
 
 from tasterr.api.availability import get_availability
 from tasterr.api.catalog import get_catalog
@@ -23,7 +23,6 @@ from tasterr.api.runtime_settings import get_runtime_settings
 from tasterr.api.title import get_title
 from tasterr.auth.crypto import encrypt_token
 from tasterr.auth.deps import AuthedSession
-from tasterr.auth.sessions import mint_session
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.discovery import DiscoveryFilter
@@ -35,7 +34,7 @@ from tasterr.clients.plex import PlexCloudAccount, PlexServerDiscovery
 from tasterr.clients.seerr import SeerrClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User, UserSession
+from tasterr.db.models import LinkedAccount, User, UserSession
 from tasterr.db.runtime_settings import save_runtime_settings
 from tasterr.main import create_app
 from tasterr.rails.registry import RailContext
@@ -585,17 +584,17 @@ def _seed_session(db_path: Path, *, plex: bool = False) -> str:
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(
+                user = await user_with_links(
+                    db,
                     seerr_user_id=99,
                     display_name="Seeded",
                     avatar_url=None,
                     auth_type="plex" if plex else "local",
                     is_admin=False,
                 )
-                db.add(user)
                 await db.flush()
                 plex_token = encrypt_token(SECRET, "plex-token") if plex else None
-                return await mint_session(db, user.id, "connect.sid=s%3Aseed", plex_token)
+                return await mint_linked_session(db, user.id, "connect.sid=s%3Aseed", plex_token)
         finally:
             await engine.dispose()
 
@@ -625,7 +624,7 @@ def test_plex_backed_home_evaluates_history_sync(
     ) -> None:
         captured.append((user_id, plex_token_enc is not None))
 
-    monkeypatch.setattr("tasterr.api.home.schedule_plex_history", recorder)
+    monkeypatch.setattr("tasterr.api.taste.schedule_plex_history", recorder)
 
     def unreadable(_secret_key: str, _ciphertext: str) -> Never:
         raise InvalidToken
@@ -669,7 +668,7 @@ def test_home_passes_configured_plex_connection_probe_limit(
     def ignore_schedule(*_args: object) -> None:
         pass
 
-    monkeypatch.setattr("tasterr.api.home.schedule_plex_history", ignore_schedule)
+    monkeypatch.setattr("tasterr.api.taste.schedule_plex_history", ignore_schedule)
     db_path = tmp_path / "tasterr.db"
     token = _seed_session(db_path, plex=True)
     with TestClient(app) as client:
@@ -692,7 +691,7 @@ def test_disabled_continue_watching_does_not_decrypt_account_token(
     def ignore_schedule(*_args: object) -> None:
         pass
 
-    monkeypatch.setattr("tasterr.api.home.schedule_plex_history", ignore_schedule)
+    monkeypatch.setattr("tasterr.api.taste.schedule_plex_history", ignore_schedule)
 
     def unexpected_decrypt(_secret_key: str, _ciphertext: str) -> Never:
         raise AssertionError("disabled Continue Watching decrypted its token")
@@ -976,13 +975,19 @@ def _record_signals(
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
                 user = (
-                    await db.execute(select(User).where(User.seerr_user_id == seerr_user_id))
+                    await db.execute(
+                        select(User)
+                        .join(LinkedAccount)
+                        .where(
+                            LinkedAccount.provider == "seerr",
+                            LinkedAccount.external_id == str(seerr_user_id),
+                        )
+                    )
                 ).scalar_one_or_none()
                 if user is None:
-                    user = User(
-                        seerr_user_id=seerr_user_id, display_name="other", auth_type="local"
+                    user = await user_with_links(
+                        db, seerr_user_id=seerr_user_id, display_name="other", auth_type="local"
                     )
-                    db.add(user)
                     await db.flush()
                 for kind in kinds:
                     await record_signal(db, user.id, "movie", tmdb_id, kind)
@@ -1063,17 +1068,24 @@ def _mint_session_for(db_path: Path, seerr_user_id: int) -> str:
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
                 user = (
-                    await db.execute(select(User).where(User.seerr_user_id == seerr_user_id))
+                    await db.execute(
+                        select(User)
+                        .join(LinkedAccount)
+                        .where(
+                            LinkedAccount.provider == "seerr",
+                            LinkedAccount.external_id == str(seerr_user_id),
+                        )
+                    )
                 ).scalar_one_or_none()
                 if user is None:
-                    user = User(
+                    user = await user_with_links(
+                        db,
                         seerr_user_id=seerr_user_id,
                         display_name=f"member-{seerr_user_id}",
                         auth_type="local",
                     )
-                    db.add(user)
                     await db.flush()
-                return await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+                return await mint_linked_session(db, user.id, "connect.sid=s%3Aseed", None)
         finally:
             await engine.dispose()
 

@@ -135,6 +135,10 @@ def test_v2_private_fields_are_absent_from_browser_contracts() -> None:
         {
             "plex_token",
             "plex_token_enc",
+            "credential_enc",
+            "external_id",
+            "sync_attempted_at",
+            "sync_synced_at",
             "access_token",
             "account_id",
             "server_url",

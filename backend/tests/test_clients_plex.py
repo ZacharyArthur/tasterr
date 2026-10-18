@@ -177,12 +177,22 @@ async def test_media_account_uses_header_only_token() -> None:
         assert request.url == "https://plex.tv/api/v2/user"
         assert request.headers["x-plex-token"] == "account-token"
         assert "account-token" not in str(request.url)
-        return httpx.Response(200, json={"id": 42, "username": "member", "ignored": True})
+        return httpx.Response(
+            200,
+            json={
+                "id": 42,
+                "username": "member",
+                "title": "Display name",
+                "thumb": "avatar",
+                "ignored": True,
+            },
+        )
 
     account = await _media_client(handler).account("account-token")
 
     assert account.id == 42
     assert account.username == "member"
+    assert account.title == "Display name" and account.thumb == "avatar"
 
 
 @pytest.mark.parametrize("account_id", [True, "42"])

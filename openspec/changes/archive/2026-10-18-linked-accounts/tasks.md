@@ -6,7 +6,7 @@ checks must pass before the PR.
 
 ## 1. Data model and migration
 
-- [ ] 1.1 `db/models.py`: add `LinkedAccount`; drop moved columns from `User` and
+- [x] 1.1 `db/models.py`: add `LinkedAccount`; drop moved columns from `User` and
       `UserSession`. Migration `0007` per the app-database delta (Seerr links
       from `seerr_user_id` with display name, avatar, and `linked_at` from the user row, delete
       sessions, drop columns) with downgrade.
@@ -26,7 +26,7 @@ checks must pass before the PR.
 
 ## 2. Sign-in and linking core
 
-- [ ] 2.1 `auth/login.py`: resolution order, Seerr auto-link, credential
+- [x] 2.1 `auth/login.py`: resolution order, Seerr auto-link, credential
       encryption on links, `IntegrityError` retry. Upstream calls never run inside a write
       transaction (resolution commit, then admin/display reads, then a short
       update + session mint). Tests: returning account,
@@ -46,7 +46,7 @@ checks must pass before the PR.
       server, the session cookie's expiry is recorded, and the status for a
       disabled local login classifies as a refusal (each case skipped unless
       the test instance is set up for it).
-- [ ] 2.2 Admin derivation from all links (Seerr check), keep-previous when any
+- [x] 2.2 Admin derivation from all links (Seerr check), keep-previous when any
       check errors without a grant. `SeerrClient.user()` classifies per the
       spec: transport error, timeout, and 502/503/504 are an outage; any other
       status (404, 500), a malformed body, or an id mismatch completes without
@@ -54,37 +54,37 @@ checks must pass before the PR.
       treating both as an upstream error. Tests: grant, demote at next sign-in, total
       and partial outage keep the value,
       deleted upstream user (404) is demoted, a 500 demotes.
-- [ ] 2.3 Display identity Seerr → Plex; `PlexCloudAccount` parses `title` and
+- [x] 2.3 Display identity Seerr → Plex; `PlexCloudAccount` parses `title` and
       `thumb`. Tests: priority and Plex-only fallback.
-- [ ] 2.4 `auth/sessions.py` and `api/auth.py`: sessions carry no upstream
+- [x] 2.4 `auth/sessions.py` and `api/auth.py`: sessions carry no upstream
       material; both sign-in routes call the resolver. Update existing auth tests;
       add one that the stored credential survives logout and unlink deletes it.
 
 ## 3. Callers read links
 
-- [ ] 3.1 `api/request.py` + `api/destinations.py`: cookie and Seerr id from the
+- [x] 3.1 `api/request.py` + `api/destinations.py`: cookie and Seerr id from the
       Seerr link; `re_auth_required` without a link; re-auth via the Plex link,
       persisting and retrying only when Seerr returns the linked account. Tests per
       ladder scenario, including the different-account no-retry case, and a
       member without a Seerr link gets unavailable destinations with no Seerr call.
-- [ ] 3.2 `api/home.py` + `api/taste.py`: Plex token and history timestamps from
+- [x] 3.2 `api/home.py` + `api/taste.py`: Plex token and history timestamps from
       the Plex link; trigger runs for any user with a Plex link. Tests: sign-in
       method independence, no-link no-work.
-- [ ] 3.3 `recommend/seed.py` → incremental Seerr sync on the Seerr link
+- [x] 3.3 `recommend/seed.py` → incremental Seerr sync on the Seerr link
       (throttle, watermark, overlap, skip `request` titles); Plex waits on it.
       Tests: first sync, later-link import, overlap idempotence, skip, failure
       retry, a Home read schedules the Seerr sync (`api/home.py`) and a second
       within the six-hour throttle does not. `api/onboarding.py`: `pending` while any history sync is reserved or
       running; tests for Seerr pending, Plex-only pending, nothing running `show`.
       A user with signals is `done` even while a sync runs.
-- [ ] 3.4 `api/recommendations.py` reset: cancel and await both syncs, clear
+- [x] 3.4 `api/recommendations.py` reset: cancel and await both syncs, clear
       signals/profile/link timestamps, evaluate the Seerr then Plex triggers
       (no inline import); respond `204`. Update `frontend/src/lib/api.ts` for the
       empty response and the `Navbar.test.tsx` reset mock. Update reset tests; add a no-double-import test.
 
 ## 4. Account API
 
-- [ ] 4.1 `api/account.py`: `GET /account`; Plex PIN link; Seerr link (`plex`,
+- [x] 4.1 `api/account.py`: `GET /account`; Plex PIN link; Seerr link (`plex`,
       `local`); unlink (cancel and await the provider sync first, atomic last-link
       check) with `delete_history`; account deletion with task cancellation;
       link PIN poll exempt from the login bucket. Linking requires the same admission
@@ -99,7 +99,9 @@ checks must pass before the PR.
       nothing afterward, a Home read during unlink or deletion schedules no
       new sync (scheduling guard), concurrent unlink of the last two links leaves one,
       unlink refused when the only other link's method is unconfigured,
-      deletion cascade and cookie clear, Plex unlink and account deletion clear the
+      deletion cascade and server-side session invalidation without a cookie header
+      (including delayed responses after a newer sign-in and sliding expiry),
+      Plex unlink and account deletion clear the
       Continue Watching cache entry, wrong deletion confirmation is 422, wrong
       Seerr password on link is a generic 401, relinking the same account
       refreshes it in place, a sign-in PIN handle polled on the link poll (and
@@ -113,25 +115,25 @@ checks must pass before the PR.
 
 ## 5. Frontend
 
-- [ ] 5.1 Regenerate `api.gen.ts` (`just types`).
-- [ ] 5.2 `routes/Account.tsx` + `/account` route + avatar-menu entry: the
+- [x] 5.1 Regenerate `api.gen.ts` (`just types`).
+- [x] 5.2 `routes/Account.tsx` + `/account` route + avatar-menu entry: the
       avatar-menu button shows the user's initials (no avatar image), keeps the
       display name as its accessible name, and the open menu shows the name; connected
       account cards, unlink dialog with the history checkbox, disabled last
       unlink, conflict guidance, "no longer available on this server" card with Unlink for a
       dormant link, delete-account danger zone. Vitest for each.
-- [ ] 5.3 `RequestButton.tsx`: "Connect Seerr" dialog on `re_auth_required`,
+- [x] 5.3 `RequestButton.tsx`: "Connect Seerr" dialog on `re_auth_required`,
       single retry with the same selection, cancel. Vitest.
-- [ ] 5.4 `routes/Login.tsx`: a 409 from the Plex poll or the Seerr form shows
+- [x] 5.4 `routes/Login.tsx`: a 409 from the Plex poll or the Seerr form shows
       the server's conflict guidance instead of "try again", and polling stops.
       Vitest for both forms.
 
 ## 6. Docs
 
-- [ ] 6.1 `docs/SECURITY.md`: auth/session and database checklists reflect
+- [x] 6.1 `docs/SECURITY.md`: auth/session and database checklists reflect
       per-account encrypted credentials and proven-only links.
-- [ ] 6.2 Release-notes entry: one-time sign-in after upgrade.
-- [ ] 6.3 `docs/ARCHITECTURE.md` and the README feature summary ("Plex-backed
+- [x] 6.2 Release-notes entry: one-time sign-in after upgrade.
+- [x] 6.3 `docs/ARCHITECTURE.md` and the README feature summary ("Plex-backed
       sessions…"): rewrite the identity, session, and seed paragraphs (users and linked accounts, per-account credentials, the
       incremental Seerr sync, Plex sync for any Plex link), keeping the terms
       `test_docs.py` checks. `docs/CONFIGURATION.md` "Upgrade and rollback":
@@ -141,5 +143,5 @@ checks must pass before the PR.
 
 ## 7. Gate
 
-- [ ] 7.1 `just check`, `just e2e`, and `just container-smoke` pass inside the
+- [x] 7.1 `just check`, `just e2e`, and `just container-smoke` pass inside the
       devcontainer (the PR gate runs all three); fix any failures.

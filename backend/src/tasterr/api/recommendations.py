@@ -1,13 +1,11 @@
 """Explain + reset (SPEC §6): the taste engine's transparency and escape hatch.
 
-Explain derives from the caller's own profile only — no path accepts a user id
-from input. Reset deletes only the caller's rows, then re-seeds inline from
-their Seerr request history (user-initiated, so the response reflects the
-re-seeded state); Seerr down still clears and degrades to unseeded.
+Explain derives from the caller's own profile. Reset cancels history work,
+clears only the caller's taste, and evaluates the normal background triggers.
 """
 
 import logging
-from typing import Annotated, cast
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
@@ -17,18 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.api.availability import get_availability
 from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import (
-    build_seerr,
     build_taste,
     cancel_plex_history,
-    schedule_plex_history,
+    cancel_seed,
+    history_guard,
+    schedule_history,
 )
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
 from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.catalog.models import Rail
-from tasterr.db.models import Signal, User
+from tasterr.db.models import LinkedAccount, Signal, User
 from tasterr.rails.registry import MIN_RAIL_ITEMS
 from tasterr.recommend import store
-from tasterr.recommend.seed import seed_user
 from tasterr.recommend.signals import MediaType
 from tasterr.runtime_settings import RailType
 from tasterr.settings import Settings, get_settings
@@ -40,13 +38,6 @@ router = APIRouter()
 class ExplainResponse(BaseModel):
     personalized: bool
     reasons: list[str] = []
-
-
-class ResetResponse(BaseModel):
-    """`seeded_signals` is how many request-history signals the re-seed
-    imported — 0 when the user has no history or Seerr was unreachable."""
-
-    seeded_signals: int
 
 
 class HouseholdMember(BaseModel):
@@ -183,7 +174,7 @@ async def explain_title(
 
 @router.post(
     "/recommendations/reset",
-    response_model=ResetResponse,
+    status_code=204,
     dependencies=[Depends(require_same_origin), Depends(mutation_rate_limit)],
 )
 async def reset_profile(
@@ -191,34 +182,20 @@ async def reset_profile(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
-    runtime: RuntimeSettingsDep,
-) -> ResetResponse:
+) -> None:
     user_id = authed.user.id
-    seerr_user_id = authed.user.seerr_user_id
-    plex_token_enc = authed.session.plex_token_enc
-    resets = cast("set[int]", request.app.state.plex_history_resets)
-    seeded = 0
-    resets.add(user_id)
-    try:
+    await db.commit()
+    async with history_guard(request, user_id):
+        await cancel_seed(request, user_id)
         await cancel_plex_history(request, user_id)
-        await store.delete_user_taste(db, authed.user.id)
-        # Do not trust the request's identity-map snapshot: an import may have
-        # committed its attempt after session resolution but before cancellation.
+        await store.delete_user_taste(db, user_id)
         await db.execute(
-            update(User)
-            .where(User.id == user_id)
-            .values(plex_history_attempted_at=None, plex_history_synced_at=None)
+            update(LinkedAccount)
+            .where(LinkedAccount.user_id == user_id)
+            .values(
+                sync_attempted_at=None,
+                sync_synced_at=None,
+            )
         )
-        await db.commit()  # the wipe holds even if the re-seed below fails
-        taste = build_taste(request, settings, db, runtime)
-        seerr = build_seerr(request, settings)
-        if taste is not None and seerr is not None:
-            try:
-                seeded = await seed_user(db, taste, seerr, user_id, seerr_user_id)
-            except Exception:  # cleared but unseeded — generic, no upstream detail
-                logger.exception("reset: re-seed failed")
-                await db.rollback()
-    finally:
-        resets.discard(user_id)
-    schedule_plex_history(request, settings, user_id, None, plex_token_enc)
-    return ResetResponse(seeded_signals=seeded)
+        await db.commit()
+    await schedule_history(request, settings, db, user_id)

@@ -50,16 +50,22 @@ and no retry storm.
 Local credentials are forwarded directly to Seerr and never stored. A Plex login
 token is used for Seerr authentication and then retained only as Fernet ciphertext
 for bounded caller-scoped Plex reads and silent Seerr re-authentication. On success,
-Tasterr upserts the Seerr user and mints a fresh opaque browser session.
+Tasterr resolves a local user through proven linked accounts and mints a fresh
+opaque browser session. An existing sign-in link wins, then the authenticated
+Seerr bridge, then a new local user. Admin derives from all configured links at
+sign-in; display identity follows Seerr then Plex.
 Only a SHA-256 hash of the browser token is stored. The browser receives the raw
 token once in an HttpOnly, SameSite=Lax cookie, marked Secure when the trusted request
 scheme is HTTPS.
 
-The server stores the member's Seerr session cookie for user-attributed requests.
-Plex tokens are Fernet-encrypted with `TASTERR_SECRET_KEY`; local passwords are never
-retained. A request write sends only the member's Seerr cookie. On Seerr's invalid-
-session response, Plex users get one silent re-authentication attempt; local users
-are prompted to sign in again. The global Seerr API key is limited to server-side
+The server stores the member's Seerr session cookie and Plex token as Fernet
+ciphertext on their linked accounts using `TASTERR_SECRET_KEY`; local passwords
+are never retained. Sessions hold no upstream material. Credentials survive logout
+and are deleted on unlink or account deletion. A request write sends only the
+member's decrypted Seerr cookie. On Seerr's invalid-session response, a Plex link
+permits one silent re-authentication attempt, persisting only a matching Seerr
+identity; otherwise the member can connect Seerr inline and retry once.
+The global Seerr API key is limited to server-side
 reads and is never used to forge a member mutation.
 
 Login buckets key by effective client IP after trusted-proxy processing. Ordinary
@@ -75,11 +81,15 @@ profile, scoring, decay, and diversity logic sits between API and clients so it 
 unit-testable without network mocks. Derived title vectors and user profiles are
 rebuildable SQLite caches; raw signals remain the durable source.
 
-After a first login, bounded background work may seed signals from that user's Seerr
-request history. Per-user single-flight bookkeeping prevents duplicate seeds. A
-failure rolls back/degrades and never prevents ordinary browsing.
+Sign-in, linking, and Home evaluate a bounded incremental Seerr request-history
+sync. Each link has a six-hour attempt throttle and a success watermark with a
+24-hour overlap. Imports skip titles already requested in Tasterr. Per-user
+single-flight bookkeeping prevents duplicate seeds; failures never prevent browsing.
+Reset cancels and awaits history tasks under a scheduling guard, clears taste and
+link timestamps, then schedules normal background imports, Seerr before Plex.
 
-For a Plex-backed session, a separate six-hour, per-user single-flight path validates
+For any user with a Plex link, whichever method they signed in with, a separate
+six-hour, per-user single-flight path validates
 the cloud account, discovers at most four advertised servers, resolves that caller's
 PMS-local account row independently on each server, and imports bounded canonical
 `watched_plex` title facts. Account lists resolve owner/admin ids; an explicit 403
@@ -88,7 +98,8 @@ Every history read explicitly filters by that id and rejects a page containing
 another id. Movies map only through a positive TMDB GUID; episodes collapse to their
 show's TMDB GUID. Raw rows, rating keys, account/server identifiers, URLs, and play
 counts are discarded. Only canonical watched signals and two attempt/success
-timestamps are durable.
+timestamps on the owning link are durable. Dormant links retain credentials but
+perform no upstream work until their provider is configured again.
 
 Continue Watching is live presentation data. It validates the same Plex capability,
 merges bounded per-server results by the caller's last-viewed time, resolves browser

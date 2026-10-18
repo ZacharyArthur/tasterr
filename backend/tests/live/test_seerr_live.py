@@ -38,6 +38,7 @@ be invasive and non-deterministic).
 
 import asyncio
 import os
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -48,6 +49,49 @@ from tasterr.clients.errors import UpstreamRejected
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrUser
 
 pytestmark = pytest.mark.live
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TASTERR_LIVE_REFUSED_PLEX_TOKEN"),
+    reason="A Plex account without access to the Seerr server is required",
+)
+async def test_plex_account_without_server_access_is_refused() -> None:
+    async with httpx.AsyncClient(timeout=10) as http:
+        with pytest.raises(UpstreamRejected):
+            await SeerrAuthClient(http, URL).login_plex(
+                os.environ["TASTERR_LIVE_REFUSED_PLEX_TOKEN"]
+            )
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TASTERR_LIVE_LOCAL_LOGIN_DISABLED"),
+    reason="Requires a test instance with local login disabled",
+)
+async def test_disabled_local_login_is_refusal() -> None:
+    async with httpx.AsyncClient(timeout=10) as http:
+        with pytest.raises(UpstreamRejected) as failure:
+            await SeerrAuthClient(http, URL).login_local(EMAIL, PASSWORD)
+        assert failure.value.status_code not in (502, 503, 504)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TASTERR_LIVE_RECORD_COOKIE_EXPIRY"),
+    reason="Requires a disposable local account and cookie-expiry recording enabled",
+)
+async def test_session_cookie_expiry_is_recorded() -> None:
+    async with httpx.AsyncClient(timeout=10) as http:
+        response = await http.post(
+            f"{URL}/api/v1/auth/local", json={"email": EMAIL, "password": PASSWORD}
+        )
+        assert response.status_code == 200
+        cookies = [cookie for cookie in response.cookies.jar if cookie.name == "connect.sid"]
+        assert len(cookies) == 1
+        expiry = cookies[0].expires
+        assert expiry is not None and expiry > datetime.now(UTC).timestamp()
+        print(
+            f"Seerr session cookie lifetime seconds: {int(expiry - datetime.now(UTC).timestamp())}"
+        )
+
 
 URL = os.environ.get("TASTERR_LIVE_SEERR_URL", "").rstrip("/")
 EMAIL = os.environ.get("TASTERR_LIVE_SEERR_EMAIL", "")

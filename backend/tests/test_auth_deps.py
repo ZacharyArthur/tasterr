@@ -3,7 +3,6 @@
 # registered via decorator, not called directly.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnusedFunction=false
-
 import asyncio
 from datetime import timedelta
 from pathlib import Path
@@ -12,13 +11,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import user_with_links
 
 from tasterr.auth.cookies import COOKIE_NAME
 from tasterr.auth.deps import AuthedSession, require_admin, require_same_origin, require_session
 from tasterr.auth.sessions import SESSION_TTL, hash_token, new_token
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User, UserSession, utcnow
+from tasterr.db.models import UserSession, utcnow
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -62,14 +62,14 @@ def _seed_session(
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(
+                user = await user_with_links(
+                    db,
                     seerr_user_id=7,
                     display_name="Alice",
                     avatar_url=None,
                     auth_type="plex",
                     is_admin=is_admin,
                 )
-                db.add(user)
                 await db.flush()
                 token = new_token()
                 now = utcnow()
@@ -79,8 +79,6 @@ def _seed_session(
                     UserSession(
                         token_hash=hash_token(token),
                         user_id=user.id,
-                        seerr_cookie="connect.sid=s%3Aseed",
-                        plex_token_enc=None,
                         created_at=now,
                         expires_at=expires,
                         last_seen_at=last_seen,

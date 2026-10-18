@@ -19,6 +19,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.db.io import finish_io
 from tasterr.db.models import Profile, Signal, TitleFeatures, utcnow
 from tasterr.recommend.features import FeatureRecord
 from tasterr.recommend.signals import (
@@ -90,7 +91,7 @@ async def record_signal(
                     "'seed_request_history', 'watched_plex')"
                 ),
             )
-        result = await db.execute(statement)
+        result = await finish_io(db.execute(statement))
         # DML through AsyncSession.execute is a CursorResult at runtime; the
         # Result[Any] annotation just doesn't know it.
         written = cast("CursorResult[Any]", result).rowcount > 0
@@ -113,7 +114,7 @@ async def record_signal(
         )
     )
     await invalidate_profile(db, user_id)
-    await db.flush()
+    await finish_io(db.flush())
     return True
 
 
@@ -124,12 +125,14 @@ async def retract_signal(
     the materialized profile in the same transaction."""
     if kind not in TOGGLE_KINDS:
         raise ValueError(f"kind {kind!r} is append-only and cannot be retracted")
-    await db.execute(
-        delete(Signal).where(
-            Signal.user_id == user_id,
-            Signal.media_type == media_type,
-            Signal.tmdb_id == tmdb_id,
-            Signal.kind == kind,
+    await finish_io(
+        db.execute(
+            delete(Signal).where(
+                Signal.user_id == user_id,
+                Signal.media_type == media_type,
+                Signal.tmdb_id == tmdb_id,
+                Signal.kind == kind,
+            )
         )
     )
     await invalidate_profile(db, user_id)
@@ -138,19 +141,23 @@ async def retract_signal(
 async def invalidate_profile(db: AsyncSession, user_id: int) -> None:
     """Drop the materialized profile (a pure cache) so the next read rebuilds
     it from signals — the atomic half of the recompute-on-write policy."""
-    await db.execute(delete(Profile).where(Profile.user_id == user_id))
+    await finish_io(db.execute(delete(Profile).where(Profile.user_id == user_id)))
 
 
 async def load_signals(db: AsyncSession, user_id: int) -> list[Signal]:
     """All of one user's signals, newest first."""
-    result = await db.execute(
-        select(Signal).where(Signal.user_id == user_id).order_by(Signal.created_at.desc())
+    result = await finish_io(
+        db.execute(
+            select(Signal).where(Signal.user_id == user_id).order_by(Signal.created_at.desc())
+        )
     )
     return list(result.scalars().all())
 
 
 async def has_signals(db: AsyncSession, user_id: int) -> bool:
-    result = await db.execute(select(Signal.id).where(Signal.user_id == user_id).limit(1))
+    result = await finish_io(
+        db.execute(select(Signal.id).where(Signal.user_id == user_id).limit(1))
+    )
     return result.first() is not None
 
 
@@ -163,10 +170,12 @@ async def load_features(
         return {}
     # populate_existing: the writes below are raw upserts, so identity-mapped
     # instances from earlier in the session must be refreshed, not reused.
-    result = await db.execute(
-        select(TitleFeatures)
-        .where(tuple_(TitleFeatures.media_type, TitleFeatures.tmdb_id).in_(list(keys)))
-        .execution_options(populate_existing=True)
+    result = await finish_io(
+        db.execute(
+            select(TitleFeatures)
+            .where(tuple_(TitleFeatures.media_type, TitleFeatures.tmdb_id).in_(list(keys)))
+            .execution_options(populate_existing=True)
+        )
     )
     records: dict[TitleKey, FeatureRecord] = {}
     for row in result.scalars():
@@ -200,14 +209,18 @@ async def save_features(
             "fetched_at": statement.excluded.fetched_at,
         },
     )
-    await db.execute(statement)
+    await finish_io(db.execute(statement))
 
 
 async def load_profile(db: AsyncSession, user_id: int) -> StoredProfile | None:
     # A select (not db.get) with populate_existing, for the same reason as
     # load_features: upserts and invalidations bypass the identity map.
-    result = await db.execute(
-        select(Profile).where(Profile.user_id == user_id).execution_options(populate_existing=True)
+    result = await finish_io(
+        db.execute(
+            select(Profile)
+            .where(Profile.user_id == user_id)
+            .execution_options(populate_existing=True)
+        )
     )
     row = result.scalar_one_or_none()
     if row is None:
@@ -228,7 +241,7 @@ async def save_profile(db: AsyncSession, user_id: int, vector: dict[str, float])
         index_elements=[Profile.user_id],
         set_={"vector": statement.excluded.vector, "computed_at": statement.excluded.computed_at},
     )
-    await db.execute(statement)
+    await finish_io(db.execute(statement))
 
 
 async def title_toggles(
@@ -242,8 +255,8 @@ async def title_toggles(
 
 async def delete_user_taste(db: AsyncSession, user_id: int) -> None:
     """Wipe one user's signals and profile (reset); touches nobody else."""
-    await db.execute(delete(Signal).where(Signal.user_id == user_id))
-    await db.execute(delete(Profile).where(Profile.user_id == user_id))
+    await finish_io(db.execute(delete(Signal).where(Signal.user_id == user_id)))
+    await finish_io(db.execute(delete(Profile).where(Profile.user_id == user_id)))
 
 
 async def _signal_exists(
@@ -262,5 +275,5 @@ async def _signal_exists(
     )
     if since is not None:
         query = query.where(Signal.created_at >= since)
-    result = await db.execute(query.limit(1))
+    result = await finish_io(db.execute(query.limit(1)))
     return result.first() is not None

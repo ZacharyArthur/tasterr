@@ -14,17 +14,20 @@
 </p>
 
 Tasterr is a self-hosted, Netflix-style discovery front end for a household media
-stack. It combines the TMDB catalog with Seerr identity, library state, and requests,
+stack. It combines the TMDB catalog with linked Seerr accounts, library state, and requests,
 then learns a separate taste profile for each signed-in user.
 
 The current source supports Plex or local Seerr sign-in, composed discovery rails,
 search, title details, availability badges, requests attributed to the signed-in
 member, per-user taste signals and recommendations, and admin-managed regions,
-services, rails, and appearance. Plex-backed sessions also learn from bounded watch
+services, rails, and appearance. Users with a Plex link also learn from bounded watch
 history, offer Continue Watching, and can request an ephemeral household blend;
 low-correlation picks keep discovery broad. These features need no Plex URL or token
-configuration: they reuse the encrypted token created by Plex sign-in and disappear
-cleanly for local sessions or when Plex is unavailable.
+configuration: they reuse the encrypted token created by Plex sign-in, stored on
+the linked account across sign-in methods, and degrade cleanly when Plex is
+unavailable. Every member can manage
+linked accounts or delete their local Tasterr account from **Account**. Seerr
+request history syncs incrementally in the background.
 
 Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
 history or Plex progress, persist household groups, or run more than one process.

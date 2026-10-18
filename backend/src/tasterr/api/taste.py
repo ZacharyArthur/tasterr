@@ -8,6 +8,8 @@ engine just cannot build vectors until the catalog exists.
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -16,6 +18,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tasterr.auth.crypto import decrypt_token, plex_client_identifier
+from tasterr.auth.login import get_link
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.plex import PlexCatalogService
@@ -23,16 +26,16 @@ from tasterr.catalog.service import CatalogService
 from tasterr.clients.plex import PlexMediaClient
 from tasterr.clients.seerr import SeerrClient
 from tasterr.clients.tmdb import TmdbClient
-from tasterr.db.models import User, utcnow
+from tasterr.db.io import finish_io
+from tasterr.db.models import utcnow
 from tasterr.db.runtime_settings import load_runtime_settings
 from tasterr.recommend import store
-from tasterr.recommend.seed import reserve_seed, seed_in_background
+from tasterr.recommend.seed import HISTORY_THROTTLE, reserve_seed, seed_in_background
 from tasterr.recommend.service import TasteService
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
 
 logger = logging.getLogger("tasterr.taste")
-PLEX_HISTORY_THROTTLE = timedelta(hours=6)
 PLEX_HISTORY_INITIAL_WINDOW = timedelta(days=365)
 PLEX_HISTORY_OVERLAP = timedelta(hours=24)
 PLEX_HISTORY_WRITE_BATCH = 100
@@ -100,19 +103,25 @@ def build_seerr(request: Request, settings: Settings) -> SeerrClient | None:
     )
 
 
-def schedule_seed(request: Request, settings: Settings, user_id: int, seerr_user_id: int) -> None:
-    """Fire-and-forget cold-start seed at login (SPEC §8) — the login response
-    never waits on it. Skipped when TMDB (no feature source) or Seerr (no
-    history source) is unconfigured. The task holds its ref on app.state so it
-    survives until done; single-flight lives in the seeding set."""
+def schedule_seed(
+    request: Request,
+    settings: Settings,
+    user_id: int,
+    attempted_at: datetime | None = None,
+) -> None:
+    """Reserve a throttled Seerr sync without delaying sign-in or Home."""
     if (
         settings.tmdb_api_key is None
+        or settings.tasterr_secret_key is None
+        or (attempted_at is not None and attempted_at > utcnow() - HISTORY_THROTTLE)
         or not settings.seerr_configured
         or settings.seerr_internal_url is None
         or settings.seerr_api_key is None
     ):
         return
     state = request.app.state
+    if user_id in state.plex_history_resets:
+        return
     seerr = build_seerr(request, settings)
     if seerr is None:
         return
@@ -130,7 +139,7 @@ def schedule_seed(request: Request, settings: Settings, user_id: int, seerr_user
     async def run_seed() -> None:
         try:
             async with maker() as db:
-                runtime = await load_runtime_settings(db)
+                runtime = await finish_io(load_runtime_settings(db))
 
             def factory(seed_db: AsyncSession) -> TasteService:
                 return taste_factory(seed_db, runtime)
@@ -141,20 +150,29 @@ def schedule_seed(request: Request, settings: Settings, user_id: int, seerr_user
                 seerr,
                 seeding,
                 user_id,
-                seerr_user_id,
                 reserved=True,
             )
+        except Exception:
+            logger.error("seed: scheduling setup failed")
         finally:
             seeding.discard(user_id)
 
+    coroutine = run_seed()
     try:
-        task = asyncio.create_task(run_seed())
+        task = asyncio.create_task(coroutine)
     except Exception:
+        coroutine.close()
         seeding.discard(user_id)
-        raise
-    tasks = cast("set[asyncio.Task[None]]", state.seed_tasks)
-    tasks.add(task)
-    task.add_done_callback(tasks.discard)
+        logger.error("seed: task creation failed")
+        return
+    tasks = cast("dict[int, asyncio.Task[None]]", state.seed_tasks)
+    tasks[user_id] = task
+
+    def release(done: asyncio.Task[None]) -> None:
+        if tasks.get(user_id) is done:
+            tasks.pop(user_id, None)
+
+    task.add_done_callback(release)
 
 
 def schedule_plex_history(
@@ -169,7 +187,8 @@ def schedule_plex_history(
     if (
         plex_token_enc is None
         or secret is None
-        or (attempted_at is not None and attempted_at > utcnow() - PLEX_HISTORY_THROTTLE)
+        or not settings.seerr_configured
+        or (attempted_at is not None and attempted_at > utcnow() - HISTORY_THROTTLE)
     ):
         return
     state = request.app.state
@@ -230,18 +249,20 @@ async def import_plex_history(
     """Commit the attempt, finish all reads, then write facts in small batches."""
     cutoff = utcnow()
     async with maker() as db:
-        user = await db.get(User, user_id)
-        if user is None:
+        link = await get_link(db, user_id, "plex")
+        if link is None:
             return
         if (
-            user.plex_history_attempted_at is not None
-            and user.plex_history_attempted_at > cutoff - PLEX_HISTORY_THROTTLE
+            link.sync_attempted_at is not None
+            and link.sync_attempted_at > cutoff - HISTORY_THROTTLE
         ):
             return
-        synced_at = user.plex_history_synced_at
-        user.plex_history_attempted_at = cutoff
+        synced_at = link.sync_synced_at
         try:
-            await db.commit()
+            # Release the read lock before competing with unlink's write transaction.
+            await finish_io(db.commit())
+            link.sync_attempted_at = cutoff
+            await finish_io(db.commit())
         except Exception:
             logger.error("plex history: attempt commit failed")
             await db.rollback()
@@ -273,10 +294,10 @@ async def import_plex_history(
                         "watched_plex",
                         watch.watched_at,
                     )
-                await db.commit()
+                await finish_io(db.commit())
             if result.complete:
-                user.plex_history_synced_at = cutoff
-                await db.commit()
+                link.sync_synced_at = cutoff
+                await finish_io(db.commit())
         except asyncio.CancelledError:
             await db.rollback()
             raise
@@ -287,3 +308,45 @@ async def import_plex_history(
 
 def _unix_seconds(value: datetime) -> int:
     return int(value.replace(tzinfo=UTC).timestamp())
+
+
+async def schedule_history(
+    request: Request, settings: Settings, db: AsyncSession, user_id: int
+) -> None:
+    if not settings.seerr_configured or settings.tasterr_secret_key is None:
+        return
+    seerr = await get_link(db, user_id, "seerr")
+    plex = await get_link(db, user_id, "plex")
+    if seerr is not None:
+        schedule_seed(request, settings, user_id, seerr.sync_attempted_at)
+    schedule_plex_history(
+        request,
+        settings,
+        user_id,
+        plex.sync_attempted_at if plex else None,
+        plex.credential_enc if plex else None,
+    )
+
+
+@asynccontextmanager
+async def history_guard(request: Request, user_id: int) -> AsyncGenerator[None]:
+    locks = cast("dict[int, asyncio.Lock]", request.app.state.history_locks)
+    lock = locks.setdefault(user_id, asyncio.Lock())
+    async with lock:
+        paused = cast("set[int]", request.app.state.plex_history_resets)
+        paused.add(user_id)
+        try:
+            yield
+        finally:
+            paused.discard(user_id)
+
+
+async def cancel_seed(request: Request, user_id: int) -> None:
+    tasks = cast("dict[int, asyncio.Task[None]]", request.app.state.seed_tasks)
+    task = tasks.get(user_id)
+    if task is not None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if tasks.get(user_id) is task:
+            tasks.pop(user_id, None)
+    request.app.state.seeding.discard(user_id)

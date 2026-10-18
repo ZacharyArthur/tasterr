@@ -4,6 +4,7 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import Connection, engine_from_config, pool
 
+from tasterr.db.migrate import migration_connection
 from tasterr.db.models import Base
 
 config = context.config
@@ -23,9 +24,10 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
-    with context.begin_transaction():
-        context.run_migrations()
+    with migration_connection(connection):
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
 
 
 def run_migrations_online() -> None:

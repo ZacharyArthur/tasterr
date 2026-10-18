@@ -1,9 +1,12 @@
-"""ORM models (SPEC §5). Session rows hold hashed tokens and encrypted Plex tokens only."""
+"""Local identities, linked accounts, sessions, and taste storage."""
 
 from datetime import UTC, datetime
+from typing import Literal, get_args
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
+
+Provider = Literal["plex", "seerr"]
 
 
 def utcnow() -> datetime:
@@ -17,18 +20,41 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = ({"sqlite_autoincrement": True},)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    seerr_user_id: Mapped[int] = mapped_column(unique=True)
     display_name: Mapped[str]
     avatar_url: Mapped[str | None]
-    auth_type: Mapped[str] = mapped_column(String(8))  # 'plex' | 'local'
     is_admin: Mapped[bool] = mapped_column(default=False)
     taste_onboarding_seen: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
-    plex_history_attempted_at: Mapped[datetime | None] = mapped_column(DateTime())
-    plex_history_synced_at: Mapped[datetime | None] = mapped_column(DateTime())
+    seerr_unlinked_at: Mapped[datetime | None] = mapped_column(DateTime())
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     last_login_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+
+class LinkedAccount(Base):
+    __tablename__ = "linked_accounts"
+    __table_args__ = (
+        UniqueConstraint("provider", "external_id", name="uq_linked_accounts_external"),
+        UniqueConstraint("user_id", "provider", name="uq_linked_accounts_user_provider"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[Provider] = mapped_column(String(16))
+    external_id: Mapped[str] = mapped_column(String(64))
+    display_name: Mapped[str]
+    avatar_url: Mapped[str | None]
+    credential_enc: Mapped[str | None]
+    sync_attempted_at: Mapped[datetime | None] = mapped_column(DateTime())
+    sync_synced_at: Mapped[datetime | None] = mapped_column(DateTime())
+    linked_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    @validates("provider")
+    def validate_provider(self, _key: str, value: Provider) -> Provider:
+        if value not in get_args(Provider):
+            raise ValueError("Unknown account provider")
+        return value
 
 
 class UserSession(Base):
@@ -37,8 +63,6 @@ class UserSession(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    seerr_cookie: Mapped[str]
-    plex_token_enc: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(), index=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)

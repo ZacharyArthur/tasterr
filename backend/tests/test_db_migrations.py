@@ -5,6 +5,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, delete, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from tests.factories import user_with_links
 
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import ALEMBIC_DIR, upgrade_to_head
@@ -78,9 +79,10 @@ async def test_downgrade_drops_auth_tables(tmp_path: Path) -> None:
     try:
         await upgrade_to_head(engine)
 
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
             await connection.run_sync(_downgrade, "0001")
 
+            await connection.commit()
         tables = await _table_names(engine)
         assert "users" not in tables
         assert "sessions" not in tables
@@ -104,9 +106,10 @@ async def test_downgrade_drops_taste_tables(tmp_path: Path) -> None:
     try:
         await upgrade_to_head(engine)
 
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
             await connection.run_sync(_downgrade, "0002")
 
+            await connection.commit()
         tables = await _table_names(engine)
         assert tables.isdisjoint({"signals", "title_features", "profiles"})
         assert {"users", "sessions"} <= tables
@@ -133,20 +136,21 @@ async def test_downgrade_drops_only_settings_table(tmp_path: Path) -> None:
         await upgrade_to_head(engine)
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
-            user = User(seerr_user_id=8, display_name="member", auth_type="local")
-            db.add(user)
+            await user_with_links(db, seerr_user_id=8, display_name="member", auth_type="local")
             db.add(Setting(key="global", value="{}"))
             await db.commit()
 
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
             await connection.run_sync(_downgrade, "0003")
 
+            await connection.commit()
         tables = await _table_names(engine)
         assert "settings" not in tables
         assert {"users", "signals", "title_features", "profiles"} <= tables
         async with engine.connect() as connection:
             user_id = await connection.execute(text("select seerr_user_id from users"))
             assert user_id.scalar_one() == 8
+            await connection.commit()
     finally:
         await engine.dispose()
 
@@ -154,8 +158,9 @@ async def test_downgrade_drops_only_settings_table(tmp_path: Path) -> None:
 async def test_migration_0005_defaults_existing_users_to_unseen(tmp_path: Path) -> None:
     engine = create_engine(tmp_path / "tasterr.db")
     try:
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
             await connection.run_sync(_upgrade, "0004")
+            await connection.commit()
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
             await db.execute(
@@ -182,17 +187,19 @@ async def test_downgrade_0005_preserves_users(tmp_path: Path) -> None:
         await upgrade_to_head(engine)
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
-            db.add(User(seerr_user_id=8, display_name="member", auth_type="local"))
+            await user_with_links(db, seerr_user_id=8, display_name="member", auth_type="local")
             await db.commit()
 
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
             await connection.run_sync(_downgrade, "0004")
 
+            await connection.commit()
         async with engine.connect() as connection:
             columns = await connection.execute(text("pragma table_info(users)"))
             assert "taste_onboarding_seen" not in {row[1] for row in columns}
             count = await connection.execute(text("select count(*) from users"))
             assert count.scalar_one() == 1
+            await connection.commit()
     finally:
         await engine.dispose()
 
@@ -200,7 +207,7 @@ async def test_downgrade_0005_preserves_users(tmp_path: Path) -> None:
 async def test_migration_0006_preserves_data_and_matches_user_model(tmp_path: Path) -> None:
     engine = create_engine(tmp_path / "tasterr.db")
     try:
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
             await connection.run_sync(_upgrade, "0005")
             await connection.execute(
                 text(
@@ -224,8 +231,11 @@ async def test_migration_0006_preserves_data_and_matches_user_model(tmp_path: Pa
                 )
             )
 
-        await upgrade_to_head(engine)
+            await connection.commit()
+        async with engine.connect() as connection:
+            await connection.run_sync(_upgrade, "0006")
 
+            await connection.commit()
         async with engine.connect() as connection:
             columns = await connection.run_sync(
                 lambda sync: {column["name"] for column in inspect(sync).get_columns("users")}
@@ -245,9 +255,15 @@ async def test_migration_0006_preserves_data_and_matches_user_model(tmp_path: Pa
             assert (
                 await connection.execute(text("select value from settings where key = 'global'"))
             ).scalar_one() == '{"region":"GB"}'
+            await connection.commit()
         model_columns = set(User.__table__.columns.keys())
         assert {"plex_history_attempted_at", "plex_history_synced_at"} <= columns
-        assert columns == model_columns
+        assert columns - {
+            "plex_history_attempted_at",
+            "plex_history_synced_at",
+            "seerr_user_id",
+            "auth_type",
+        } == model_columns - {"seerr_unlinked_at"}
     finally:
         await engine.dispose()
 
@@ -265,6 +281,7 @@ async def test_migration_0006_unique_index_includes_watched_plex(tmp_path: Path)
                     )
                 )
             ).scalar_one()
+            await connection.commit()
         assert "watched_plex" in sql
     finally:
         await engine.dispose()
@@ -273,8 +290,8 @@ async def test_migration_0006_unique_index_includes_watched_plex(tmp_path: Path)
 async def test_downgrade_0006_restores_v11_data_and_settings(tmp_path: Path) -> None:
     engine = create_engine(tmp_path / "tasterr.db")
     try:
-        await upgrade_to_head(engine)
-        async with engine.begin() as connection:
+        async with engine.connect() as connection:
+            await connection.run_sync(_upgrade, "0006")
             await connection.execute(
                 text(
                     "insert into users "
@@ -325,9 +342,11 @@ async def test_downgrade_0006_restores_v11_data_and_settings(tmp_path: Path) -> 
                     {"key": key, "value": value},
                 )
 
-        async with engine.begin() as connection:
+            await connection.commit()
+        async with engine.connect() as connection:
             await connection.run_sync(_downgrade, "0005")
 
+            await connection.commit()
         async with engine.connect() as connection:
             columns = await connection.execute(text("pragma table_info(users)"))
             assert {"plex_history_attempted_at", "plex_history_synced_at"}.isdisjoint(
@@ -349,6 +368,7 @@ async def test_downgrade_0006_restores_v11_data_and_settings(tmp_path: Path) -> 
                     )
                 )
             ).scalar_one()
+            await connection.commit()
         assert settings["global"] == '{"region":"GB","disabled_rail_types":["hero"]}'
         assert settings["malformed"] == "not-json"
         assert settings["compatible"] == '{"disabled_rail_types":["hero"]}'
@@ -366,8 +386,9 @@ async def test_deleting_a_user_sweeps_taste_rows(tmp_path: Path) -> None:
         await upgrade_to_head(engine)
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
-            user = User(seerr_user_id=7, display_name="member", auth_type="plex")
-            db.add(user)
+            user = await user_with_links(
+                db, seerr_user_id=7, display_name="member", auth_type="plex"
+            )
             await db.flush()
             db.add(
                 Signal(user_id=user.id, tmdb_id=550, media_type="movie", kind="request", weight=3.0)

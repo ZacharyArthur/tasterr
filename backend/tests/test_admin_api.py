@@ -1,7 +1,6 @@
 # starlette's TestClient ships partially-unknown method annotations.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false
-
 import asyncio
 from pathlib import Path
 from typing import cast
@@ -11,19 +10,18 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import mint_linked_session, user_with_links
 
 from tasterr.api.admin import router as admin_router
 from tasterr.api.availability import get_availability
 from tasterr.api.catalog import get_catalog
 from tasterr.auth.ratelimit import TokenBucket
-from tasterr.auth.sessions import mint_session
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.models import RegionOption, ServiceOption
 from tasterr.catalog.service import CatalogService
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User
 from tasterr.main import create_app
 from tasterr.settings import Settings, get_settings
 
@@ -72,15 +70,15 @@ def _seed_session(db_path: Path, *, is_admin: bool) -> str:
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(
+                user = await user_with_links(
+                    db,
                     seerr_user_id=1 if is_admin else 2,
                     display_name="Admin" if is_admin else "Member",
                     auth_type="local",
                     is_admin=is_admin,
                 )
-                db.add(user)
                 await db.flush()
-                return await mint_session(db, user.id, "connect.sid=test", None)
+                return await mint_linked_session(db, user.id, "connect.sid=test", None)
         finally:
             await engine.dispose()
 

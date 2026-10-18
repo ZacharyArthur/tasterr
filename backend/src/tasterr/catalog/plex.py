@@ -25,6 +25,10 @@ CONTINUE_RESOLUTION_MAX = 20
 CONTINUE_CACHE_OPTS = CacheOpts(ttl=300, stale=0)
 
 
+def continue_watching_key(user_id: int) -> str:
+    return f"plex:continue-watching:user:{user_id}"
+
+
 @dataclass(frozen=True)
 class PlexWatch:
     media_type: MediaType
@@ -102,9 +106,7 @@ class PlexCatalogService:
             except (TimeoutError, UpstreamError):
                 return []
 
-        return await self._cache.cached(
-            f"plex:continue-watching:user:{user_id}", CONTINUE_CACHE_OPTS, loader
-        )
+        return await self._cache.cached(continue_watching_key(user_id), CONTINUE_CACHE_OPTS, loader)
 
     async def _history_candidates(
         self,

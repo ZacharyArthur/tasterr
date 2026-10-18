@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change m4-taste. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: In-app interaction signals are recorded per user
 
 `POST /api/v1/signals` SHALL record an interaction signal for the authenticated
@@ -38,7 +40,8 @@ to the session user, and no endpoint SHALL expose one user's signals to another.
 
 The `request`, `seed_request_history`, and `watched_plex` signal kinds SHALL be
 recorded only by the backend itself — by the successful Seerr request flow, the
-cold-start Seerr import, and the account-scoped Plex history sync respectively.
+incremental Seerr request-history sync, and the account-scoped Plex history sync
+respectively.
 `POST /api/v1/signals` SHALL reject these kinds by input validation, so a client
 cannot fabricate strong signals it did not earn.
 
@@ -109,8 +112,7 @@ per user, media type, and TMDB id. Re-importing the same or an older observed
 watch SHALL be an idempotent no-op; observing a later watch SHALL update only that
 row's creation time and SHALL invalidate the user's materialized profile in the
 same transaction. The signal SHALL be a strong positive and SHALL be entirely
-rebuildable from the caller's Plex history while a usable Plex-backed session is
-available.
+rebuildable from the caller's Plex history while their Plex account is linked.
 
 #### Scenario: First canonical watch creates one signal
 

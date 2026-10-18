@@ -11,6 +11,7 @@ import { Navbar } from "./components/Navbar";
 import type { User } from "./lib/api";
 import { useMe } from "./lib/auth";
 import { useConfig } from "./lib/availability";
+import { Account } from "./routes/Account";
 import { Home } from "./routes/Home";
 import { Login } from "./routes/Login";
 import { Search } from "./routes/Search";
@@ -60,6 +61,7 @@ function Shell({ user }: { user: User }) {
 				<Routes location={state?.backgroundLocation ?? location}>
 					<Route path="/" element={<Home />} />
 					<Route path="/search" element={<Search />} />
+					<Route path="/account" element={<Account user={user} />} />
 					<Route
 						path="/settings"
 						element={user.is_admin ? <Settings /> : <Navigate to="/" replace />}

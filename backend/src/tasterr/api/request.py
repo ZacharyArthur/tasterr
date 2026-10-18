@@ -15,16 +15,19 @@ from typing import Annotated, Literal
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import refresh_profile
-from tasterr.auth.crypto import decrypt_token
+from tasterr.auth.crypto import decrypt_token, encrypt_token
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
+from tasterr.auth.login import get_link
 from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.catalog.availability import Availability, availability_from_code
 from tasterr.clients.errors import UpstreamError, UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.seerr import MediaType, SeerrAuthClient, SeerrClient
+from tasterr.db.models import LinkedAccount
 from tasterr.recommend import store
 from tasterr.recommend.signals import MAX_TMDB_ID
 from tasterr.runtime_settings import RuntimeSettings
@@ -133,6 +136,13 @@ async def create_request(
         raise HTTPException(status_code=422, detail="Seasons apply to TV requests only")
     if ctx is None:
         return RequestResponse(status="unavailable", seerr_url=seerr_url)
+    seerr_link = await get_link(db, authed.user.id, "seerr")
+    if seerr_link is None or seerr_link.credential_enc is None:
+        return RequestResponse(status="re_auth_required", seerr_url=seerr_url)
+    try:
+        cookie = decrypt_token(ctx.secret_key, seerr_link.credential_enc)
+    except InvalidToken:
+        return RequestResponse(status="re_auth_required", seerr_url=seerr_url)
     has_override = any(
         value is not None for value in (payload.server_id, payload.profile_id, payload.root_folder)
     )
@@ -141,7 +151,7 @@ async def create_request(
     ):
         raise HTTPException(status_code=422, detail="Incomplete destination override")
     try:
-        user = await ctx.client.user(authed.user.seerr_user_id)
+        user = await ctx.client.user(int(seerr_link.external_id))
         if not user.can_request(payload.media_type, is_4k=payload.is_4k):
             raise HTTPException(status_code=403, detail="Request permission required")
         if has_override and not user.can_override:
@@ -174,6 +184,8 @@ async def create_request(
         authed,
         payload.media_type,
         payload.tmdb_id,
+        seerr_link=seerr_link,
+        cookie=cookie,
         is_4k=payload.is_4k,
         server_id=payload.server_id,
         profile_id=payload.profile_id,
@@ -263,6 +275,8 @@ async def _request_with_reauth(
     media_type: MediaType,
     tmdb_id: int,
     *,
+    seerr_link: LinkedAccount,
+    cookie: str,
     is_4k: bool = False,
     server_id: int | None = None,
     profile_id: int | None = None,
@@ -271,7 +285,7 @@ async def _request_with_reauth(
 ) -> _Outcome:
     try:
         code = await ctx.client.create_request(
-            authed.session.seerr_cookie,
+            cookie,
             media_type,
             tmdb_id,
             is_4k=is_4k,
@@ -288,11 +302,9 @@ async def _request_with_reauth(
             return _Outcome("failed")  # a non-403 rejection is not a session problem
 
     # 403 — an invalid session or a genuine denial. Re-auth at most once.
-    if authed.session.plex_token_enc is None:
-        return _Outcome("re_auth_required")  # local member: the SPA re-logs them in
-    new_cookie = await _reauth_plex(ctx, db, authed)
+    new_cookie = await _reauth_plex(ctx, db, authed, seerr_link)
     if new_cookie is None:
-        return _Outcome("failed")  # re-auth itself failed
+        return _Outcome("re_auth_required")
     try:
         code = await ctx.client.create_request(
             new_cookie,
@@ -309,11 +321,17 @@ async def _request_with_reauth(
         return _Outcome("failed")  # still 403 → genuine denial (quota/permission)
 
 
-async def _reauth_plex(ctx: SeerrRequestCtx, db: AsyncSession, authed: AuthedSession) -> str | None:
+async def _reauth_plex(
+    ctx: SeerrRequestCtx,
+    db: AsyncSession,
+    authed: AuthedSession,
+    seerr_link: LinkedAccount,
+) -> str | None:
     """Silently refresh the member's Seerr session from their stored Plex token and
     persist the new cookie. Returns the fresh cookie, or None if re-auth is not
     possible (unreadable token or Seerr refusal)."""
-    enc = authed.session.plex_token_enc
+    plex_link = await get_link(db, authed.user.id, "plex")
+    enc = plex_link.credential_enc if plex_link is not None else None
     if enc is None:
         return None
     try:
@@ -324,7 +342,22 @@ async def _reauth_plex(ctx: SeerrRequestCtx, db: AsyncSession, authed: AuthedSes
         login = await ctx.seerr_auth.login_plex(token)
     except (UpstreamRejected, UpstreamUnavailable):
         return None
-    authed.session.seerr_cookie = login.cookie
+    if str(login.user.id) != seerr_link.external_id:
+        return None
+    refreshed = await db.scalar(
+        update(LinkedAccount)
+        .where(
+            LinkedAccount.id == seerr_link.id,
+            LinkedAccount.user_id == authed.user.id,
+            LinkedAccount.provider == "seerr",
+            LinkedAccount.external_id == seerr_link.external_id,
+        )
+        .values(credential_enc=encrypt_token(ctx.secret_key, login.cookie))
+        .returning(LinkedAccount.id)
+        .execution_options(synchronize_session=False)
+    )
     await db.commit()
+    if refreshed is None:
+        return None
     logger.info("request: silent re-auth refreshed seerr session")
     return login.cookie

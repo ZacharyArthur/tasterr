@@ -136,7 +136,8 @@ connection and SQLite ignores that pragma inside an open transaction, so a
 rebuild inside `engine.begin()` would fire every child table's `ON DELETE
 CASCADE` and wipe all signals and profiles (reproduced in review). `db/migrate.py`
 therefore opens a connection, runs `PRAGMA foreign_keys=OFF` before beginning
-the migration transaction, runs `PRAGMA foreign_key_check` after upgrade (failing
+the migration transaction with an explicit `BEGIN` (including DDL in rollback),
+runs `PRAGMA foreign_key_check` after upgrade (failing
 boot if it reports rows), and re-enables enforcement. Because nothing cascades while
 enforcement is off, the downgrade deletes the removed users' signals, profiles,
 sessions, and links explicitly.
@@ -161,7 +162,7 @@ saves one sign-in but leaves migration code in the hot path indefinitely.
 | `POST /account/links/plex/pin`, `.../pin/poll` | session, same-origin, login bucket (create only; the poll is handle-gated and exempt, like sign-in's) | same `PinStore` handles as sign-in; poll links instead of minting a session |
 | `POST /account/links/seerr` `{method: plex}` or `{method: local, email, password}` | session, same-origin, mutation + login buckets | `plex` uses the stored Plex token |
 | `POST /account/links/{provider}/unlink` `{delete_history}` | session, same-origin, mutation bucket | 409 unless another remaining link can currently sign in |
-| `POST /account/delete` `{confirm}` | session, same-origin, mutation bucket | cancels sync tasks, cascades, clears cookie |
+| `POST /account/delete` `{confirm}` | session, same-origin, mutation bucket | cancels sync tasks, cascades, invalidates sessions without changing the cookie |
 
 Mutations stay `POST`, matching the rest of the API. A link conflict returns a
 generic 409 that never names the other user.
@@ -209,6 +210,17 @@ SPA's message becomes a "Connect Seerr" dialog backed by
   and it can only preserve the previous value, never set it to true.
 - Account deletion cancels in-flight sync tasks before deleting, so no
   background write recreates rows for a deleted user.
+- Account deletion invalidates every server-side session but emits no cookie
+  header, including sliding expiry. Cookie updates cannot compare-and-swap the
+  browser's current HttpOnly value, so a delayed expiry header could erase a
+  newer login. The unusable old cookie expires naturally or is replaced on
+  sign-in; the SPA still clears the deleted user's state.
+- Cancellation awaits the current SQLite I/O operation before session cleanup;
+  the async adapter must finish fetching and close its cursor before a writer
+  can safely proceed. Upstream waits remain immediately cancellable.
+- Silent re-authentication updates credentials only while the original link id,
+  owner, provider, and external identity still match; replacement links cannot
+  receive a late cookie or trigger a request retry.
 
 **Outbound HTTP:** no new upstream endpoints beyond the plex.tv account fields
 (`title`, `thumb`) parsed into the existing typed model; base URLs unchanged.

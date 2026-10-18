@@ -5,6 +5,13 @@ import type { components, paths } from "./api.gen";
 export type HealthResponse =
 	paths["/api/v1/health"]["get"]["responses"]["200"]["content"]["application/json"];
 export type User = components["schemas"]["UserResponse"];
+export type AccountResponse = components["schemas"]["AccountResponse"];
+export type AccountProvider = components["schemas"]["AccountProvider"];
+export type SeerrLinkBody = Pick<
+	components["schemas"]["SeerrLinkBody"],
+	"method"
+> &
+	Partial<Omit<components["schemas"]["SeerrLinkBody"], "method">>;
 export type PinCreateResponse = components["schemas"]["PinCreateResponse"];
 export type PinPollResponse = components["schemas"]["PinPollResponse"];
 export type PublicConfig = components["schemas"]["PublicConfig"];
@@ -33,7 +40,6 @@ export type AvailabilityMap = Record<string, Availability>;
 export type SignalKind = components["schemas"]["SignalBody"]["kind"];
 export type SignalResponse = components["schemas"]["SignalResponse"];
 export type ExplainResponse = components["schemas"]["ExplainResponse"];
-export type ResetResponse = components["schemas"]["ResetResponse"];
 export type HouseholdMember = components["schemas"]["HouseholdMember"];
 export type TasteFlags = components["schemas"]["TasteFlags"];
 export type TasteOnboardingSelection =
@@ -138,6 +144,32 @@ export function loginLocal(email: string, password: string): Promise<User> {
 
 export function logout(): Promise<void> {
 	return postJson<void>("/api/v1/auth/logout");
+}
+
+export function getAccount(): Promise<AccountResponse> {
+	return request<AccountResponse>("/api/v1/account");
+}
+export function createLinkPlexPin(): Promise<PinCreateResponse> {
+	return postJson<PinCreateResponse>("/api/v1/account/links/plex/pin");
+}
+export function pollLinkPlexPin(
+	pinId: string,
+): Promise<components["schemas"]["LinkPollResponse"]> {
+	return postJson("/api/v1/account/links/plex/pin/poll", { pin_id: pinId });
+}
+export function linkSeerr(body: SeerrLinkBody): Promise<void> {
+	return postJson<void>("/api/v1/account/links/seerr", body);
+}
+export function unlinkAccount(
+	provider: AccountProvider["provider"],
+	deleteHistory: boolean,
+): Promise<void> {
+	return postJson<void>(`/api/v1/account/links/${provider}/unlink`, {
+		delete_history: deleteHistory,
+	});
+}
+export function deleteAccount(confirm: string): Promise<void> {
+	return postJson<void>("/api/v1/account/delete", { confirm });
 }
 
 export function getHome(): Promise<HomeFeed> {
@@ -264,8 +296,8 @@ export function getExplain(
 }
 
 /** Wipe the caller's signals + profile and re-seed from Seerr history. */
-export function resetRecommendations(): Promise<ResetResponse> {
-	return postJson<ResetResponse>("/api/v1/recommendations/reset");
+export function resetRecommendations(): Promise<void> {
+	return postJson<void>("/api/v1/recommendations/reset");
 }
 
 export function getHouseholdMembers(): Promise<HouseholdMember[]> {

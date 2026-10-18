@@ -1,6 +1,5 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false
-
 import asyncio
 import json
 from collections.abc import Callable
@@ -14,15 +13,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import mint_linked_session, user_with_links
 
 from tasterr.api.request import SeerrRequestCtx, get_seerr_request_ctx
-from tasterr.auth.crypto import encrypt_token
+from tasterr.auth.crypto import decrypt_token, encrypt_token
 from tasterr.auth.ratelimit import TokenBucket
-from tasterr.auth.sessions import hash_token, mint_session
+from tasterr.auth.sessions import hash_token
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import Signal, User, UserSession
+from tasterr.db.models import LinkedAccount, Signal, UserSession
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -30,7 +30,7 @@ SECRET = "test-secret-key"
 SEERR_URL = "http://seerr:5055"
 SEED_COOKIE = "connect.sid=s%3Aseed"
 NEW_COOKIE = "connect.sid=fresh"
-PLEX_USER = {"id": 1, "displayName": "Viewer", "permissions": 2}
+PLEX_USER = {"id": 99, "displayName": "Viewer", "permissions": 2}
 
 
 def _app(
@@ -56,17 +56,17 @@ def _seed_session(db_path: Path, *, plex_token: str | None = None) -> str:
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(
+                user = await user_with_links(
+                    db,
                     seerr_user_id=99,
                     display_name="Seeded",
                     avatar_url=None,
                     auth_type="plex" if plex_token else "local",
                     is_admin=False,
                 )
-                db.add(user)
                 await db.flush()
                 enc = encrypt_token(SECRET, plex_token) if plex_token else None
-                return await mint_session(db, user.id, SEED_COOKIE, enc)
+                return await mint_linked_session(db, user.id, SEED_COOKIE, enc)
         finally:
             await engine.dispose()
 
@@ -81,10 +81,15 @@ def _stored_cookie(db_path: Path, token: str) -> str:
             async with maker() as db:
                 row = (
                     await db.execute(
-                        select(UserSession).where(UserSession.token_hash == hash_token(token))
+                        select(LinkedAccount)
+                        .join(UserSession, UserSession.user_id == LinkedAccount.user_id)
+                        .where(
+                            UserSession.token_hash == hash_token(token),
+                            LinkedAccount.provider == "seerr",
+                        )
                     )
                 ).scalar_one()
-                return row.seerr_cookie
+                return decrypt_token(SECRET, row.credential_enc or "")
         finally:
             await engine.dispose()
 

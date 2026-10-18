@@ -23,13 +23,27 @@ const USER: User = {
 	is_admin: false,
 };
 
+test("initials keep the display name accessible and every member gets Account", () => {
+	renderNavbar({ ...USER, display_name: "House Member" });
+	const button = screen.getByRole("button", { name: "House Member" });
+	expect(button.textContent).toBe("HM");
+	expect(document.querySelector("img")).toBeNull();
+	fireEvent.click(button);
+	expect(screen.getByText("House Member")).toBeTruthy();
+	expect(
+		screen.getByRole("menu").contains(screen.getByText("House Member")),
+	).toBe(false);
+	expect(
+		screen.getByRole("menuitem", { name: "Account" }).getAttribute("href"),
+	).toBe("/account");
+});
+
 function stubFetch() {
 	const mock = vi.fn(
 		async (_input: RequestInfo | URL, _init?: RequestInit) =>
 			({
 				ok: true,
-				status: 200,
-				json: async () => ({ seeded_signals: 2 }),
+				status: 204,
 			}) as Response,
 	);
 	vi.stubGlobal("fetch", mock);

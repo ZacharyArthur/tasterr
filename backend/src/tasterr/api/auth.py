@@ -13,17 +13,22 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tasterr.api.taste import schedule_plex_history, schedule_seed
+from tasterr.api.taste import build_seerr, schedule_history
 from tasterr.auth.cookies import clear_session_cookie, set_session_cookie
 from tasterr.auth.crypto import plex_client_identifier
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
-from tasterr.auth.login import complete_login
+from tasterr.auth.login import (
+    CONFLICT_GUIDANCE,
+    AccountConflict,
+    ProvenAccount,
+    complete_login,
+)
 from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket, mutation_rate_limit
 from tasterr.auth.sessions import revoke_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.plex import PlexAuthClient
-from tasterr.clients.seerr import SeerrAuthClient
+from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 from tasterr.db.models import User
 from tasterr.settings import Settings, get_settings
 
@@ -76,6 +81,7 @@ class AuthContext:
     plex: PlexAuthClient
     seerr: SeerrAuthClient
     pins: PinStore
+    seerr_read: SeerrClient | None = None
 
 
 def get_auth_context(
@@ -92,6 +98,7 @@ def get_auth_context(
         plex=PlexAuthClient(request.app.state.http, plex_client_identifier(secret_key)),
         seerr=SeerrAuthClient(request.app.state.http, settings.seerr_internal_url),
         pins=cast("PinStore", request.app.state.pin_store),
+        seerr_read=build_seerr(request, settings),
     )
 
 
@@ -161,6 +168,11 @@ async def poll_plex_pin(
         raise HTTPException(status_code=404, detail=PIN_NOT_FOUND)
 
     try:
+        plex_account = await ctx.plex.account(plex_token)
+    except (UpstreamRejected, UpstreamUnavailable) as error:
+        raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+
+    try:
         login = await ctx.seerr.login_plex(plex_token)
     except UpstreamRejected as error:  # Seerr refused this Plex account
         logger.info("auth: plex login rejected by seerr")
@@ -168,15 +180,19 @@ async def poll_plex_pin(
     except UpstreamUnavailable as error:
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
 
-    user, token, plex_token_enc = await complete_login(
-        db, ctx.secret_key, login, "plex", plex_token
-    )
+    try:
+        user, token = await complete_login(
+            db,
+            ctx.secret_key,
+            ProvenAccount.plex(plex_account, plex_token),
+            login,
+            ctx.seerr_read,
+        )
+    except AccountConflict as error:
+        raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
     _set_cookie(request, response, token)
     logger.info("auth: plex login succeeded")
-    schedule_seed(request, settings, user.id, user.seerr_user_id)
-    schedule_plex_history(
-        request, settings, user.id, user.plex_history_attempted_at, plex_token_enc
-    )
+    await schedule_history(request, settings, db, user.id)
     return PinPollResponse(status="ok", user=UserResponse.from_user(user))
 
 
@@ -202,10 +218,19 @@ async def local_login(
         logger.warning("auth: local login unavailable")
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
 
-    user, token, _plex_token_enc = await complete_login(db, ctx.secret_key, login, "local", None)
+    try:
+        user, token = await complete_login(
+            db,
+            ctx.secret_key,
+            ProvenAccount.seerr(login),
+            login,
+            ctx.seerr_read,
+        )
+    except AccountConflict as error:
+        raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
     _set_cookie(request, response, token)
     logger.info("auth: local login succeeded")
-    schedule_seed(request, settings, user.id, user.seerr_user_id)
+    await schedule_history(request, settings, db, user.id)
     return UserResponse.from_user(user)
 
 

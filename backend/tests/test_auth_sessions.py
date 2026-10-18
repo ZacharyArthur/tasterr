@@ -1,7 +1,6 @@
 # starlette's TestClient ships partially-unknown method annotations; relax
 # only the unknown-type rules rather than sprinkling casts.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-
 import asyncio
 from collections.abc import AsyncGenerator
 from datetime import timedelta
@@ -11,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from tests.factories import user_with_links
 
 from tasterr.auth.sessions import (
     SESSION_TTL,
@@ -39,14 +39,14 @@ async def db(tmp_path: Path) -> AsyncGenerator[AsyncSession]:
 
 
 async def _user(db: AsyncSession, seerr_id: int = 1) -> User:
-    user = User(
+    user = await user_with_links(
+        db,
         seerr_user_id=seerr_id,
         display_name="Alice",
         avatar_url=None,
         auth_type="plex",
         is_admin=False,
     )
-    db.add(user)
     await db.commit()
     return user
 
@@ -58,7 +58,7 @@ async def _session_count(db: AsyncSession) -> int:
 async def test_mint_stores_hash_only(db: AsyncSession) -> None:
     user = await _user(db)
 
-    token = await mint_session(db, user.id, "connect.sid=s%3Aabc", None)
+    token = await mint_session(db, user.id)
 
     row = (await db.execute(select(UserSession))).scalar_one()
     assert row.token_hash == hash_token(token)
@@ -68,13 +68,13 @@ async def test_mint_stores_hash_only(db: AsyncSession) -> None:
 
 async def test_resolve_round_trip(db: AsyncSession) -> None:
     user = await _user(db)
-    token = await mint_session(db, user.id, "connect.sid=s%3Aabc", None)
+    token = await mint_session(db, user.id)
 
     resolved = await resolve_session(db, token)
 
     assert resolved is not None
     assert resolved.user.id == user.id
-    assert resolved.session.seerr_cookie == "connect.sid=s%3Aabc"
+    assert resolved.session.user_id == user.id
 
 
 async def test_unknown_token_resolves_to_none(db: AsyncSession) -> None:
@@ -85,7 +85,7 @@ async def test_unknown_token_resolves_to_none(db: AsyncSession) -> None:
 
 async def test_expired_session_is_rejected_and_deleted(db: AsyncSession) -> None:
     user = await _user(db)
-    token = await mint_session(db, user.id, "connect.sid=s%3Aabc", None)
+    token = await mint_session(db, user.id)
     row = (await db.execute(select(UserSession))).scalar_one()
     row.expires_at = utcnow() - timedelta(seconds=1)
     await db.commit()
@@ -96,7 +96,7 @@ async def test_expired_session_is_rejected_and_deleted(db: AsyncSession) -> None
 
 async def test_activity_slides_expiry_after_threshold(db: AsyncSession) -> None:
     user = await _user(db)
-    token = await mint_session(db, user.id, "connect.sid=s%3Aabc", None)
+    token = await mint_session(db, user.id)
     row = (await db.execute(select(UserSession))).scalar_one()
     stale = utcnow() - timedelta(hours=2)
     row.last_seen_at = stale
@@ -113,7 +113,7 @@ async def test_activity_slides_expiry_after_threshold(db: AsyncSession) -> None:
 
 async def test_slide_is_throttled_below_threshold(db: AsyncSession) -> None:
     user = await _user(db)
-    token = await mint_session(db, user.id, "connect.sid=s%3Aabc", None)
+    token = await mint_session(db, user.id)
     row = (await db.execute(select(UserSession))).scalar_one()
     recent = utcnow() - timedelta(minutes=1)
     expires = utcnow() + timedelta(days=1)
@@ -132,8 +132,8 @@ async def test_slide_is_throttled_below_threshold(db: AsyncSession) -> None:
 async def test_every_login_mints_a_fresh_token(db: AsyncSession) -> None:
     user = await _user(db)
 
-    first = await mint_session(db, user.id, "connect.sid=s%3Aone", None)
-    second = await mint_session(db, user.id, "connect.sid=s%3Atwo", None)
+    first = await mint_session(db, user.id)
+    second = await mint_session(db, user.id)
 
     assert first != second
     assert await _session_count(db) == 2
@@ -141,7 +141,7 @@ async def test_every_login_mints_a_fresh_token(db: AsyncSession) -> None:
 
 async def test_revoke_deletes_the_row(db: AsyncSession) -> None:
     user = await _user(db)
-    token = await mint_session(db, user.id, "connect.sid=s%3Aabc", None)
+    token = await mint_session(db, user.id)
     resolved = await resolve_session(db, token)
     assert resolved is not None
 
@@ -152,8 +152,8 @@ async def test_revoke_deletes_the_row(db: AsyncSession) -> None:
 
 async def test_sweep_removes_only_expired_rows(db: AsyncSession) -> None:
     user = await _user(db)
-    await mint_session(db, user.id, "connect.sid=s%3Avalid", None)
-    token = await mint_session(db, user.id, "connect.sid=s%3Aexpired", None)
+    await mint_session(db, user.id)
+    token = await mint_session(db, user.id)
     row = (
         await db.execute(select(UserSession).where(UserSession.token_hash == hash_token(token)))
     ).scalar_one()
@@ -164,7 +164,7 @@ async def test_sweep_removes_only_expired_rows(db: AsyncSession) -> None:
 
     remaining = (await db.execute(select(UserSession))).scalars().all()
     assert len(remaining) == 1
-    assert remaining[0].seerr_cookie == "connect.sid=s%3Avalid"
+    assert remaining[0].token_hash != hash_token(token)
 
 
 def _seed_expired_and_valid(db_path: Path) -> None:
@@ -175,8 +175,8 @@ def _seed_expired_and_valid(db_path: Path) -> None:
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
                 user = await _user(db)
-                await mint_session(db, user.id, "connect.sid=s%3Avalid", None)
-                token = await mint_session(db, user.id, "connect.sid=s%3Aexpired", None)
+                await mint_session(db, user.id)
+                token = await mint_session(db, user.id)
                 row = (
                     await db.execute(
                         select(UserSession).where(UserSession.token_hash == hash_token(token))

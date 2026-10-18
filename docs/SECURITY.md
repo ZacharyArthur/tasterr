@@ -23,7 +23,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 1. Secrets never reach the client — `PublicConfig` regression test.
 2. Only `clients/` performs outbound HTTP — import-linter contract.
-3. Session tokens stored **hashed**; Plex tokens **encrypted** at rest.
+3. Session tokens stored **hashed**; Plex tokens and Seerr cookies **encrypted**
+   at rest on linked accounts, never on sessions.
 4. Lockfiles committed; `just audit` before releases.
 5. Forwarded client/scheme headers are accepted only from an explicit literal-IP/CIDR
    proxy allowlist; wildcard trust is rejected.
@@ -47,7 +48,16 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Credentials are forwarded to Seerr, never stored, never logged.
 - [ ] Token comparisons are constant-time (compare hashes, `secrets.compare_digest`).
 - [ ] Fresh session token on every login (no fixation); logout deletes the row.
+- [ ] Links come only from successful authentication in the same request, never
+      identity/email matching or administrator assignment. PIN link handles are
+      bound to their creating session and cannot complete sign-in.
+- [ ] Upstream credentials survive logout on their owning link; unlink and account
+      deletion delete them. Seerr cookies and Plex tokens use Fernet encryption.
+- [ ] Sign-in commits identity resolution before upstream admin/display reads;
+      no upstream call runs while a write transaction is open.
 - [ ] Cookie flags: `HttpOnly`, `SameSite=Lax`, `Secure` behind HTTPS.
+- [ ] Account deletion invalidates server-side sessions without a cookie header
+      or sliding refresh, so a delayed response preserves a newer sign-in.
 - [ ] Auth endpoints rate-limited tightly; failures are generic (no user enumeration).
 - [ ] Forwarded IP/scheme is used only after direct proxy-peer allowlist validation;
       trusted and untrusted peer behavior is covered by regression tests.
@@ -104,6 +114,11 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] SQLAlchemy expressions only — no string-built SQL, ever.
 - [ ] New columns holding tokens/secrets: encrypted (Fernet) and justified in design.md.
 - [ ] Migrations never copy secret material into new plaintext columns or logs.
+- [ ] SQLite rebuilds disable foreign keys before the migration transaction,
+      check foreign keys afterward, and re-enable enforcement. User ids are never
+      reused. Account deletion cascades through sessions, links, signals, and profiles.
+- [ ] Unlink, deletion, and reset cancel and await affected history work while
+      holding the per-user scheduling guard through commit.
 - [ ] Backup/restore instructions stop the writer or use SQLite's backup API, run an
       integrity check, preserve runtime ownership, and treat backups as sensitive.
 
