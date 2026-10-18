@@ -15,6 +15,7 @@ flowchart LR
     C --> T["TMDB"]
     C --> S["Seerr"]
     C --> P["plex.tv + verified Plex Media Servers"]
+    C --> J["Jellyfin"]
     A --> Q[("SQLite")]
     D --> Q
     U --> Q
@@ -27,8 +28,8 @@ flowchart LR
   typed upstream wire models, and secret-bearing headers/cookies.
 - Only `backend/src/tasterr/api/` shapes browser responses. Routes use Pydantic input
   and explicit response models rather than forwarding upstream JSON or ORM objects.
-- `PublicConfig` is an explicit allowlist projection. TMDB/Seerr keys, the internal
-  Seerr URL, Plex tokens, Seerr cookies, and the deployment secret cannot enter it.
+- `PublicConfig` is an explicit allowlist projection. TMDB/Seerr/Jellyfin keys,
+  internal URLs, Plex tokens, Seerr cookies, and the deployment secret cannot enter it.
 - Catalog, rail, and recommendation domain models do not import deployment settings.
   Boundary tests and import-linter contracts enforce these rules.
 
@@ -62,7 +63,16 @@ sign-in; Seerr admin permissions or ownership of the pinned Plex resource grant
 admin. The Plex owner check reuses the sign-in resources read; offline PMS never
 prevents admission or an owner grant. If no check grants, an outage preserves the
 previous value; other failures and unconfigured providers do not. Display identity
-follows Seerr then Plex.
+follows Seerr, then Plex, then Jellyfin; every user is rendered with initials.
+
+Jellyfin sign-in authenticates username/password once and immediately logs out the
+returned token; logout failure is logged generically and does not block sign-in.
+Only the Jellyfin user id and display name are linked, with no credential or avatar.
+The same credentials attempt Seerr's Jellyfin login before normal link resolution;
+refusal does not block sign-in, while an outage blocks only a would-be new user.
+At every sign-in, Jellyfin's user-scoped policy read joins the admin checks:
+`IsAdministrator` grants only while `IsDisabled` is false. Empty passwords require
+the explicit environment override for sign-in and either linking path.
 Only a SHA-256 hash of the browser token is stored. The browser receives the raw
 token once in an HttpOnly, SameSite=Lax cookie, marked Secure when the trusted request
 scheme is HTTPS.
@@ -99,7 +109,18 @@ sync. Each link has a six-hour attempt throttle and a success watermark with a
 24-hour overlap. Imports skip titles already requested in Tasterr. Per-user
 single-flight bookkeeping prevents duplicate seeds; failures never prevent browsing.
 Reset cancels and awaits history tasks under a scheduling guard, clears taste and
-link timestamps, then schedules normal background imports, Seerr before Plex.
+link timestamps, then schedules normal background imports, Seerr before Plex and Jellyfin.
+
+Jellyfin history joins the same per-user scheduling guard and cancellation lifecycle.
+It waits for Seerr sync, reads `/Items?userId=` with header-only API-key auth, and
+maps movie TMDB provider ids and episode series ids to canonical `watched_jellyfin`
+facts. First imports cover 365 days; incremental imports overlap the success
+watermark by 24 hours. Pages and series batches contain at most 100 items, reads
+cap at 500 items per type under a 30-second deadline, and writes commit at most
+100 facts per transaction. Only complete reads advance the watermark; raw items
+and tokens are discarded. Jellyfin watches anchor **Because You Watched** and
+exclude those titles from recommended-for-you. Reset, unlink, account deletion,
+onboarding pending state, and shutdown cover all history tasks.
 
 For any user with a Plex link, whichever method they signed in with, a separate
 six-hour, per-user single-flight path validates

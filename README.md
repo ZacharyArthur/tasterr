@@ -17,7 +17,7 @@ Tasterr is a self-hosted, Netflix-style discovery front end for a household medi
 stack. It combines the TMDB catalog with linked Seerr accounts, library state, and requests,
 then learns a separate taste profile for each signed-in user.
 
-The current source supports Plex or local Seerr sign-in, composed discovery rails,
+The current source supports Plex, Jellyfin, or local Seerr sign-in, composed discovery rails,
 search, title details, availability badges, requests attributed to the signed-in
 member, per-user taste signals and recommendations, and admin-managed regions,
 services, rails, and appearance. Users with a Plex link also learn from bounded watch
@@ -27,9 +27,15 @@ configuration: they reuse the encrypted token created by Plex sign-in, stored on
 the linked account across sign-in methods, and degrade cleanly when Plex is
 unavailable. Every member can manage
 linked accounts or delete their local Tasterr account from **Account**. Seerr is
-optional with `PLEX_SERVER_ID` configured; it adds requests, availability, local
+optional with Plex or Jellyfin configured; it adds requests, availability, local
 sign-in, and incremental request-history sync. The pinned Plex server's owner is
 an administrator even without Seerr.
+
+Jellyfin links learn taste from played movies and episodes (collapsed to their
+series), with the same bounded background sync and **Because You Watched** rails.
+Only the Jellyfin user id is retained; the sign-in token is immediately logged out.
+Jellyfin administrators also administer Tasterr. Jellyfin playback links, avatars,
+and Continue Watching are not supported.
 
 Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
 history or Plex progress, persist household groups, or run more than one process.
@@ -47,7 +53,7 @@ history or Plex progress, persist household groups, or run more than one process
 
 ## Quick start
 
-Prerequisites are Docker with Compose, a TMDB v3 API key, and either a Plex server
+Prerequisites are Docker with Compose, a TMDB v3 API key, and a Plex server, Jellyfin server,
 or a running Seerr instance. A shared Docker network is not required when Seerr is
 reachable through a routable LAN hostname or address.
 
@@ -67,7 +73,7 @@ reachable through a routable LAN hostname or address.
    curl --fail http://127.0.0.1:8000/api/v1/health
    ```
 
-Open `http://127.0.0.1:8000`, choose **Continue with Plex** or **Continue with Seerr**,
+Open `http://127.0.0.1:8000`, choose **Continue with Plex**, **Continue with Jellyfin**, or **Continue with Seerr**,
 and use the Settings screen as the pinned Plex owner or a Seerr administrator to select the region, streaming services,
 rails, theme, and accent. SQLite migrations run automatically on first boot.
 
@@ -81,6 +87,23 @@ the Plex token remains the sign-in gate.
 Removing Seerr removes the bridge between sign-in methods. Before unsetting it,
 members using Seerr email/password should link Plex (or Jellyfin when available)
 from `/account`, or their next sign-in creates a new, empty Tasterr account.
+
+### Jellyfin setup
+
+In Jellyfin **Dashboard → Advanced → API Keys**, add a key for Tasterr. Set
+`JELLYFIN_INTERNAL_URL` to the server's HTTP(S) URL reachable from the Tasterr
+container and `JELLYFIN_API_KEY` to that key. Both are required; embedded URL
+credentials are rejected. Keep both server-side. Set `TASTERR_SECRET_KEY` as usual;
+Seerr and Plex can be omitted. Restart, then choose **Continue with Jellyfin** and
+enter a Jellyfin username/password. Existing members should link Jellyfin from
+**Account** before switching sign-in methods.
+
+Exposing Tasterr also exposes Jellyfin password sign-in. Jellyfin sees requests
+from Tasterr's address, so Jellyfin's local-network access rules do not apply.
+Repeated wrong passwords can lock a Jellyfin account; attempts are bounded only by
+Tasterr's login bucket (10 per minute per client IP). Passwordless accounts are
+refused unless the operator explicitly sets `JELLYFIN_ALLOW_EMPTY_PASSWORD=true`;
+that setting also applies to Jellyfin and Seerr-via-Jellyfin linking.
 
 Compose publishes Tasterr on host loopback by default. For intentional direct LAN
 access, set `TASTERR_HTTP_PORT=8000` (or a specific LAN IP and port) in `.env` and

@@ -28,6 +28,7 @@ test-results/
 .env
 *.db
 *.sqlite*
+/.local/live-jellyfin/
 
 # OS
 Thumbs.db

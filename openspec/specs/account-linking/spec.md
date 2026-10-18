@@ -10,7 +10,7 @@ how admin and display identity derive from links, and the member account page.
 ### Requirement: Users are Tasterr-owned and hold linked accounts
 
 A Tasterr user SHALL be identified only by its local id. External identities
-SHALL be stored as linked accounts: a provider (`plex` or `seerr`), the
+SHALL be stored as linked accounts: a provider (`plex`, `jellyfin`, or `seerr`), the
 provider's stable account id, a display name, an optional avatar URL, an
 optional Fernet-encrypted credential, sync attempt/success timestamps, and a
 link time. A user SHALL hold at most one linked account per provider, and a
@@ -28,7 +28,7 @@ let anyone, including an admin, assign or edit a link by id.
 
 #### Scenario: One user per provider account
 
-- **WHEN** a user authenticates a Plex or Seerr account already linked to
+- **WHEN** a user authenticates a Plex, Jellyfin, or Seerr account already linked to
   another Tasterr user
 - **THEN** the link is refused with a generic 409 that says the account belongs
   to another Tasterr account and explains how to resolve it, without naming
@@ -123,7 +123,10 @@ SHALL proceed; where Seerr is the sign-in gate, its outage still fails sign-in.
 ### Requirement: Seerr is auto-linked with the sign-in credentials
 
 When Seerr is configured, each Plex sign-in SHALL attempt a Seerr login with the
-same Plex token, and each Seerr local sign-in is itself that Seerr login. A
+same Plex token, each Jellyfin sign-in SHALL attempt Seerr's Jellyfin login with
+the same username and password within that request, and each Seerr local sign-in
+is itself that Seerr login. A Seerr refusal SHALL NOT block a Jellyfin sign-in; a
+Seerr outage SHALL block only a sign-in that would create a new user. A
 successful attempt SHALL link that Seerr account when the resolved user has no
 Seerr link, has never unlinked Seerr (`users.seerr_unlinked_at` is null), and the
 account is unlinked, and SHALL refresh the stored Seerr cookie
@@ -137,6 +140,13 @@ attempt SHALL NOT be stored or logged.
 - **THEN** that Seerr account is linked with its encrypted cookie and requests
   are enabled without any further step
 
+#### Scenario: Jellyfin sign-in links Seerr silently
+
+- **WHEN** a user with no Seerr link signs in with Jellyfin and Seerr accepts the
+  same Jellyfin credentials
+- **THEN** that Seerr account is linked with its encrypted cookie and the
+  password is discarded
+
 #### Scenario: Sign-in refreshes the Seerr cookie
 
 - **WHEN** a user whose Seerr link matches the auto-link result signs in
@@ -144,7 +154,7 @@ attempt SHALL NOT be stored or logged.
 
 #### Scenario: Unlinked Seerr stays unlinked
 
-- **WHEN** a member who unlinked Seerr later signs in with Plex and
+- **WHEN** a member who unlinked Seerr later signs in with Plex or Jellyfin and
   Seerr accepts those credentials
 - **THEN** Seerr is not re-linked and no Seerr history is imported
 
@@ -160,7 +170,9 @@ At each sign-in, `is_admin` SHALL be re-derived from every linked account the
 user holds, not only the sign-in account: a Seerr link grants admin when that
 Seerr user's permissions (read by id with the global API key) include ADMIN (bit
 2), and, when `PLEX_SERVER_ID` is set, a Plex link grants admin when the
-link's token sees that server as `owned`. A user SHALL be admin when any check
+link's token sees that server as `owned`, and a Jellyfin link grants admin when
+that Jellyfin user's policy (read by id with the Jellyfin API key) has
+`IsAdministrator` and not `IsDisabled`. A user SHALL be admin when any check
 grants it. When no check grants
 admin, the previous `is_admin` SHALL be kept if any check errored, and SHALL
 become false only when every check completed without granting it. A check
@@ -200,6 +212,11 @@ sign-ins.
   without Seerr
 - **THEN** `is_admin` is true
 
+#### Scenario: Jellyfin administrator is admin
+
+- **WHEN** a Jellyfin administrator signs in on a deployment without Seerr
+- **THEN** `is_admin` is true
+
 #### Scenario: Shared Plex user is not admin
 
 - **WHEN** a user whose Plex account sees the configured server as shared, not
@@ -209,11 +226,13 @@ sign-ins.
 ### Requirement: Display identity follows a fixed account priority
 
 At each sign-in, the user's display name and avatar URL SHALL be refreshed from
-the highest-priority linked account that answers: Seerr, then Plex. Values from
+the highest-priority linked account that answers: Seerr, then Plex, then
+Jellyfin. Values from
 the sign-in itself SHALL be used where available; otherwise stored link values
 SHALL be used. Users SHALL NOT override their display name. Avatar URLs SHALL come
-only from the Seerr user record or the plex.tv account. The SPA SHALL show the
-user's initials, not an avatar image, for every user.
+only from the Seerr user record or the plex.tv account, never from Jellyfin
+(Jellyfin images are served from the internal Jellyfin URL). The SPA SHALL show
+the user's initials, not an avatar image, for every user.
 
 #### Scenario: Seerr name wins
 
@@ -225,13 +244,19 @@ user's initials, not an avatar image, for every user.
 - **WHEN** a user has only a Plex link
 - **THEN** the Plex account's name is shown and its avatar URL is stored
 
+#### Scenario: Jellyfin-only user shows initials
+
+- **WHEN** a user has only a Jellyfin link
+- **THEN** the Jellyfin user name is shown with initials and no avatar URL
+
 ### Requirement: Members view and manage their own linked accounts
 
 `GET /api/v1/account` SHALL require the shared session dependency and return,
 for each provider configured on this server (a provider is configured when its
 sign-in method is available as `/auth/methods` reports it: Plex when
-`PLEX_SERVER_ID` is set or Seerr is configured, Seerr when Seerr is configured,
-each also requiring `TASTERR_SECRET_KEY`), whether the caller has
+`PLEX_SERVER_ID` is set or Seerr is configured, Jellyfin when its URL and API key
+are set, Seerr when Seerr is configured, each also requiring
+`TASTERR_SECRET_KEY`), whether the caller has
 it linked and
 that link's display name and link time, plus whether unlinking is allowed. A
 provider the caller has linked but that is no longer configured SHALL also be
@@ -240,9 +265,15 @@ SHALL NOT return provider account ids, credentials, sync internals, or any other
 user's data. Linking SHALL be: Plex via a session-gated PIN flow
 (`POST /api/v1/account/links/plex/pin` and `.../pin/poll`, mirroring sign-in
 handles, popup, and same-origin rules); linking Seerr manually SHALL clear
-`users.seerr_unlinked_at`; Seerr via
+`users.seerr_unlinked_at`; Jellyfin via
+`POST /api/v1/account/links/jellyfin` (username and password forwarded once to
+Jellyfin, and the resulting token logged out as at sign-in); Jellyfin credentials, for Jellyfin or Seerr linking, SHALL follow
+the empty-password rule of Jellyfin sign-in; Seerr via
 `POST /api/v1/account/links/seerr` with method `plex` (one step, using the
-caller's stored Plex token; 409 when the caller has no Plex link) or `local` (email and password forwarded once to
+caller's stored Plex token; 409 when the caller has no Plex link), `jellyfin` (Jellyfin username and password
+forwarded once to Seerr's Jellyfin login), offered and accepted only while Jellyfin is
+configured (otherwise 503), or `local` (email and password forwarded
+once to
 Seerr). A link-creation endpoint for a provider whose sign-in method is unavailable
 SHALL return 503 and store nothing; unlinking is never blocked by availability. A link SHALL be created only when the account would be admitted by signing in
 with it at that moment (for Plex, the active Plex sign-in gate: Seerr accepting
@@ -273,6 +304,12 @@ the link poll SHALL refuse sign-in handles the same way. Failures SHALL be gener
 - **THEN** Seerr is logged into with the stored token and linked without any
   credential entry
 
+#### Scenario: Link Jellyfin from the account page
+
+- **WHEN** a member submits Jellyfin credentials the server accepts
+- **THEN** that Jellyfin user is linked by id, no Jellyfin token or password is
+  stored, and its history sync becomes eligible
+
 #### Scenario: Plex account the gate would refuse cannot be linked
 
 - **WHEN** a member links a Plex account that Plex sign-in would currently refuse
@@ -294,9 +331,10 @@ sync can start in between; then delete the link and its credential; for a Plex l
 Continue Watching entry; for a Seerr link, set `users.seerr_unlinked_at`
 so sign-in auto-link no longer re-links Seerr; when
 `delete_history` is true it SHALL also delete that source's imported signals
-(`seed_request_history` for Seerr, `watched_plex` for Plex) and invalidate the
+(`seed_request_history` for Seerr, `watched_plex` for Plex, `watched_jellyfin`
+for Jellyfin) and invalidate the
 profile. It SHALL refuse with 409 when no other remaining link belongs to a sign-in method
-that is currently available (as defined above), so a member
+that is currently available (as `/auth/methods` would report it), so a member
 cannot strand themselves after a configuration change; the check and the delete
 SHALL be one atomic operation so concurrent unlinks
 cannot remove every link. Tasterr
@@ -386,7 +424,7 @@ available on this server" with Unlink. Unlink SHALL confirm
 with an unticked "Also delete history imported from this account" option and
 SHALL be disabled with "This is your only way to sign in" when no other link can
 currently sign in. Deletion SHALL require
-typing the display name and SHALL state that nothing is deleted in Plex or Seerr.
+typing the display name and SHALL state that nothing is deleted in Plex, Jellyfin, or Seerr.
 A link conflict SHALL show the resolution steps without naming the other user:
 sign in with each account, keep the one you want, delete the other Tasterr
 account from its account page, then link again.

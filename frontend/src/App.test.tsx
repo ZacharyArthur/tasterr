@@ -75,7 +75,9 @@ function renderApp(
 	const fetch = window.fetch;
 	vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
 		String(input) === "/api/v1/auth/methods"
-			? Promise.resolve(jsonResponse({ plex: true, seerr: true }))
+			? Promise.resolve(
+					jsonResponse({ plex: true, jellyfin: true, seerr: true }),
+				)
 			: fetch(input, init),
 	);
 	render(
@@ -231,7 +233,10 @@ test("logout returns to the login screen", async () => {
 	).toBeTruthy();
 });
 
-test("local account switch clears user A data and blocks a late query", async () => {
+test.each([
+	"local",
+	"jellyfin",
+])("%s account switch clears user A data and blocks a late query", async (method) => {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
@@ -254,7 +259,7 @@ test("local account switch clears user A data and blocks a late query", async ()
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input);
 		if (url === "/api/v1/auth/logout") return jsonResponse(null, 204);
-		if (url === "/api/v1/auth/local") return userBLogin.promise;
+		if (url === `/api/v1/auth/${method}`) return userBLogin.promise;
 		if (url === "/api/v1/home") return userBHome.promise;
 		if (url === "/api/v1/config") return jsonResponse(CONFIG);
 		if (url === "/api/v1/rails?cursor=0") return jsonResponse(RAILS);
@@ -279,18 +284,26 @@ test("local account switch clears user A data and blocks a late query", async ()
 	expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
 
 	fireEvent.click(
-		await screen.findByRole("button", { name: "Continue with Seerr" }),
+		await screen.findByRole("button", {
+			name:
+				method === "jellyfin"
+					? "Continue with Jellyfin"
+					: "Continue with Seerr",
+		}),
 	);
-	fireEvent.change(screen.getByLabelText("Email"), {
-		target: { value: "viewer-b@example.test" },
-	});
+	fireEvent.change(
+		screen.getByLabelText(method === "jellyfin" ? "Username" : "Email"),
+		{
+			target: { value: "viewer-b@example.test" },
+		},
+	);
 	fireEvent.change(screen.getByLabelText("Password"), {
 		target: { value: "password" },
 	});
 	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 	await waitFor(() =>
 		expect(fetchMock).toHaveBeenCalledWith(
-			"/api/v1/auth/local",
+			`/api/v1/auth/${method}`,
 			expect.objectContaining({ method: "POST" }),
 		),
 	);

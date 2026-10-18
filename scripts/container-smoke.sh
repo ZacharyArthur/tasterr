@@ -109,7 +109,7 @@ printf '%s\n' 'PLEX_SERVER_ID=container-smoke-server' >>"$env_file"
 compose up --detach --no-build --force-recreate tasterr
 wait_healthy
 docker exec "$container" python -c \
-    "import json, urllib.request; body = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/auth/methods', timeout=3)); assert body == {'plex': True, 'seerr': False}"
+    "import json, urllib.request; body = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/auth/methods', timeout=3)); assert body == {'plex': True, 'jellyfin': False, 'seerr': False}"
 echo "container smoke: Plex-only sign-in methods passed"
 
 # Successful runs also prove the cleanup routine removed every owned resource.

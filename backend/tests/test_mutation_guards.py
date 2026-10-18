@@ -14,6 +14,12 @@ from tasterr.settings import Settings
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 READ_ONLY_POSTS = {("POST", "/api/v1/availability")}
 EXPECTED_GUARDS = {
+    ("POST", "/api/v1/account/links/jellyfin"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+        "login_rate_limit",
+    },
+    ("POST", "/api/v1/auth/jellyfin"): {"require_same_origin", "login_rate_limit"},
     ("POST", "/api/v1/account/links/plex/pin"): {
         "require_same_origin",
         "mutation_rate_limit",
@@ -59,6 +65,7 @@ AUTHENTICATED_MUTATIONS = {
         ("POST", "/api/v1/auth/plex/pin"),
         ("POST", "/api/v1/auth/plex/pin/poll"),
         ("POST", "/api/v1/auth/local"),
+        ("POST", "/api/v1/auth/jellyfin"),
     }
 }
 
@@ -125,6 +132,7 @@ def test_every_response_bearing_api_route_has_an_explicit_model() -> None:
             "/api/v1/auth/logout",
             "/api/v1/recommendations/reset",
             "/api/v1/account/links/seerr",
+            "/api/v1/account/links/jellyfin",
             "/api/v1/account/links/{provider}/unlink",
             "/api/v1/account/delete",
         )

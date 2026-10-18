@@ -179,7 +179,7 @@ class TasteService:
             ranked = rank(profile, candidates, RAIL_SIZE)
             items = [pool[candidate.key] for candidate in ranked]
             if items:
-                return detail.title, _kind(source) == "watched_plex", items
+                return detail.title, _kind(source) in ("watched_plex", "watched_jellyfin"), items
         return None
 
     async def unexpected_picks(self, user_id: int) -> list[MediaSummary]:

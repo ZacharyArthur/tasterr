@@ -63,6 +63,28 @@ async def test_login_plex_returns_user_and_cookie() -> None:
     assert login.cookie == "connect.sid=s%3Aredacted.sig"
 
 
+async def test_login_jellyfin_returns_user_and_cookie() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/auth/jellyfin"
+        assert json.loads(request.read()) == {"username": "viewer", "password": "password"}
+        assert "x-api-key" not in request.headers
+        return httpx.Response(200, json=USER_FIXTURE, headers={"set-cookie": COOKIE_HEADER})
+
+    login = await _client(handler).login_jellyfin("viewer", "password")
+    assert login.user.id == 1 and login.cookie.startswith("connect.sid=")
+
+
+@pytest.mark.parametrize("method", ["plex", "jellyfin"])
+@pytest.mark.parametrize("status", [401, 403, 500, 502, 503, 504])
+async def test_media_server_login_status_classification(method: str, status: int) -> None:
+    client = _client(lambda _: httpx.Response(status))
+    with pytest.raises(UpstreamUnavailable if status in (502, 503, 504) else UpstreamRejected):
+        if method == "plex":
+            await client.login_plex("token")
+        else:
+            await client.login_jellyfin("username", "password")
+
+
 @pytest.mark.parametrize("permissions", [0, 2, 32])
 async def test_login_local_reads_full_identity_with_its_session(permissions: int) -> None:
     calls: list[str] = []

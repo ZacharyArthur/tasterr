@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
@@ -44,6 +44,9 @@ def test_library_override_rejects_invalid_values(
 
 
 ENV_VARS = (
+    "JELLYFIN_INTERNAL_URL",
+    "JELLYFIN_API_KEY",
+    "JELLYFIN_ALLOW_EMPTY_PASSWORD",
     "PLEX_SERVER_ID",
     "TMDB_API_KEY",
     "SEERR_INTERNAL_URL",
@@ -105,9 +108,52 @@ def test_boot_with_nothing_set(clean_env: None) -> None:
     assert settings.tasterr_secret_key is None
     assert settings.tmdb_configured is False
     assert settings.seerr_configured is False
+    assert settings.jellyfin_configured is False
+    assert settings.jellyfin_allow_empty_password is False
     assert settings.database_path == Path("data/tasterr.db")
     assert settings.tasterr_forwarded_allow_ips == "127.0.0.1"
     assert settings.tasterr_plex_max_connection_probes == 6
+
+
+@pytest.mark.parametrize(
+    "url,key,configured",
+    [
+        (None, None, False),
+        ("http://jellyfin:8096", None, False),
+        (None, "key", False),
+        ("http://jellyfin:8096", "key", True),
+    ],
+)
+def test_jellyfin_configuration(
+    clean_env: None, url: str | None, key: str | None, configured: bool
+) -> None:
+    settings = Settings.model_validate({"jellyfin_internal_url": url, "jellyfin_api_key": key})
+    assert settings.jellyfin_configured is configured
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://user:pass@jellyfin:8096",
+        "https://@jellyfin",
+        "http:///",
+        "ftp://jellyfin",
+        "http://[",
+        "http://jellyfin:bad",
+        "http://jellyfin?api_key=secret",
+    ],
+)
+def test_jellyfin_invalid_url_leaves_unconfigured(clean_env: None, url: str) -> None:
+    settings = Settings(jellyfin_internal_url=url, jellyfin_api_key=SecretStr("key"))
+    assert settings.jellyfin_internal_url is None
+    assert not settings.jellyfin_configured
+
+
+def test_jellyfin_password_override_from_environment(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("JELLYFIN_ALLOW_EMPTY_PASSWORD", "true")
+    assert Settings().jellyfin_allow_empty_password
 
 
 @pytest.mark.parametrize("value", ["server-123", "A" * 64, "a"])

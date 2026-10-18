@@ -11,7 +11,7 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 - **Exposure:** LAN today, internet via Cloudflare tunnel tomorrow. Write every endpoint as
   if it's already internet-facing.
-- **What we protect:** TMDB/Seerr API keys, the Seerr internal URL, per-user Plex tokens and
+- **What we protect:** TMDB/Seerr/Jellyfin API keys, internal URLs, per-user Plex tokens and
   Seerr session cookies, Tasterr session tokens, and household viewing behavior (privacy).
 - **Adversaries:** internet scanners hitting exposed endpoints; a malicious or compromised
   browser inside the household; XSS smuggled through third-party metadata (TMDB text is
@@ -45,7 +45,14 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 ### Auth & session code
 
-- [ ] Credentials are forwarded to Seerr, never stored, never logged.
+- [ ] Credentials are forwarded to Seerr or Jellyfin, never stored, never logged.
+- [ ] Jellyfin sign-in and linking authenticate once and immediately log out the
+      returned token; logout failure never blocks admission. Store only the user
+      id, with no Jellyfin credential or avatar. Empty passwords require the
+      explicit environment override, including Seerr-via-Jellyfin linking.
+- [ ] Exposing Tasterr exposes Jellyfin password sign-in from Tasterr's address:
+      Jellyfin local-network rules do not apply; lockout is bounded only by the
+      login bucket. Admin requires `IsAdministrator` and not `IsDisabled`.
 - [ ] Token comparisons are constant-time (compare hashes, `secrets.compare_digest`).
 - [ ] Fresh session token on every login (no fixation); logout deletes the row.
 - [ ] Sessions expire after 30 days of inactivity and at 90 days from creation;
@@ -105,6 +112,20 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       self-only non-admin history path; every other account-list failure stays
       closed. Explicitly filter history and reject the whole server page if any
       row lacks or differs from that account id.
+
+#### Jellyfin
+
+- [ ] URL is validated HTTP(S) with a host, no embedded credentials, query, or
+      fragment. URL and API key stay out of browser contracts and logs.
+- [ ] API key and temporary access token use only the `Authorization: MediaBrowser`
+      header, never URL parameters; every call has a timeout and refuses redirects.
+- [ ] The API key authenticates only reads scoped to an explicit Jellyfin user id;
+      authentication/logout use no API key. Played items use `/Items?userId=`.
+- [ ] Episode TMDB ids are never treated as series ids. Pages and series batches
+      cap at 100, history at 500 rows per type, network/mapping at 30 seconds,
+      and write transactions at 100 canonical facts. No raw item data is retained.
+- [ ] Unconfigured Jellyfin blocks new links and Seerr's Jellyfin method with 503;
+      dormant links perform no reads, and unlinking remains available.
 
 ### Frontend
 
@@ -176,11 +197,14 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Security review pass over the full diff since the last tag.
 - [ ] Live contract tests against the home Seerr instance pass and the tested Seerr
       version is recorded, or the narrow release-owner exception in
-      [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-and-plex-contracts) is recorded.
+      [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-plex-and-jellyfin-contracts) is recorded.
 - [ ] Opt-in Plex contracts pass for every available owner/managed/shared role with
       standard TLS, machine identity, per-row history identity, account-scoped
       Continue Watching, and TMDB GUID mapping with redacted evidence, or the same
       narrow release-owner exception is recorded.
+- [ ] Opt-in Jellyfin contracts pass, including disposable-account cleanup,
+      empty password, lockout, deleted-user 404, shared DeviceId/token logout,
+      user policy, played items, and series ids. Record the tested Jellyfin version.
 - [ ] `.env.example` contains placeholders only — no real values, no real hostnames.
 
 - [ ] `just release-check` passes in the devcontainer (ordinary gate + browser +

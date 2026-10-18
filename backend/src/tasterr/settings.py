@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     seerr_external_url: str | None = None
     seerr_api_key: SecretStr | None = None
     plex_server_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9-]{1,64}$")
+    jellyfin_internal_url: str | None = Field(default=None, repr=False)
+    jellyfin_api_key: SecretStr | None = None
+    jellyfin_allow_empty_password: bool = False
     tasterr_secret_key: SecretStr | None = None
 
     database_path: Path = Path("data/tasterr.db")
@@ -117,6 +120,31 @@ class Settings(BaseSettings):
                 raise ValueError("trusted proxies must be literal IP addresses or CIDRs") from error
             normalized.append(str(parsed))
         return ",".join(normalized)
+
+    @field_validator("jellyfin_internal_url")
+    @classmethod
+    def _jellyfin_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = urlparse(value)
+            if (
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                return None
+            _ = parsed.port
+        except ValueError:
+            return None
+        return value
+
+    @property
+    def jellyfin_configured(self) -> bool:
+        return self.jellyfin_internal_url is not None and self.jellyfin_api_key is not None
 
     @property
     def tmdb_configured(self) -> bool:

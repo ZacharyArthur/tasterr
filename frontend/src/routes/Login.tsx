@@ -1,14 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
+import { JellyfinCredentialsForm } from "../components/JellyfinCredentialsForm";
 import { PlexConnect } from "../components/PlexConnect";
 import {
 	ApiError,
 	createPlexPin,
 	getAuthMethods,
+	loginJellyfin,
 	loginLocal,
 	pollPlexPin,
 } from "../lib/api";
-import { setConfirmedSession } from "../lib/auth";
+import {
+	captureSession,
+	isSessionCurrent,
+	setConfirmedSession,
+} from "../lib/auth";
 
 const pillClassName =
 	"relative flex min-h-12 w-full items-center justify-center gap-3 rounded-full border border-app-border bg-app-surface px-12 py-3 font-medium text-app-text transition-colors hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60";
@@ -20,6 +26,15 @@ export function Login() {
 		queryFn: getAuthMethods,
 	});
 	const [seerrExpanded, setSeerrExpanded] = useState(false);
+	const [jellyfinExpanded, setJellyfinExpanded] = useState(false);
+	const jellyfinLogin = useMutation({
+		mutationFn: loginJellyfin,
+		onMutate: () => captureSession(queryClient),
+		onSuccess: (user, _body, epoch) => {
+			if (isSessionCurrent(queryClient, epoch))
+				return setConfirmedSession(queryClient, user);
+		},
+	});
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const localLogin = useMutation({
@@ -70,6 +85,48 @@ export function Login() {
 						}}
 					/>
 				)}
+				{methods.data?.jellyfin && (
+					<div className="flex flex-col gap-3">
+						<button
+							type="button"
+							className={pillClassName}
+							aria-expanded={jellyfinExpanded}
+							aria-controls="jellyfin-login"
+							onClick={() => setJellyfinExpanded(!jellyfinExpanded)}
+						>
+							<svg
+								aria-hidden="true"
+								className="absolute left-5 size-6"
+								viewBox="0 0 24 24"
+							>
+								<path
+									fill="#AA5CC3"
+									d="M12 2c-2 0-11 16-10 18s19 2 20 0S14 2 12 2zm0 4 7 12H5z"
+								/>
+								<path fill="#00A4DC" d="m12 9 5 9H7z" />
+							</svg>
+							Continue with Jellyfin
+						</button>
+						{jellyfinExpanded && (
+							<div id="jellyfin-login">
+								<JellyfinCredentialsForm
+									onSubmit={(body) => jellyfinLogin.mutate(body)}
+									pending={jellyfinLogin.isPending}
+									submitLabel="Sign in"
+								/>
+								{jellyfinLogin.isError && (
+									<p role="alert" className="text-sm text-status-error">
+										{jellyfinLogin.error instanceof ApiError &&
+										(jellyfinLogin.error.status === 401 ||
+											jellyfinLogin.error.status === 409)
+											? jellyfinLogin.error.message
+											: "Sign-in failed — try again."}
+									</p>
+								)}
+							</div>
+						)}
+					</div>
+				)}
 				{methods.data?.seerr && (
 					<button
 						type="button"
@@ -114,7 +171,10 @@ export function Login() {
 					</output>
 				)}
 				{(methods.isError ||
-					(methods.data && !methods.data.plex && !methods.data.seerr)) && (
+					(methods.data &&
+						!methods.data.plex &&
+						!methods.data.jellyfin &&
+						!methods.data.seerr)) && (
 					<p role="alert" className="text-sm text-status-error">
 						Sign-in is currently unavailable.
 					</p>

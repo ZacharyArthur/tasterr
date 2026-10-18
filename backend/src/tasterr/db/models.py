@@ -6,7 +6,11 @@ from typing import Literal, get_args
 from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
 
-Provider = Literal["plex", "seerr"]
+Provider = Literal["plex", "jellyfin", "seerr"]
+SIGNAL_UNIQUE_INDEX_WHERE = text(
+    "kind IN ('watchlist', 'not_interested', 'seed_request_history', "
+    "'watched_plex', 'watched_jellyfin')"
+)
 
 
 def utcnow() -> datetime:
@@ -86,9 +90,7 @@ class Signal(Base):
             "tmdb_id",
             "kind",
             unique=True,
-            sqlite_where=text(
-                "kind IN ('watchlist', 'not_interested', 'seed_request_history', 'watched_plex')"
-            ),
+            sqlite_where=SIGNAL_UNIQUE_INDEX_WHERE,
         ),
     )
 
@@ -97,7 +99,7 @@ class Signal(Base):
     tmdb_id: Mapped[int]
     media_type: Mapped[str] = mapped_column(String(8))  # 'movie' | 'tv'
     # 'request' | 'watchlist' | 'detail_open' | 'not_interested' |
-    # 'seed_request_history' | 'watched_plex'
+    # 'seed_request_history' | 'watched_plex' | 'watched_jellyfin'
     kind: Mapped[str] = mapped_column(String(24))
     weight: Mapped[float]
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)

@@ -883,7 +883,7 @@ async def test_personalized_home_orders_and_titles_rails() -> None:
     assert [item.id for item in my_list.items] == [500]
 
 
-async def test_plex_watch_source_uses_honest_more_like_title() -> None:
+async def test_watch_source_uses_honest_more_like_title() -> None:
     taste = FakeTaste()
     taste.more_like_result = ("Top Gun", True, [_summary(700 + i) for i in range(6)])
 

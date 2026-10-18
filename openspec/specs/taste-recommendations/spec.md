@@ -36,6 +36,7 @@ only public TMDB-derived metadata, never secret material.
 A user's taste profile SHALL be the normalized sum, over their signals, of
 signal weight × title vector, exponentially time-decayed with a half-life of
 approximately 90 days. Signal weights SHALL be: `request` +3.0, `watched_plex`
++2.5, `watched_jellyfin`
 +2.5, `watchlist` +2.0, `seed_request_history` +2.0, `detail_open` +0.3,
 `not_interested` −3.0. The profile SHALL be materialized per user and recomputed
 when the user's signals change or the materialization is stale, and SHALL be
@@ -75,7 +76,8 @@ wrong-region provider facts SHALL contribute no service boost. Ranked results
 SHALL pass a greedy diversity re-rank penalizing similarity to already-picked
 titles. Titles the user has marked `not_interested` SHALL be excluded from every
 personalized rail; titles the user has already requested, seeded, watchlisted, or
-watched through Plex SHALL be excluded from the recommended-for-you rail.
+watched through Plex or Jellyfin SHALL be excluded from the recommended-for-you
+rail.
 
 Persisted feature records SHALL carry backward-compatible active-region provider
 facts derived from the same TMDB detail as the vector. A missing or different
@@ -125,7 +127,7 @@ change never applies provider ids from the previous region.
 
 #### Scenario: Watched title is not recommended again
 
-- **WHEN** a user has a `watched_plex` signal for a title
+- **WHEN** a user has a `watched_plex` or `watched_jellyfin` signal for a title
 - **THEN** that title is excluded from recommended-for-you while remaining usable
   as a candidate-source signal
 
@@ -141,7 +143,8 @@ candidate pool), **more-like** (TMDB recommendations and similar titles for the
 first usable source in a stable per-user daily shuffle of the three newest unique
 qualifying strong-positive sources, re-ranked locally), **my-list** (active
 watchlist titles), and **unexpected-picks** (quality-gated low-correlation titles).
-When the more-like source is `watched_plex`, its title SHALL be **Because You
+When the more-like source is `watched_plex` or `watched_jellyfin`, its title
+SHALL be **Because You
 Watched {title}**; for every other strong source it SHALL remain **More Like
 {title}**. The provider SHALL attempt no more than the three newest unique,
 non-hidden strong-positive sources before omitting the rail. No provider SHALL
@@ -159,7 +162,8 @@ failed Home request.
 
 #### Scenario: Plex watch earns an honest source label
 
-- **WHEN** the newest usable strong source is a `watched_plex` title
+- **WHEN** the newest usable strong source is a `watched_plex` or
+  `watched_jellyfin` title
 - **THEN** the related rail is labelled `Because You Watched {title}`
 
 #### Scenario: Non-watch source keeps the existing label
@@ -232,7 +236,7 @@ same-origin (CSRF) check, and the shared loose authenticated-mutation rate limit
 It SHALL hold a per-user scheduling guard from before cancelling until its clear
 commits, so no sync trigger can schedule a sync for that user in between; this
 is the guard that unlink, account deletion, and source switch-off also hold.
-It SHALL cancel and await that user's in-flight Seerr and Plex syncs, then delete only the
+It SHALL cancel and await that user's in-flight Seerr, Plex, and Jellyfin syncs, then delete only the
 calling user's signals and profile and clear the sync attempt/success timestamps
 on only that user's linked accounts. Cancellation SHALL be consumed rather than
 propagated to the reset request, and the wait SHALL remain bounded by the sync

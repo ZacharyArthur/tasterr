@@ -110,8 +110,8 @@ def personalized_home_providers(
             return []
         if result is None:
             return []
-        source_title, is_plex_watch, items = result
-        prefix = "Because You Watched" if is_plex_watch else "More Like"
+        source_title, is_watch, items = result
+        prefix = "Because You Watched" if is_watch else "More Like"
         more_like.title = f"{prefix} {source_title}"  # resolved with the fetch
         return items
 

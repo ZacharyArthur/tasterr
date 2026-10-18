@@ -214,7 +214,7 @@ dependencies rather than re-implementing checks.
 
 ### Requirement: Login endpoints are hardened
 Mutating auth endpoints SHALL enforce a same-origin check (`Sec-Fetch-Site` /
-`Origin`). The login-start endpoints (`/auth/plex/pin`, `/auth/local`) SHALL be
+`Origin`). The login-start endpoints (`/auth/plex/pin`, `/auth/local`, `/auth/jellyfin`) SHALL be
 tightly rate-limited in-process. The Plex PIN poll (`POST /auth/plex/pin/poll`)
 SHALL enforce the same-origin check and SHALL be exempt from the tight login
 rate limit — it polls every ~2s by design behind an unguessable, expiring,
@@ -245,8 +245,9 @@ browser headers upstream or upstream headers/bodies downstream.
 The login screen SHALL offer exactly the sign-in methods `GET /api/v1/auth/methods`
 reports as available, as a full-width stack of rounded pill buttons in the style
 of common single-sign-on buttons, each with its service's mark as inline SVG and a
-"Continue with …" label: "Continue with Plex" and "Continue with Seerr". A method
-that needs credentials SHALL expand its email/password form in place when
+"Continue with …" label: "Continue with Plex", "Continue with Jellyfin", and
+"Continue with Seerr", in that order. A method
+that needs credentials SHALL expand its email/password (or, for Jellyfin, username/password) form in place when
 activated. Plex sign-in SHALL attempt to open a script-created popup
 context directly from the user's activation, sever that context's access to its
 opener before navigating to the backend-provided Plex approval URL, and retain
@@ -264,7 +265,7 @@ On success the SPA SHALL switch to the authenticated state without a full reload
 a logout control SHALL end the session and return to the login screen. Failures
 SHALL surface as generic, human-readable messages. On each confirmed session
 transition — successful local login, successful Plex PIN completion, successful
-logout, or `auth/me` resolving to a different user — the SPA SHALL invalidate
+Jellyfin login, successful logout, or `auth/me` resolving to a different user — the SPA SHALL invalidate
 prior-session mutation callbacks, cancel in-flight TanStack Query requests before
 removing cached query data, and publish the confirmed user or signed-out state
 only after that boundary completes. Failed login or logout attempts SHALL preserve
@@ -361,6 +362,7 @@ the current confirmed auth state and query cache.
 ### Requirement: Live Seerr contract tests
 A pytest-marked live suite (excluded from `just check` and CI) SHALL validate the
 Seerr auth contract against a real instance: Plex token login, local login,
+Jellyfin login, the status returned when a media-server login is disabled,
 user/permissions shape, and the invalid-session 403 behavior — recording the
 Seerr version tested.
 
@@ -395,14 +397,15 @@ or influence cookie security.
 `GET /api/v1/auth/methods` SHALL be unauthenticated by explicit decision (the
 login screen needs it before a session exists) and SHALL return only booleans for
 each sign-in method: `plex` (true when `PLEX_SERVER_ID` is set or Seerr is
-configured) and `seerr` (true when Seerr is configured), each also requiring
+configured), `jellyfin` (true when the Jellyfin URL and API key are set), and
+`seerr` (true when Seerr is configured), each also requiring
 `TASTERR_SECRET_KEY`. It SHALL NOT return URLs, server ids, keys, or any other
 configuration, and SHALL perform no upstream call.
 
 #### Scenario: Methods reflect configuration
 
 - **WHEN** only `PLEX_SERVER_ID` and the secret key are configured
-- **THEN** the response is `plex: true, seerr: false`
+- **THEN** the response is `plex: true, jellyfin: false, seerr: false`
 
 #### Scenario: Methods carry no configuration detail
 

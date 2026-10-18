@@ -47,7 +47,11 @@ async def get_taste_onboarding(
     if authed.user.taste_onboarding_seen or await store.has_signals(db, authed.user.id):
         return TasteOnboardingStateResponse(state="done")
     seeding = cast("set[int]", request.app.state.seeding)
-    pending = authed.user.id in seeding or authed.user.id in request.app.state.plex_history_tasks
+    pending = (
+        authed.user.id in seeding
+        or authed.user.id in request.app.state.plex_history_tasks
+        or authed.user.id in request.app.state.jellyfin_history_tasks
+    )
     return TasteOnboardingStateResponse(state="pending" if pending else "show")
 
 

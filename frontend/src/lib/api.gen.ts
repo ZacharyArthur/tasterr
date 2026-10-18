@@ -106,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/jellyfin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Jellyfin Login */
+        post: operations["jellyfin_login_api_v1_auth_jellyfin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -202,6 +219,23 @@ export interface paths {
         put?: never;
         /** Link Seerr */
         post: operations["link_seerr_api_v1_account_links_seerr_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/jellyfin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link Jellyfin */
+        post: operations["link_jellyfin_api_v1_account_links_jellyfin_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -548,7 +582,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "plex" | "seerr";
+            provider: "plex" | "jellyfin" | "seerr";
             /** Available */
             available: boolean;
             /** Linked */
@@ -579,6 +613,8 @@ export interface components {
         AuthMethodsResponse: {
             /** Plex */
             plex: boolean;
+            /** Jellyfin */
+            jellyfin: boolean;
             /** Seerr */
             seerr: boolean;
         };
@@ -741,6 +777,13 @@ export interface components {
             avatar_url: string | null;
             /** Has Taste Signals */
             has_taste_signals: boolean;
+        };
+        /** JellyfinLoginRequest */
+        JellyfinLoginRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
         };
         /** LinkPollResponse */
         LinkPollResponse: {
@@ -1132,7 +1175,12 @@ export interface components {
              * Method
              * @enum {string}
              */
-            method: "plex" | "local";
+            method: "plex" | "jellyfin" | "local";
+            /**
+             * Username
+             * @default
+             */
+            username: string;
             /**
              * Email
              * @default
@@ -1478,6 +1526,39 @@ export interface operations {
             };
         };
     };
+    jellyfin_login_api_v1_auth_jellyfin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JellyfinLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_me_api_v1_auth_me_get: {
         parameters: {
             query?: never;
@@ -1620,12 +1701,43 @@ export interface operations {
             };
         };
     };
+    link_jellyfin_api_v1_account_links_jellyfin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JellyfinLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     unlink_account_api_v1_account_links__provider__unlink_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                provider: "plex" | "seerr";
+                provider: "plex" | "jellyfin" | "seerr";
             };
             cookie?: never;
         };

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { AccountDialog } from "../components/AccountDialog";
 import { ConnectSeerr } from "../components/ConnectSeerr";
+import { JellyfinCredentialsForm } from "../components/JellyfinCredentialsForm";
 import { PlexConnect } from "../components/PlexConnect";
 import {
 	type AccountProvider,
@@ -9,6 +10,7 @@ import {
 	createLinkPlexPin,
 	deleteAccount,
 	getAccount,
+	linkJellyfin,
 	pollLinkPlexPin,
 	type User,
 	unlinkAccount,
@@ -19,10 +21,14 @@ import {
 	setConfirmedSession,
 } from "../lib/auth";
 
+const providerNames = { plex: "Plex", jellyfin: "Jellyfin", seerr: "Seerr" };
+
 export function Account({ user }: { user: User }) {
 	const cache = useQueryClient();
 	const account = useQuery({ queryKey: ["account"], queryFn: getAccount });
-	const [connecting, setConnecting] = useState(false);
+	const [connecting, setConnecting] = useState<"seerr" | "jellyfin" | null>(
+		null,
+	);
 	const [unlinking, setUnlinking] = useState<AccountProvider | null>(null);
 	const [deleteHistory, setDeleteHistory] = useState(false);
 	const [deleting, setDeleting] = useState(false);
@@ -31,6 +37,15 @@ export function Account({ user }: { user: User }) {
 		await cache.invalidateQueries({ queryKey: ["account"] });
 		void cache.invalidateQueries({ queryKey: ["home"] });
 	};
+	const jellyfinLink = useMutation({
+		mutationFn: linkJellyfin,
+		onMutate: () => captureSession(cache),
+		onSuccess: async (_data, _body, epoch) => {
+			if (!isSessionCurrent(cache, epoch)) return;
+			setConnecting(null);
+			await refresh();
+		},
+	});
 	const unlink = useMutation({
 		mutationFn: () =>
 			unlinkAccount(unlinking?.provider ?? "plex", deleteHistory),
@@ -60,9 +75,7 @@ export function Account({ user }: { user: User }) {
 					key={provider.provider}
 					className="flex flex-col gap-3 rounded border border-app-border bg-app-panel p-4"
 				>
-					<h3 className="font-semibold">
-						{provider.provider === "plex" ? "Plex" : "Seerr"}
-					</h3>
+					<h3 className="font-semibold">{providerNames[provider.provider]}</h3>
 					<p>{provider.linked ? provider.display_name : "Not connected"}</p>
 					{!provider.available && <p>No longer available on this server</p>}
 					{provider.linked ? (
@@ -77,7 +90,7 @@ export function Account({ user }: { user: User }) {
 									setUnlinking(provider);
 								}}
 							>
-								Unlink {provider.provider === "plex" ? "Plex" : "Seerr"}
+								Unlink {providerNames[provider.provider]}
 							</button>
 							{!provider.can_unlink && <p>This is your only way to sign in</p>}
 						</>
@@ -96,9 +109,14 @@ export function Account({ user }: { user: User }) {
 							<button
 								type="button"
 								className="min-h-11 rounded bg-app-accent px-4 py-2 text-white"
-								onClick={() => setConnecting(true)}
+								onClick={() => {
+									jellyfinLink.reset();
+									setConnecting(
+										provider.provider === "jellyfin" ? "jellyfin" : "seerr",
+									);
+								}}
 							>
-								Link Seerr
+								Link {providerNames[provider.provider]}
 							</button>
 						))
 					)}
@@ -118,15 +136,34 @@ export function Account({ user }: { user: User }) {
 					Delete my Tasterr account
 				</button>
 			</section>
-			{connecting && (
+			{connecting === "seerr" && (
 				<ConnectSeerr
-					onCancel={() => setConnecting(false)}
-					onConnected={() => setConnecting(false)}
+					onCancel={() => setConnecting(null)}
+					onConnected={() => setConnecting(null)}
 				/>
+			)}
+			{connecting === "jellyfin" && (
+				<AccountDialog
+					title="Link Jellyfin"
+					onCancel={() => setConnecting(null)}
+				>
+					<JellyfinCredentialsForm
+						onSubmit={(body) => jellyfinLink.mutate(body)}
+						pending={jellyfinLink.isPending}
+						submitLabel="Connect Jellyfin"
+					/>
+					{jellyfinLink.isError && (
+						<p role="alert">
+							{jellyfinLink.error instanceof ApiError
+								? jellyfinLink.error.message
+								: "Could not connect Jellyfin. Try again."}
+						</p>
+					)}
+				</AccountDialog>
 			)}
 			{unlinking && (
 				<AccountDialog
-					title={`Unlink ${unlinking.provider === "plex" ? "Plex" : "Seerr"}`}
+					title={`Unlink ${providerNames[unlinking.provider]}`}
 					onCancel={() => setUnlinking(null)}
 				>
 					<label>
@@ -161,7 +198,7 @@ export function Account({ user }: { user: User }) {
 				>
 					<p>
 						This permanently deletes your Tasterr data. Nothing is deleted in
-						Plex or Seerr.
+						Plex, Jellyfin, or Seerr.
 					</p>
 					<label>
 						Type {user.display_name} to confirm

@@ -43,7 +43,11 @@ def test_gate_configuration_table(tmp_path: Path, pinned: bool, seerr: bool, sec
     with TestClient(harness.app) as client:
         methods = client.get("/api/v1/auth/methods")
         assert methods.status_code == 200
-        assert methods.json() == {"plex": secret and (pinned or seerr), "seerr": secret and seerr}
+        assert methods.json() == {
+            "plex": secret and (pinned or seerr),
+            "jellyfin": False,
+            "seerr": secret and seerr,
+        }
         assert all(type(value) is bool for value in methods.json().values())
         assert harness.plex.resource_calls == harness.seerr.login_calls == 0
         created = client.post("/api/v1/auth/plex/pin")

@@ -6,6 +6,7 @@ export type HealthResponse =
 	paths["/api/v1/health"]["get"]["responses"]["200"]["content"]["application/json"];
 export type User = components["schemas"]["UserResponse"];
 export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
+export type JellyfinCredentials = components["schemas"]["JellyfinLoginRequest"];
 export type AccountResponse = components["schemas"]["AccountResponse"];
 export type AccountProvider = components["schemas"]["AccountProvider"];
 export type SeerrLinkBody = Pick<
@@ -145,6 +146,14 @@ export function pollPlexPin(pinId: string): Promise<PinPollResponse> {
 
 export function loginLocal(email: string, password: string): Promise<User> {
 	return postJson<User>("/api/v1/auth/local", { email, password });
+}
+
+export function loginJellyfin(body: JellyfinCredentials): Promise<User> {
+	return postJson<User>("/api/v1/auth/jellyfin", body);
+}
+
+export function linkJellyfin(body: JellyfinCredentials): Promise<void> {
+	return postJson<void>("/api/v1/account/links/jellyfin", body);
 }
 
 export function logout(): Promise<void> {

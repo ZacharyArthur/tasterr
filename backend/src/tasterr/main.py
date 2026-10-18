@@ -85,6 +85,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             tasks += list(
                 cast("dict[int, asyncio.Task[None]]", started_app.state.plex_history_tasks).values()
             )
+            tasks += list(
+                cast(
+                    "dict[int, asyncio.Task[None]]", started_app.state.jellyfin_history_tasks
+                ).values()
+            )
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -133,6 +138,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Per-user Plex history tasks are both the single-flight claims and the
     # strong references reset uses to cancel/await an in-flight import.
     app.state.plex_history_tasks = {}
+    app.state.jellyfin_history_tasks = {}
     app.state.plex_history_resets = set()
     # Catalog failures map to generic browser errors (no upstream detail leaks).
     # UpstreamRejected (TMDB 4xx) that an endpoint doesn't handle itself (title/

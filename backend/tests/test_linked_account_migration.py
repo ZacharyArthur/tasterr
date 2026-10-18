@@ -167,7 +167,7 @@ async def test_failed_upgrade_rolls_back_ddl_and_can_be_retried(tmp_path: Path) 
         async with engine.connect() as connection:
             assert (
                 await connection.execute(text("SELECT version_num FROM alembic_version"))
-            ).scalar_one() == "0007"
+            ).scalar_one() == "0008"
             assert (await connection.execute(text("PRAGMA foreign_key_check"))).all() == []
     finally:
         await engine.dispose()

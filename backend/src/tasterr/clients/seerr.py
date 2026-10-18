@@ -100,6 +100,11 @@ class SeerrAuthClient:
     async def login_plex(self, auth_token: str) -> SeerrLogin:
         return await self._login("/api/v1/auth/plex", {"authToken": auth_token})
 
+    async def login_jellyfin(self, username: str, password: str) -> SeerrLogin:
+        return await self._login(
+            "/api/v1/auth/jellyfin", {"username": username, "password": password}
+        )
+
     async def login_local(self, email: str, password: str) -> SeerrLogin:
         login = await self._login("/api/v1/auth/local", {"email": email, "password": password})
         # Local sign-in returns only a partial identity; permissions come from /me.

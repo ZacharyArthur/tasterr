@@ -76,6 +76,100 @@ test("member sees providers, name, and deletion controls", async () => {
 		screen.getByRole("button", { name: "Delete my Tasterr account" }),
 	).toBeTruthy();
 });
+
+test("Jellyfin card links with credentials and offers the history choice on unlink", async () => {
+	const { fetch } = setup({
+		providers: [
+			{
+				provider: "jellyfin",
+				available: true,
+				linked: false,
+				can_unlink: false,
+			},
+		],
+	});
+	fireEvent.click(await screen.findByRole("button", { name: "Link Jellyfin" }));
+	fireEvent.change(screen.getByLabelText("Username"), {
+		target: { value: "viewer" },
+	});
+	fireEvent.change(screen.getByLabelText("Password"), {
+		target: { value: "pw" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Connect Jellyfin" }));
+	await waitFor(() =>
+		expect(fetch).toHaveBeenCalledWith(
+			"/api/v1/account/links/jellyfin",
+			expect.objectContaining({
+				body: JSON.stringify({ username: "viewer", password: "pw" }),
+			}),
+		),
+	);
+});
+
+test.each([
+	true,
+	false,
+])("Seerr dialog offers Jellyfin only while available: %s", async (available) => {
+	const { fetch } = setup({
+		providers: [
+			{ provider: "seerr", available: true, linked: false, can_unlink: false },
+			{ provider: "jellyfin", available, linked: false, can_unlink: false },
+		],
+	});
+	fireEvent.click(await screen.findByRole("button", { name: "Link Seerr" }));
+	if (!available) {
+		expect(
+			screen.queryByRole("button", { name: "Use Jellyfin credentials" }),
+		).toBeNull();
+		return;
+	}
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Use Jellyfin credentials" }),
+	);
+	fireEvent.change(screen.getByLabelText("Username"), {
+		target: { value: "viewer" },
+	});
+	fireEvent.change(screen.getByLabelText("Password"), {
+		target: { value: "pw" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Connect Seerr" }));
+	await waitFor(() =>
+		expect(fetch).toHaveBeenCalledWith(
+			"/api/v1/account/links/seerr",
+			expect.objectContaining({
+				body: JSON.stringify({
+					method: "jellyfin",
+					username: "viewer",
+					password: "pw",
+				}),
+			}),
+		),
+	);
+});
+
+test("dormant Jellyfin card remains unlinkable and deletion names all upstreams", async () => {
+	setup({
+		providers: [
+			{
+				provider: "jellyfin",
+				available: false,
+				linked: true,
+				display_name: "Jellyfin member",
+				can_unlink: true,
+			},
+		],
+	});
+	expect(await screen.findByText("Jellyfin member")).toBeTruthy();
+	fireEvent.click(screen.getByRole("button", { name: "Unlink Jellyfin" }));
+	expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(
+		false,
+	);
+	fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+	fireEvent.click(
+		screen.getByRole("button", { name: "Delete my Tasterr account" }),
+	);
+	expect(screen.getByText(/Plex, Jellyfin, or Seerr/)).toBeTruthy();
+});
 test("unlink starts with history unticked and forwards the choice", async () => {
 	const { fetch } = setup();
 	fireEvent.click(await screen.findByRole("button", { name: "Unlink Plex" }));
@@ -147,7 +241,9 @@ test("deletion requires the name, sends it, and clears the session", async () =>
 		name: "Permanently delete account",
 	}) as HTMLButtonElement;
 	expect(button.disabled).toBe(true);
-	expect(screen.getByText(/Nothing is deleted in Plex or Seerr/)).toBeTruthy();
+	expect(
+		screen.getByText(/Nothing is deleted in Plex, Jellyfin, or Seerr/),
+	).toBeTruthy();
 	fireEvent.change(screen.getByLabelText("Type House Member to confirm"), {
 		target: { value: USER.display_name },
 	});

@@ -24,7 +24,7 @@ from tasterr.db.models import Profile, utcnow
 from tasterr.recommend import store
 from tasterr.recommend.features import FeatureRecord
 from tasterr.recommend.service import TasteService
-from tasterr.recommend.signals import TitleKey
+from tasterr.recommend.signals import SignalKind, TitleKey
 
 
 def _summary(tmdb_id: int, media: MediaType = "movie") -> MediaSummary:
@@ -270,9 +270,12 @@ async def test_signalless_user_has_an_empty_profile(db: AsyncSession) -> None:
     assert await _service(db, FakeCatalog()).recommended_for_you(user_id) == []
 
 
-async def test_recommendations_exclude_hidden_and_engaged_titles(db: AsyncSession) -> None:
+@pytest.mark.parametrize("kind", ["request", "watched_plex", "watched_jellyfin"])
+async def test_recommendations_exclude_hidden_and_engaged_titles(
+    db: AsyncSession, kind: SignalKind
+) -> None:
     user_id = await _user(db)
-    await store.record_signal(db, user_id, "movie", 1, "request")
+    await store.record_signal(db, user_id, "movie", 1, kind)
     await store.record_signal(db, user_id, "movie", 99, "not_interested")
     catalog = FakeCatalog()
     catalog.details[("movie", 1)] = _detail(1, [_summary(99), _summary(2), _summary(1)])
@@ -620,9 +623,10 @@ async def test_more_like_ranks_the_sources_related_titles(db: AsyncSession) -> N
     assert [item.id for item in items] == [2]  # source + hidden excluded
 
 
-async def test_more_like_uses_plex_watch_label(db: AsyncSession) -> None:
+@pytest.mark.parametrize("kind", ["watched_plex", "watched_jellyfin"])
+async def test_more_like_uses_watch_label(db: AsyncSession, kind: SignalKind) -> None:
     user_id = await _user(db)
-    await store.record_signal(db, user_id, "movie", 2, "watched_plex")
+    await store.record_signal(db, user_id, "movie", 2, kind)
     catalog = FakeCatalog()
     catalog.details[("movie", 2)] = _detail(2, [_summary(20)])
 

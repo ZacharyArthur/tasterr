@@ -7,7 +7,7 @@ import {
 	screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { ME_QUERY_KEY } from "../lib/auth";
+import { ME_QUERY_KEY, setConfirmedSession } from "../lib/auth";
 import { Login } from "./Login";
 
 beforeEach(() => {
@@ -33,7 +33,10 @@ function stubFetch(routes: Record<string, Route>) {
 			routes[key] ??
 			routes[String(input)] ??
 			(key === "GET /api/v1/auth/methods"
-				? () => ({ status: 200, body: { plex: true, seerr: true } })
+				? () => ({
+						status: 200,
+						body: { plex: true, jellyfin: true, seerr: true },
+					})
 				: undefined);
 		if (route === undefined) {
 			throw new Error(`unexpected fetch: ${String(input)}`);
@@ -75,10 +78,11 @@ const USER = {
 };
 
 test.each([
-	{ plex: true, seerr: false },
-	{ plex: false, seerr: true },
-	{ plex: true, seerr: true },
-	{ plex: false, seerr: false },
+	{ plex: true, jellyfin: false, seerr: false },
+	{ plex: false, jellyfin: true, seerr: false },
+	{ plex: false, jellyfin: false, seerr: true },
+	{ plex: true, jellyfin: true, seerr: true },
+	{ plex: false, jellyfin: false, seerr: false },
 ])("shows only available methods: %j", async (methods) => {
 	const fetch = stubFetch({
 		"GET /api/v1/auth/methods": () => ({ status: 200, body: methods }),
@@ -90,8 +94,11 @@ test.each([
 	expect(
 		Boolean(screen.queryByRole("button", { name: "Continue with Seerr" })),
 	).toBe(methods.seerr);
+	expect(
+		Boolean(screen.queryByRole("button", { name: "Continue with Jellyfin" })),
+	).toBe(methods.jellyfin);
 	expect(screen.queryByLabelText("Email")).toBeNull();
-	if (!methods.plex && !methods.seerr)
+	if (!methods.plex && !methods.jellyfin && !methods.seerr)
 		expect(screen.getByRole("alert").textContent).toBe(
 			"Sign-in is currently unavailable.",
 		);
@@ -666,6 +673,7 @@ test("local login failure shows the generic backend message", async () => {
 test.each([
 	"plex",
 	"local",
+	"jellyfin",
 ])("%s conflict shows server guidance and stops polling", async (method) => {
 	const message =
 		"Sign in with each account, keep one, delete the other, then link again.";
@@ -679,6 +687,7 @@ test.each([
 			body: { detail: message },
 		}),
 		"/api/v1/auth/local": () => ({ status: 409, body: { detail: message } }),
+		"/api/v1/auth/jellyfin": () => ({ status: 409, body: { detail: message } }),
 	});
 	vi.stubGlobal("open", () => null);
 	const cache = await renderLogin();
@@ -686,11 +695,19 @@ test.each([
 		fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 	else {
 		fireEvent.click(
-			screen.getByRole("button", { name: "Continue with Seerr" }),
+			screen.getByRole("button", {
+				name:
+					method === "jellyfin"
+						? "Continue with Jellyfin"
+						: "Continue with Seerr",
+			}),
 		);
-		fireEvent.change(screen.getByLabelText("Email"), {
-			target: { value: "a@b.c" },
-		});
+		fireEvent.change(
+			screen.getByLabelText(method === "jellyfin" ? "Username" : "Email"),
+			{
+				target: { value: "a@b.c" },
+			},
+		);
 		fireEvent.change(screen.getByLabelText("Password"), {
 			target: { value: "pw" },
 		});
@@ -707,4 +724,71 @@ test.each([
 	expect(
 		mock.mock.calls.filter(([url]) => String(url).endsWith("/pin/poll")),
 	).toHaveLength(method === "plex" ? 1 : 0);
+});
+
+test("Jellyfin form expands in place and resets cached session data on success", async () => {
+	const fetch = stubFetch({
+		"/api/v1/auth/jellyfin": () => ({ status: 200, body: USER }),
+	});
+	const cache = await renderLogin();
+	cache.setQueryData(["home"], { owner: "prior" });
+	fireEvent.click(
+		screen.getByRole("button", { name: "Continue with Jellyfin" }),
+	);
+	fireEvent.change(screen.getByLabelText("Username"), {
+		target: { value: "viewer" },
+	});
+	fireEvent.change(screen.getByLabelText("Password"), {
+		target: { value: "pw" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+	await vi.waitFor(() =>
+		expect(cache.getQueryData(ME_QUERY_KEY)).toEqual(USER),
+	);
+	expect(cache.getQueryData(["home"])).toBeUndefined();
+	expect(cache.getMutationCache().getAll()).toEqual([]);
+	expect(fetch).toHaveBeenCalledWith(
+		"/api/v1/auth/jellyfin",
+		expect.objectContaining({
+			body: JSON.stringify({ username: "viewer", password: "pw" }),
+		}),
+	);
+});
+
+test("a late Jellyfin login cannot overwrite a newer confirmed session", async () => {
+	let resolve!: (response: Response) => void;
+	const pending = new Promise<Response>((done) => {
+		resolve = done;
+	});
+	const fetch = vi.fn(async (input: RequestInfo | URL) =>
+		String(input) === "/api/v1/auth/methods"
+			? ({
+					ok: true,
+					status: 200,
+					json: async () => ({ plex: false, jellyfin: true, seerr: false }),
+				} as Response)
+			: pending,
+	);
+	vi.stubGlobal("fetch", fetch);
+	const cache = await renderLogin();
+	fireEvent.click(
+		screen.getByRole("button", { name: "Continue with Jellyfin" }),
+	);
+	fireEvent.change(screen.getByLabelText("Username"), {
+		target: { value: "viewer" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+	await vi.waitFor(() =>
+		expect(fetch).toHaveBeenCalledWith(
+			"/api/v1/auth/jellyfin",
+			expect.anything(),
+		),
+	);
+	const newer = { ...USER, id: 2, display_name: "Other" };
+	await setConfirmedSession(cache, newer);
+	await act(async () => {
+		resolve({ ok: true, status: 200, json: async () => USER } as Response);
+		await pending;
+	});
+	expect(cache.getQueryData(ME_QUERY_KEY)).toEqual(newer);
 });

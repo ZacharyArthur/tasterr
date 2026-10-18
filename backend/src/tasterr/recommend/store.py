@@ -14,13 +14,13 @@ from datetime import datetime
 from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import delete, select, text, tuple_
+from sqlalchemy import delete, select, tuple_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.db.io import finish_io
-from tasterr.db.models import Profile, Signal, TitleFeatures, utcnow
+from tasterr.db.models import SIGNAL_UNIQUE_INDEX_WHERE, Profile, Signal, TitleFeatures, utcnow
 from tasterr.recommend.features import FeatureRecord
 from tasterr.recommend.signals import (
     SIGNAL_WEIGHTS,
@@ -50,7 +50,7 @@ async def record_signal(
 ) -> bool:
     """Record a signal honoring per-kind semantics; returns whether a row was
     written. Toggle/seed re-adds and same-day detail reopens are successful
-    no-ops; Plex watches move their one title row only to a newer watch time.
+    no-ops; watch facts move their one title row only to a newer watch time.
     `created_at` backdates server imports so decay prices them honestly
     (only server imports may backdate — the detail-open dedup window derives from the
     incoming moment's calendar day, so a backdated detail_open would silently
@@ -70,13 +70,10 @@ async def record_signal(
             weight=SIGNAL_WEIGHTS[kind],
             created_at=moment,
         )
-        if kind == "watched_plex":
+        if kind in ("watched_plex", "watched_jellyfin"):
             statement = statement.on_conflict_do_update(
                 index_elements=[Signal.user_id, Signal.media_type, Signal.tmdb_id, Signal.kind],
-                index_where=text(
-                    "kind IN ('watchlist', 'not_interested', "
-                    "'seed_request_history', 'watched_plex')"
-                ),
+                index_where=SIGNAL_UNIQUE_INDEX_WHERE,
                 set_={
                     "weight": statement.excluded.weight,
                     "created_at": statement.excluded.created_at,
@@ -86,10 +83,7 @@ async def record_signal(
         else:
             statement = statement.on_conflict_do_nothing(
                 index_elements=[Signal.user_id, Signal.media_type, Signal.tmdb_id, Signal.kind],
-                index_where=text(
-                    "kind IN ('watchlist', 'not_interested', "
-                    "'seed_request_history', 'watched_plex')"
-                ),
+                index_where=SIGNAL_UNIQUE_INDEX_WHERE,
             )
         result = await finish_io(db.execute(statement))
         # DML through AsyncSession.execute is a CursorResult at runtime; the

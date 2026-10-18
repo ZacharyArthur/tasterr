@@ -123,7 +123,13 @@ def test_server_recorded_kinds_are_unrepresentable(tmp_path: Path) -> None:
     app = _app(tmp_path)
     token = _seed_session(tmp_path / "tasterr.db")
     with _client(app, token) as client:
-        for kind in ("request", "seed_request_history", "watched_plex", "bogus"):
+        for kind in (
+            "request",
+            "seed_request_history",
+            "watched_plex",
+            "watched_jellyfin",
+            "bogus",
+        ):
             response = client.post("/api/v1/signals", json=_body(kind))
             assert response.status_code == 422, kind
 

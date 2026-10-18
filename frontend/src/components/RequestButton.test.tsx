@@ -381,7 +381,10 @@ test("expired session opens Connect Seerr and cancel restores the control", asyn
 	expect(await screen.findByRole("button", { name: "Request" })).toBeTruthy();
 });
 
-test("Connect Seerr retries the same quality, destination, and seasons only once", async () => {
+test.each([
+	"plex",
+	"jellyfin",
+])("Connect Seerr via %s retries the same quality, destination, and seasons only once", async (method) => {
 	const bodies: unknown[] = [];
 	let linked = 0;
 	vi.stubGlobal(
@@ -392,7 +395,10 @@ test("Connect Seerr retries the same quality, destination, and seasons only once
 			if (url.endsWith("/destinations")) return response(BOTH);
 			if (url.endsWith("/account"))
 				return response({
-					providers: [{ provider: "plex", linked: true, available: true }],
+					providers: [
+						{ provider: "plex", linked: true, available: true },
+						{ provider: "jellyfin", linked: false, available: true },
+					],
 				});
 			if (url.endsWith("/links/seerr")) {
 				linked++;
@@ -422,8 +428,22 @@ test("Connect Seerr retries the same quality, destination, and seasons only once
 	fireEvent.click(screen.getByRole("button", { name: "OK" }));
 	await screen.findByRole("dialog", { name: "Connect Seerr" });
 	fireEvent.click(
-		await screen.findByRole("button", { name: "Use my Plex account" }),
+		await screen.findByRole("button", {
+			name:
+				method === "jellyfin"
+					? "Use Jellyfin credentials"
+					: "Use my Plex account",
+		}),
 	);
+	if (method === "jellyfin") {
+		fireEvent.change(screen.getByLabelText("Username"), {
+			target: { value: "viewer" },
+		});
+		fireEvent.change(screen.getByLabelText("Password"), {
+			target: { value: "pw" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Connect Seerr" }));
+	}
 	await screen.findByRole("link", { name: /Request in Seerr/ });
 	expect(linked).toBe(1);
 	expect(bodies).toHaveLength(2);

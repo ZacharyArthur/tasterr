@@ -1,4 +1,4 @@
-"""Auth endpoints: Plex PIN flow, local login, me, logout (SPEC §4).
+"""Auth endpoints: Plex PIN flow, credential login, me, logout (SPEC §4).
 
 Failure bodies are deliberately generic: no upstream bodies, no internal URLs,
 no user enumeration. Login attempts are logged by outcome only — credentials,
@@ -10,13 +10,14 @@ from dataclasses import dataclass
 from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tasterr.api.taste import build_seerr, schedule_history
+from tasterr.api.taste import build_jellyfin, build_seerr, schedule_history
 from tasterr.auth.cookies import clear_session_cookie, set_session_cookie
 from tasterr.auth.crypto import plex_client_identifier
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
+from tasterr.auth.jellyfin import authenticate_and_logout
 from tasterr.auth.login import (
     CONFLICT_GUIDANCE,
     AccountConflict,
@@ -27,6 +28,7 @@ from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket, mutation_rate_limit
 from tasterr.auth.sessions import revoke_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexAuthClient
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 from tasterr.db.models import Provider, User
@@ -75,8 +77,14 @@ class LocalLoginRequest(BaseModel):
     password: str
 
 
+class JellyfinLoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=320)
+    password: str = Field(max_length=4096)
+
+
 class AuthMethodsResponse(BaseModel):
     plex: bool
+    jellyfin: bool
     seerr: bool
 
 
@@ -87,13 +95,14 @@ class AuthContext:
     seerr: SeerrAuthClient | None
     pins: PinStore
     seerr_read: SeerrClient | None = None
+    jellyfin: JellyfinClient | None = None
 
 
 def get_auth_context(
     request: Request, settings: Annotated[Settings, Depends(get_settings)]
 ) -> AuthContext:
     secret = settings.tasterr_secret_key
-    if secret is None or not settings.plex_configured:
+    if secret is None or not (settings.plex_configured or settings.jellyfin_configured):
         raise HTTPException(status_code=503, detail="Authentication unavailable")
     secret_key = secret.get_secret_value()
     return AuthContext(
@@ -104,12 +113,20 @@ def get_auth_context(
         else None,
         pins=cast("PinStore", request.app.state.pin_store),
         seerr_read=build_seerr(request, settings),
+        jellyfin=build_jellyfin(request, settings),
     )
 
 
 def provider_available(settings: Settings, provider: Provider) -> bool:
-    return settings.tasterr_secret_key is not None and (
-        settings.plex_configured if provider == "plex" else settings.seerr_configured
+    return (
+        settings.tasterr_secret_key is not None
+        and (
+            {
+                "plex": settings.plex_configured,
+                "jellyfin": settings.jellyfin_configured,
+                "seerr": settings.seerr_configured,
+            }[provider]
+        )
     )
 
 
@@ -117,6 +134,7 @@ def provider_available(settings: Settings, provider: Provider) -> bool:
 def auth_methods(settings: Annotated[Settings, Depends(get_settings)]) -> AuthMethodsResponse:
     return AuthMethodsResponse(
         plex=provider_available(settings, "plex"),
+        jellyfin=provider_available(settings, "jellyfin"),
         seerr=provider_available(settings, "seerr"),
     )
 
@@ -135,6 +153,15 @@ def get_plex_auth_context(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AuthContext:
     if not provider_available(settings, "plex"):
+        raise HTTPException(status_code=503, detail="Authentication unavailable")
+    return ctx
+
+
+def get_jellyfin_auth_context(
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AuthContext:
+    if not provider_available(settings, "jellyfin"):
         raise HTTPException(status_code=503, detail="Authentication unavailable")
     return ctx
 
@@ -243,6 +270,7 @@ async def poll_plex_pin(
             plex=ctx.plex,
             server_id=settings.plex_server_id,
             plex_resources=resources,
+            jellyfin=ctx.jellyfin,
         )
     except UpstreamUnavailable as error:
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
@@ -286,11 +314,70 @@ async def local_login(
             ctx.seerr_read,
             plex=ctx.plex,
             server_id=settings.plex_server_id,
+            jellyfin=ctx.jellyfin,
         )
     except AccountConflict as error:
         raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
     _set_cookie(request, response, token)
     logger.info("auth: local login succeeded")
+    await schedule_history(request, settings, db, user.id)
+    return UserResponse.from_user(user)
+
+
+@router.post(
+    "/auth/jellyfin",
+    response_model=UserResponse,
+    dependencies=[Depends(require_same_origin), Depends(login_rate_limit)],
+)
+async def jellyfin_login(
+    payload: JellyfinLoginRequest,
+    request: Request,
+    response: Response,
+    ctx: Annotated[AuthContext, Depends(get_jellyfin_auth_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> UserResponse:
+    assert ctx.jellyfin is not None
+    try:
+        account = await authenticate_and_logout(
+            ctx.jellyfin,
+            payload.username,
+            payload.password,
+            allow_empty_password=settings.jellyfin_allow_empty_password,
+        )
+    except UpstreamRejected as error:
+        logger.info("auth: jellyfin login rejected")
+        raise HTTPException(status_code=401, detail="Sign-in failed") from error
+    except UpstreamUnavailable as error:
+        logger.warning("auth: jellyfin login unavailable")
+        raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+    login = None
+    seerr_unavailable = False
+    if ctx.seerr is not None:
+        try:
+            login = await ctx.seerr.login_jellyfin(payload.username, payload.password)
+        except UpstreamRejected:
+            logger.info("auth: jellyfin login rejected by seerr")
+        except UpstreamUnavailable:
+            seerr_unavailable = True
+    try:
+        user, token = await complete_login(
+            db,
+            ctx.secret_key,
+            ProvenAccount.jellyfin(account),
+            login,
+            ctx.seerr_read,
+            seerr_unavailable=seerr_unavailable,
+            plex=ctx.plex,
+            server_id=settings.plex_server_id,
+            jellyfin=ctx.jellyfin,
+        )
+    except AccountConflict as error:
+        raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
+    except UpstreamUnavailable as error:
+        raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+    _set_cookie(request, response, token)
+    logger.info("auth: jellyfin login succeeded")
     await schedule_history(request, settings, db, user.id)
     return UserResponse.from_user(user)
 

@@ -52,6 +52,40 @@ pytestmark = pytest.mark.live
 
 
 @pytest.mark.skipif(
+    not (
+        os.environ.get("TASTERR_LIVE_SEERR_URL")
+        and os.environ.get("TASTERR_LIVE_JELLYFIN_USERNAME")
+    ),
+    reason="Seerr URL and Jellyfin credentials required",
+)
+async def test_jellyfin_login_contract() -> None:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as http:
+        login = await SeerrAuthClient(http, URL).login_jellyfin(
+            os.environ["TASTERR_LIVE_JELLYFIN_USERNAME"],
+            os.environ.get("TASTERR_LIVE_JELLYFIN_PASSWORD", ""),
+        )
+        assert login.user.id > 0 and login.cookie.startswith("connect.sid=")
+
+
+@pytest.mark.parametrize("method", ["jellyfin", "plex"])
+async def test_disabled_media_server_login_is_refusal(method: str) -> None:
+    if not URL or os.environ.get(f"TASTERR_LIVE_{method.upper()}_LOGIN_DISABLED") != "true":
+        pytest.skip("Requires an explicitly disabled media-server login on a test Seerr")
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as http:
+        client = SeerrAuthClient(http, URL)
+        with pytest.raises(UpstreamRejected) as failure:
+            if method == "plex":
+                await client.login_plex(os.environ.get("TASTERR_LIVE_PLEX_TOKEN", "contract-token"))
+            else:
+                await client.login_jellyfin(
+                    os.environ.get("TASTERR_LIVE_JELLYFIN_USERNAME", "contract-user"),
+                    os.environ.get("TASTERR_LIVE_JELLYFIN_PASSWORD", "contract-password"),
+                )
+        assert failure.value.status_code not in (502, 503, 504)
+        print(f"Seerr disabled {method} login status: {failure.value.status_code}")
+
+
+@pytest.mark.skipif(
     not os.environ.get("TASTERR_LIVE_REFUSED_PLEX_TOKEN"),
     reason="A Plex account without access to the Seerr server is required",
 )

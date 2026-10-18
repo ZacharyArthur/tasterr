@@ -8,7 +8,7 @@ engine just cannot build vectors until the catalog exists.
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -17,12 +17,13 @@ from cryptography.fernet import InvalidToken
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tasterr.auth.crypto import decrypt_token, plex_client_identifier
+from tasterr.auth.crypto import decrypt_token, jellyfin_device_identifier, plex_client_identifier
 from tasterr.auth.login import get_link
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.plex import PlexCatalogService
 from tasterr.catalog.service import CatalogService
+from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexMediaClient
 from tasterr.clients.seerr import SeerrClient
 from tasterr.clients.tmdb import TmdbClient
@@ -30,15 +31,45 @@ from tasterr.db.io import finish_io
 from tasterr.db.models import utcnow
 from tasterr.db.runtime_settings import load_runtime_settings
 from tasterr.recommend import store
+from tasterr.recommend.jellyfin_history import read_history
 from tasterr.recommend.seed import HISTORY_THROTTLE, reserve_seed, seed_in_background
 from tasterr.recommend.service import TasteService
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
 
 logger = logging.getLogger("tasterr.taste")
-PLEX_HISTORY_INITIAL_WINDOW = timedelta(days=365)
-PLEX_HISTORY_OVERLAP = timedelta(hours=24)
-PLEX_HISTORY_WRITE_BATCH = 100
+WATCH_HISTORY_INITIAL_WINDOW = timedelta(days=365)
+WATCH_HISTORY_OVERLAP = timedelta(hours=24)
+WATCH_HISTORY_WRITE_BATCH = 100
+
+
+def _start_history_task(
+    tasks: dict[int, asyncio.Task[None]], user_id: int, coroutine: Coroutine[object, object, None]
+) -> bool:
+    try:
+        task = asyncio.create_task(coroutine)
+    except Exception:
+        coroutine.close()
+        logger.error("history: task creation failed")
+        return False
+    tasks[user_id] = task
+
+    def release(done: asyncio.Task[None]) -> None:
+        if tasks.get(user_id) is done:
+            tasks.pop(user_id, None)
+
+    task.add_done_callback(release)
+    return True
+
+
+async def _cancel_history_task(tasks: dict[int, asyncio.Task[None]], user_id: int) -> None:
+    task = tasks.get(user_id)
+    if task is None:
+        return
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    if tasks.get(user_id) is task:
+        tasks.pop(user_id, None)
 
 
 def build_taste(
@@ -103,6 +134,22 @@ def build_seerr(request: Request, settings: Settings) -> SeerrClient | None:
     )
 
 
+def build_jellyfin(request: Request, settings: Settings) -> JellyfinClient | None:
+    if (
+        not settings.jellyfin_configured
+        or settings.jellyfin_internal_url is None
+        or settings.jellyfin_api_key is None
+        or settings.tasterr_secret_key is None
+    ):
+        return None
+    return JellyfinClient(
+        request.app.state.http,
+        settings.jellyfin_internal_url,
+        settings.jellyfin_api_key.get_secret_value(),
+        jellyfin_device_identifier(settings.tasterr_secret_key.get_secret_value()),
+    )
+
+
 def schedule_seed(
     request: Request,
     settings: Settings,
@@ -157,22 +204,9 @@ def schedule_seed(
         finally:
             seeding.discard(user_id)
 
-    coroutine = run_seed()
-    try:
-        task = asyncio.create_task(coroutine)
-    except Exception:
-        coroutine.close()
-        seeding.discard(user_id)
-        logger.error("seed: task creation failed")
-        return
     tasks = cast("dict[int, asyncio.Task[None]]", state.seed_tasks)
-    tasks[user_id] = task
-
-    def release(done: asyncio.Task[None]) -> None:
-        if tasks.get(user_id) is done:
-            tasks.pop(user_id, None)
-
-    task.add_done_callback(release)
+    if not _start_history_task(tasks, user_id, run_seed()):
+        seeding.discard(user_id)
 
 
 def schedule_plex_history(
@@ -213,31 +247,79 @@ def schedule_plex_history(
         history = PlexCatalogService(plex, None, cast("Cache", state.catalog_cache))
         await import_plex_history(maker, history, secret_key, plex_token_enc, user_id)
 
-    coroutine = run()
-    try:
-        task = asyncio.create_task(coroutine)
-    except Exception:
-        coroutine.close()
-        logger.error("plex history: task creation failed")
-        return
-    tasks[user_id] = task
-
-    def release(done: asyncio.Task[None]) -> None:
-        if tasks.get(user_id) is done:
-            tasks.pop(user_id, None)
-
-    task.add_done_callback(release)
+    _start_history_task(tasks, user_id, run())
 
 
 async def cancel_plex_history(request: Request, user_id: int) -> None:
     tasks = cast("dict[int, asyncio.Task[None]]", request.app.state.plex_history_tasks)
-    task = tasks.get(user_id)
-    if task is None:
+    await _cancel_history_task(tasks, user_id)
+
+
+def schedule_jellyfin_history(
+    request: Request, settings: Settings, user_id: int, attempted_at: datetime | None
+) -> None:
+    client = build_jellyfin(request, settings)
+    if client is None or (attempted_at is not None and attempted_at > utcnow() - HISTORY_THROTTLE):
         return
-    task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
-    if tasks.get(user_id) is task:
-        tasks.pop(user_id, None)
+    state = request.app.state
+    tasks = cast("dict[int, asyncio.Task[None]]", state.jellyfin_history_tasks)
+    if user_id in tasks or user_id in state.plex_history_resets:
+        return
+    maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
+
+    async def run() -> None:
+        while user_id in state.seeding:
+            await asyncio.sleep(0.05)
+        await import_jellyfin_history(maker, client, user_id)
+
+    _start_history_task(tasks, user_id, run())
+
+
+async def cancel_jellyfin_history(request: Request, user_id: int) -> None:
+    tasks = cast("dict[int, asyncio.Task[None]]", request.app.state.jellyfin_history_tasks)
+    await _cancel_history_task(tasks, user_id)
+
+
+async def import_jellyfin_history(
+    maker: "async_sessionmaker[AsyncSession]", client: JellyfinClient, user_id: int
+) -> None:
+    cutoff = utcnow()
+    async with maker() as db:
+        link = await get_link(db, user_id, "jellyfin")
+        if link is None or (
+            link.sync_attempted_at is not None
+            and link.sync_attempted_at > cutoff - HISTORY_THROTTLE
+        ):
+            return
+        synced_at = link.sync_synced_at
+        try:
+            await finish_io(db.commit())
+            link.sync_attempted_at = cutoff
+            await finish_io(db.commit())
+            start = (
+                cutoff - WATCH_HISTORY_INITIAL_WINDOW
+                if synced_at is None
+                else synced_at - WATCH_HISTORY_OVERLAP
+            )
+            result = await read_history(client, link.external_id, start, cutoff)
+            watches = list(result.watches.items())
+            for offset in range(0, len(watches), WATCH_HISTORY_WRITE_BATCH):
+                for (media_type, tmdb_id), played in watches[
+                    offset : offset + WATCH_HISTORY_WRITE_BATCH
+                ]:
+                    await store.record_signal(
+                        db, user_id, media_type, tmdb_id, "watched_jellyfin", played
+                    )
+                await finish_io(db.commit())
+            if result.complete:
+                link.sync_synced_at = cutoff
+                await finish_io(db.commit())
+        except asyncio.CancelledError:
+            await db.rollback()
+            raise
+        except Exception:
+            logger.error("jellyfin history: import failed")
+            await db.rollback()
 
 
 async def import_plex_history(
@@ -275,9 +357,9 @@ async def import_plex_history(
             logger.warning("plex history: session token unavailable")
             return
         start = (
-            cutoff - PLEX_HISTORY_INITIAL_WINDOW
+            cutoff - WATCH_HISTORY_INITIAL_WINDOW
             if synced_at is None
-            else synced_at - PLEX_HISTORY_OVERLAP
+            else synced_at - WATCH_HISTORY_OVERLAP
         )
         try:
             result = await history.history(
@@ -285,8 +367,8 @@ async def import_plex_history(
                 viewed_after=_unix_seconds(start),
                 viewed_before=_unix_seconds(cutoff),
             )
-            for offset in range(0, len(result.watches), PLEX_HISTORY_WRITE_BATCH):
-                for watch in result.watches[offset : offset + PLEX_HISTORY_WRITE_BATCH]:
+            for offset in range(0, len(result.watches), WATCH_HISTORY_WRITE_BATCH):
+                for watch in result.watches[offset : offset + WATCH_HISTORY_WRITE_BATCH]:
                     await store.record_signal(
                         db,
                         user_id,
@@ -314,19 +396,19 @@ def _unix_seconds(value: datetime) -> int:
 async def schedule_history(
     request: Request, settings: Settings, db: AsyncSession, user_id: int
 ) -> None:
-    if not settings.plex_configured or settings.tasterr_secret_key is None:
+    if settings.tasterr_secret_key is None:
         return
     seerr = await get_link(db, user_id, "seerr")
     plex = await get_link(db, user_id, "plex")
-    if seerr is not None:
+    jellyfin = await get_link(db, user_id, "jellyfin")
+    if seerr is not None and settings.seerr_configured:
         schedule_seed(request, settings, user_id, seerr.sync_attempted_at)
-    schedule_plex_history(
-        request,
-        settings,
-        user_id,
-        plex.sync_attempted_at if plex else None,
-        plex.credential_enc if plex else None,
-    )
+    if plex is not None and settings.plex_configured:
+        schedule_plex_history(
+            request, settings, user_id, plex.sync_attempted_at, plex.credential_enc
+        )
+    if jellyfin is not None and settings.jellyfin_configured:
+        schedule_jellyfin_history(request, settings, user_id, jellyfin.sync_attempted_at)
 
 
 @asynccontextmanager
@@ -344,10 +426,5 @@ async def history_guard(request: Request, user_id: int) -> AsyncGenerator[None]:
 
 async def cancel_seed(request: Request, user_id: int) -> None:
     tasks = cast("dict[int, asyncio.Task[None]]", request.app.state.seed_tasks)
-    task = tasks.get(user_id)
-    if task is not None:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-        if tasks.get(user_id) is task:
-            tasks.pop(user_id, None)
+    await _cancel_history_task(tasks, user_id)
     request.app.state.seeding.discard(user_id)

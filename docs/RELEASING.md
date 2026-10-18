@@ -64,26 +64,39 @@ finding only when its advisory identifier, affected surface, and concise rationa
 are recorded in the release evidence. Never copy audit output containing private
 registry coordinates or environment data into the repository.
 
-## 5. Run live Seerr and Plex contracts
+## 5. Run live Seerr, Plex, and Jellyfin contracts
 
 Create `/tmp/tasterr-live.env` inside the devcontainer with mode `600`; never place it
 under the repository. It must supply the live Seerr URL, local account email/password,
 Seerr API key, a stored Plex token accepted by Seerr, a disposable movie identifier
 that the account may request, and the owner/managed/shared Plex tokens documented in
 `backend/tests/live/test_plex_live.py`. An optional known-available movie identifier
-enables the data-dependent availability case. Then run:
+enables the data-dependent availability case. Include the Jellyfin URL, API key,
+history user id (at least two played movies and two played episodes, with distinct
+play dates per type to verify newest-first ordering), and
+`TASTERR_LIVE_JELLYFIN_DISPOSABLE_USERS=true` documented in
+`backend/tests/live/test_jellyfin_live.py`. These tests create/delete disposable
+users and deliberately lock one out; obtain operator permission before running.
+Supply Jellyfin username/password for Seerr's `/auth/jellyfin` case, and exercise
+disabled Jellyfin/Plex login statuses on a disposable Seerr configuration using the
+flags documented in the live suite. Then run:
 
 ```console
 npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/tasterr-live.env; set +a; just test-live'
 ```
 
-Mandatory Seerr cases are local auth, invalid-session status, stored-Plex-token auth,
+Mandatory Seerr cases are local auth, Jellyfin auth, disabled media-server login
+refusal statuses, invalid-session status, stored-Plex-token auth,
 availability read, request-history read, and request-as-user attribution. Mandatory
 Plex cases cover owner, managed, and shared account/resource discovery, verified TLS
 and machine identity, local-account mapping, per-row history isolation, caller-scoped
 Continue Watching, merge timestamps, and canonical TMDB GUID mapping. The request
 case creates a real Seerr request and attempts cleanup, so choose a disposable title
-and verify cleanup afterward. Only a deeper pagination, available-title, or other
+and verify cleanup afterward. Mandatory Jellyfin cases cover auth/logout, user
+policy, played movie/episode queries, series provider ids, empty passwords, account
+lockout, deleted-user 404, and two users authenticating with one shared DeviceId
+while logging out one token. Record the tested Jellyfin version and verify every
+disposable account was deleted. Only a deeper pagination, available-title, or other
 explicitly documented data-precondition case may skip. Record only upstream versions
 and generic passed/skipped case names. If retained credentials have become stale or unavailable, a
 release owner may accept a recent complete automated baseline plus a fresh integrated

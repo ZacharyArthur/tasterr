@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.auth.crypto import decrypt_token, encrypt_token
 from tasterr.auth.sessions import mint_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.jellyfin import JellyfinClient, JellyfinUser
 from tasterr.clients.plex import PlexAuthClient, PlexCloudAccount, PlexResourceAccess
 from tasterr.clients.seerr import SeerrClient, SeerrLogin
 from tasterr.db.io import finish_io
@@ -34,7 +35,11 @@ class ProvenAccount:
     external_id: str
     display_name: str
     avatar_url: str | None
-    credential: str
+    credential: str | None
+
+    @classmethod
+    def jellyfin(cls, user: JellyfinUser) -> "ProvenAccount":
+        return cls("jellyfin", user.id, user.name, None, None)
 
     @classmethod
     def seerr(cls, login: SeerrLogin) -> "ProvenAccount":
@@ -92,7 +97,9 @@ async def link_account(
         db.add(link)
     link.display_name = account.display_name
     link.avatar_url = account.avatar_url
-    link.credential_enc = encrypt_token(secret_key, account.credential)
+    link.credential_enc = (
+        encrypt_token(secret_key, account.credential) if account.credential is not None else None
+    )
     await db.flush()
     return link
 
@@ -142,9 +149,20 @@ async def derive_admin(
     plex: PlexAuthClient | None,
     server_id: str | None,
     plex_resources: list[PlexResourceAccess] | None,
+    jellyfin: JellyfinClient | None = None,
 ) -> bool:
     errored = False
     for link in links:
+        if link.provider == "jellyfin" and jellyfin is not None:
+            try:
+                jellyfin_user = await jellyfin.user(link.external_id)
+            except UpstreamUnavailable:
+                errored = True
+                continue
+            except UpstreamRejected:
+                continue
+            if jellyfin_user.policy.is_administrator and not jellyfin_user.policy.is_disabled:
+                return True
         if link.provider == "seerr" and seerr is not None:
             try:
                 upstream = await seerr.user(int(link.external_id))
@@ -183,6 +201,7 @@ async def complete_login(
     plex: PlexAuthClient | None = None,
     server_id: str | None = None,
     plex_resources: list[PlexResourceAccess] | None = None,
+    jellyfin: JellyfinClient | None = None,
 ) -> tuple[User, str]:
     user = await resolve_user(
         db, secret_key, account, seerr_login, seerr_unavailable=seerr_unavailable
@@ -198,9 +217,15 @@ async def complete_login(
         plex=plex,
         server_id=server_id,
         plex_resources=plex_resources,
+        jellyfin=jellyfin,
     )
     display = next(
-        (link for provider in ("seerr", "plex") for link in links if link.provider == provider),
+        (
+            link
+            for provider in ("seerr", "plex", "jellyfin")
+            for link in links
+            if link.provider == provider
+        ),
         None,
     )
     user.is_admin = is_admin

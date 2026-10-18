@@ -64,6 +64,8 @@ def _sentineled_settings() -> Settings:
         "plex_server_id": f"{SENTINEL}-plex-server-id",
         "tasterr_hide_library_items": True,
         "tasterr_excluded_service_ids": [8],
+        "jellyfin_allow_empty_password": True,
+        "jellyfin_internal_url": "http://jellyfin-sentinel:8096",
     }
     for name, field in Settings.model_fields.items():
         if name in CLIENT_SAFE_FIELDS or name in values:

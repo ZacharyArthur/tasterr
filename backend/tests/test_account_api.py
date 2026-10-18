@@ -513,10 +513,12 @@ def test_new_links_evaluate_history_triggers(
 
 
 @pytest.mark.parametrize("deleting", [False, True])
+@pytest.mark.parametrize("provider", ["plex", "jellyfin"])
 async def test_unlink_and_delete_cancel_syncs_and_block_home_scheduling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     deleting: bool,
+    provider: str,
 ) -> None:
     from tests.test_browse_api import FakeCatalog
 
@@ -532,6 +534,8 @@ async def test_unlink_and_delete_cancel_syncs_and_block_home_scheduling(
     harness.app.dependency_overrides[get_availability] = lambda: AvailabilityService(None, Cache())
     settings = cast(Settings, harness.app.dependency_overrides[get_settings]())
     settings.tmdb_api_key = SecretStr("tmdb-key")
+    settings.jellyfin_internal_url = "http://jellyfin"
+    settings.jellyfin_api_key = SecretStr("key")
     scheduled: list[object] = []
     reservations: list[int] = []
 
@@ -544,6 +548,7 @@ async def test_unlink_and_delete_cancel_syncs_and_block_home_scheduling(
 
     monkeypatch.setattr("tasterr.api.taste.seed_in_background", unexpected)
     monkeypatch.setattr("tasterr.api.taste.import_plex_history", unexpected)
+    monkeypatch.setattr("tasterr.api.taste.import_jellyfin_history", unexpected)
     monkeypatch.setattr("tasterr.api.taste.reserve_seed", record_reservation)
     cancelled = asyncio.Event()
     async with (
@@ -560,6 +565,20 @@ async def test_unlink_and_delete_cancel_syncs_and_block_home_scheduling(
         await asyncio.gather(
             *harness.app.state.seed_tasks.values(),
             *harness.app.state.plex_history_tasks.values(),
+            *harness.app.state.jellyfin_history_tasks.values(),
+        )
+        if provider == "jellyfin":
+            async with harness.app.state.sessionmaker() as db:
+                db.add(
+                    LinkedAccount(
+                        user_id=1, provider="jellyfin", external_id="a" * 32, display_name="Viewer"
+                    )
+                )
+                await db.commit()
+        tasks = (
+            harness.app.state.plex_history_tasks
+            if provider == "plex"
+            else harness.app.state.jellyfin_history_tasks
         )
         scheduled.clear()
         reservations.clear()
@@ -569,23 +588,24 @@ async def test_unlink_and_delete_cancel_syncs_and_block_home_scheduling(
                 await asyncio.Event().wait()
             except asyncio.CancelledError:
                 assert 1 in harness.app.state.plex_history_resets
-                harness.app.state.plex_history_tasks.pop(1)
+                tasks.pop(1)
                 assert (await client.get("/api/v1/home")).status_code == 200
                 assert harness.app.state.seed_tasks == {}
                 assert harness.app.state.plex_history_tasks == {}
+                assert harness.app.state.jellyfin_history_tasks == {}
                 assert scheduled == []
                 assert reservations == []
                 cancelled.set()
                 raise
 
         task = asyncio.create_task(hanging())
-        harness.app.state.plex_history_tasks[1] = task
+        tasks[1] = task
         await asyncio.sleep(0)
         if deleting:
             result = await client.post("/api/v1/account/delete", json={"confirm": "Viewer"})
         else:
             result = await client.post(
-                "/api/v1/account/links/plex/unlink", json={"delete_history": True}
+                f"/api/v1/account/links/{provider}/unlink", json={"delete_history": True}
             )
         assert result.status_code == 204
         assert cancelled.is_set() and task.cancelled()

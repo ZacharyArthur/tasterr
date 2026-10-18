@@ -8,6 +8,7 @@ import {
 } from "../lib/api";
 import { captureSession, isSessionCurrent } from "../lib/auth";
 import { AccountDialog } from "./AccountDialog";
+import { JellyfinCredentialsForm } from "./JellyfinCredentialsForm";
 
 export function ConnectSeerr({
 	onConnected,
@@ -20,6 +21,7 @@ export function ConnectSeerr({
 	const account = useQuery({ queryKey: ["account"], queryFn: getAccount });
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
+	const [jellyfinExpanded, setJellyfinExpanded] = useState(false);
 	const link = useMutation({
 		mutationFn: linkSeerr,
 		onMutate: () => captureSession(cache),
@@ -34,6 +36,9 @@ export function ConnectSeerr({
 	const plex = account.data?.providers.some(
 		(provider) =>
 			provider.provider === "plex" && provider.linked && provider.available,
+	);
+	const jellyfin = account.data?.providers.some(
+		(provider) => provider.provider === "jellyfin" && provider.available,
 	);
 	function connect(body: SeerrLinkBody) {
 		link.mutate(body, {
@@ -55,45 +60,64 @@ export function ConnectSeerr({
 					Use my Plex account
 				</button>
 			)}
-			<form
-				className="flex flex-col gap-3"
-				onSubmit={(event) => {
-					event.preventDefault();
-					connect({ method: "local", email, password });
-				}}
-			>
-				<label>
-					Email
-					<input
-						className="min-h-11 w-full rounded border border-app-border bg-app-surface px-3"
-						type="email"
-						autoComplete="email"
-						maxLength={320}
-						required
-						value={email}
-						onChange={(event) => setEmail(event.target.value)}
-					/>
-				</label>
-				<label>
-					Password
-					<input
-						className="min-h-11 w-full rounded border border-app-border bg-app-surface px-3"
-						type="password"
-						autoComplete="current-password"
-						maxLength={4096}
-						required
-						value={password}
-						onChange={(event) => setPassword(event.target.value)}
-					/>
-				</label>
+			{jellyfin && (
 				<button
-					type="submit"
+					type="button"
+					aria-expanded={jellyfinExpanded}
 					disabled={link.isPending}
-					className="min-h-11 rounded bg-app-accent px-4 py-2 text-white"
+					className="min-h-11 rounded border border-app-border px-4"
+					onClick={() => setJellyfinExpanded(!jellyfinExpanded)}
 				>
-					Connect Seerr
+					Use Jellyfin credentials
 				</button>
-			</form>
+			)}
+			{jellyfinExpanded ? (
+				<JellyfinCredentialsForm
+					onSubmit={(body) => connect({ method: "jellyfin", ...body })}
+					pending={link.isPending}
+					submitLabel="Connect Seerr"
+				/>
+			) : (
+				<form
+					className="flex flex-col gap-3"
+					onSubmit={(event) => {
+						event.preventDefault();
+						connect({ method: "local", email, password });
+					}}
+				>
+					<label>
+						Email
+						<input
+							className="min-h-11 w-full rounded border border-app-border bg-app-surface px-3"
+							type="email"
+							autoComplete="email"
+							maxLength={320}
+							required
+							value={email}
+							onChange={(event) => setEmail(event.target.value)}
+						/>
+					</label>
+					<label>
+						Password
+						<input
+							className="min-h-11 w-full rounded border border-app-border bg-app-surface px-3"
+							type="password"
+							autoComplete="current-password"
+							maxLength={4096}
+							required
+							value={password}
+							onChange={(event) => setPassword(event.target.value)}
+						/>
+					</label>
+					<button
+						type="submit"
+						disabled={link.isPending}
+						className="min-h-11 rounded bg-app-accent px-4 py-2 text-white"
+					>
+						Connect Seerr
+					</button>
+				</form>
+			)}
 			{link.isError && (
 				<p role="alert">
 					{link.error instanceof ApiError

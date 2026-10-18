@@ -970,7 +970,7 @@ def test_logins_schedule_the_cold_start_seed(
     assert local.status_code == 200
     assert plex.status_code == 200
     assert scheduled == [1, 1]  # same Seerr user -> same Tasterr user row
-    assert plex_scheduled == [(1, False), (1, True)]
+    assert plex_scheduled == [(1, True)]
 
 
 def test_plex_account_read_failure_is_generic(

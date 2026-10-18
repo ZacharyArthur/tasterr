@@ -12,16 +12,17 @@ from tests.test_account_api import LOCAL
 from tests.test_auth_api import PLEX_TOKEN, SECRET, _harness
 from tests.test_recommend_seed import _taste
 
-from tasterr.api.taste import import_plex_history
+from tasterr.api.taste import import_jellyfin_history, import_plex_history
 from tasterr.auth.crypto import encrypt_token
 from tasterr.auth.login import get_link
 from tasterr.catalog.plex import PlexCatalogService, PlexHistoryResult
+from tasterr.clients.jellyfin import JellyfinClient, JellyfinItems
 from tasterr.clients.seerr import SeerrClient, SeerrHistoricalRequest
-from tasterr.db.models import Profile, Provider, Signal, User
+from tasterr.db.models import LinkedAccount, Profile, Provider, Signal, User
 from tasterr.recommend.seed import seed_in_background
 
 
-@pytest.mark.parametrize("provider", ["plex", "seerr"])
+@pytest.mark.parametrize("provider", ["plex", "seerr", "jellyfin"])
 @pytest.mark.parametrize("action", ["unlink", "delete", "reset"])
 async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: Provider, action: str
@@ -49,6 +50,10 @@ async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
             await self.read()
             raise AssertionError("unreachable")
 
+        async def played_items(self, _user_id: str, _kind: str, _offset: int) -> JellyfinItems:
+            await self.read()
+            raise AssertionError("unreachable")
+
     async def no_restart(*_args: object) -> None:
         pass
 
@@ -69,6 +74,13 @@ async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
         await asyncio.gather(*state.seed_tasks.values(), *state.plex_history_tasks.values())
         maker = state.sessionmaker
         async with maker() as db:
+            if provider == "jellyfin":
+                db.add(
+                    LinkedAccount(
+                        user_id=1, provider="jellyfin", external_id="a" * 32, display_name="Viewer"
+                    )
+                )
+                await db.flush()
             link = await get_link(db, 1, provider)
             assert link is not None
             link.sync_attempted_at = None
@@ -82,11 +94,14 @@ async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
                 1,
             )
             tasks = state.plex_history_tasks
-        else:
+        elif provider == "seerr":
             coroutine = seed_in_background(
                 maker, _taste, cast(SeerrClient, HangingHistory()), state.seeding, 1
             )
             tasks = state.seed_tasks
+        else:
+            coroutine = import_jellyfin_history(maker, cast(JellyfinClient, HangingHistory()), 1)
+            tasks = state.jellyfin_history_tasks
         task = asyncio.create_task(coroutine)
         tasks[1] = task
         await started.wait()

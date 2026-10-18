@@ -30,3 +30,7 @@ def decrypt_token(secret_key: str, ciphertext: str) -> str:
 def plex_client_identifier(secret_key: str) -> str:
     digest = hashlib.sha256(b"tasterr:plex-client-identifier:" + secret_key.encode()).hexdigest()
     return str(uuid.uuid5(uuid.NAMESPACE_URL, digest))
+
+
+def jellyfin_device_identifier(secret_key: str) -> str:
+    return hashlib.sha256(b"tasterr:jellyfin-device:" + secret_key.encode()).hexdigest()

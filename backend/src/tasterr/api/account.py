@@ -15,16 +15,25 @@ from tasterr.api.auth import (
     PIN_NOT_FOUND,
     UPSTREAM_DOWN,
     AuthContext,
+    JellyfinLoginRequest,
     PinCreateResponse,
     PinPollRequest,
+    get_jellyfin_auth_context,
     get_plex_auth_context,
     get_seerr_auth_context,
     login_rate_limit,
     provider_available,
 )
-from tasterr.api.taste import cancel_plex_history, cancel_seed, history_guard, schedule_history
+from tasterr.api.taste import (
+    cancel_jellyfin_history,
+    cancel_plex_history,
+    cancel_seed,
+    history_guard,
+    schedule_history,
+)
 from tasterr.auth.crypto import decrypt_token
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
+from tasterr.auth.jellyfin import authenticate_and_logout
 from tasterr.auth.login import (
     CONFLICT_GUIDANCE,
     AccountConflict,
@@ -46,6 +55,7 @@ Member = Annotated[AuthedSession, Depends(require_session)]
 Config = Annotated[Settings, Depends(get_settings)]
 Auth = Annotated[AuthContext, Depends(get_plex_auth_context)]
 SeerrAuth = Annotated[AuthContext, Depends(get_seerr_auth_context)]
+JellyfinAuth = Annotated[AuthContext, Depends(get_jellyfin_auth_context)]
 
 
 class AccountProvider(BaseModel):
@@ -66,7 +76,8 @@ class LinkPollResponse(BaseModel):
 
 
 class SeerrLinkBody(BaseModel):
-    method: Literal["plex", "local"]
+    method: Literal["plex", "jellyfin", "local"]
+    username: str = Field(default="", max_length=320)
     email: str = Field(default="", max_length=320)
     password: str = Field(default="", max_length=4096)
 
@@ -98,7 +109,7 @@ async def account_summary(authed: Member, db: Db, settings: Config) -> AccountRe
                     for other in links
                 ),
             )
-            for provider in ("plex", "seerr")
+            for provider in ("plex", "jellyfin", "seerr")
             if (link := next((item for item in links if item.provider == provider), None))
             is not None
             or provider_available(settings, provider)
@@ -222,6 +233,12 @@ async def link_seerr(
     try:
         if payload.method == "local":
             login = await ctx.seerr.login_local(payload.email, payload.password)
+        elif payload.method == "jellyfin":
+            if not provider_available(settings, "jellyfin"):
+                raise HTTPException(status_code=503, detail="Authentication unavailable")
+            if not payload.password and not settings.jellyfin_allow_empty_password:
+                raise UpstreamRejected(401)
+            login = await ctx.seerr.login_jellyfin(payload.username, payload.password)
         else:
             plex = await get_link(db, authed.user.id, "plex")
             if plex is None or plex.credential_enc is None:
@@ -235,6 +252,40 @@ async def link_seerr(
         logger.info("account: link seerr unavailable")
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
     await _save_link(request, db, settings, authed, ctx, ProvenAccount.seerr(login))
+
+
+@router.post(
+    "/account/links/jellyfin",
+    status_code=204,
+    dependencies=[
+        Depends(require_same_origin),
+        Depends(mutation_rate_limit),
+        Depends(login_rate_limit),
+    ],
+)
+async def link_jellyfin(
+    payload: JellyfinLoginRequest,
+    authed: Member,
+    ctx: JellyfinAuth,
+    db: Db,
+    settings: Config,
+    request: Request,
+) -> None:
+    assert ctx.jellyfin is not None
+    try:
+        user = await authenticate_and_logout(
+            ctx.jellyfin,
+            payload.username,
+            payload.password,
+            allow_empty_password=settings.jellyfin_allow_empty_password,
+        )
+    except UpstreamRejected as error:
+        logger.info("account: link jellyfin refused")
+        raise HTTPException(status_code=401, detail="Sign-in failed") from error
+    except UpstreamUnavailable as error:
+        logger.info("account: link jellyfin unavailable")
+        raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+    await _save_link(request, db, settings, authed, ctx, ProvenAccount.jellyfin(user))
 
 
 @router.post(
@@ -257,11 +308,12 @@ async def unlink_account(
     # Release the auth read before waiting, so it cannot block the current writer's commit.
     await db.commit()
     async with history_guard(request, user_id):
-        await (
-            cancel_seed(request, user_id)
-            if provider == "seerr"
-            else cancel_plex_history(request, user_id)
-        )
+        if provider == "seerr":
+            await cancel_seed(request, user_id)
+        elif provider == "plex":
+            await cancel_plex_history(request, user_id)
+        else:
+            await cancel_jellyfin_history(request, user_id)
         await db.execute(text("BEGIN IMMEDIATE"))
         links = (
             await db.scalars(select(LinkedAccount).where(LinkedAccount.user_id == user_id))
@@ -284,7 +336,11 @@ async def unlink_account(
                 delete(Signal).where(
                     Signal.user_id == user_id,
                     Signal.kind
-                    == ("seed_request_history" if provider == "seerr" else "watched_plex"),
+                    == {
+                        "seerr": "seed_request_history",
+                        "plex": "watched_plex",
+                        "jellyfin": "watched_jellyfin",
+                    }[provider],
                 )
             )
             await invalidate_profile(db, user_id)
@@ -315,6 +371,7 @@ async def delete_account(
     async with history_guard(request, user_id):
         await cancel_seed(request, user_id)
         await cancel_plex_history(request, user_id)
+        await cancel_jellyfin_history(request, user_id)
         await db.execute(delete(User).where(User.id == user_id))
         await db.commit()
         logger.info("account: delete succeeded")
