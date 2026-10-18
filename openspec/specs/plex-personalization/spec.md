@@ -8,7 +8,10 @@ and bounded background history synchronization for personalized experiences.
 
 ### Requirement: Advertised Plex server connections are verified before use
 
-Resource discovery SHALL request HTTPS and relay connection data, retain at most
+Resource discovery SHALL request HTTPS and relay connection data. When
+`PLEX_SERVER_ID` is set it SHALL retain only the resource whose client identifier
+equals it for both history and Continue Watching; otherwise it SHALL
+retain at most
 four Plex Media Server resources in deterministic owned-first, machine-identifier
 order. For each resource, the backend SHALL retain only connections that pass the
 existing URL validation, partition them into local, remote-direct, and relay
@@ -86,6 +89,18 @@ response SHALL be used.
 
 - **WHEN** resource discovery returns more than four accessible PMS devices
 - **THEN** the same first four owned-first, machine-id-sorted resources are used for the same response on every run
+
+#### Scenario: Configured server pins discovery
+
+- **WHEN** `PLEX_SERVER_ID` is set and the account can see that server and others
+- **THEN** only the configured server is probed and read; the others are ignored
+
+#### Scenario: Configured server absent from resources
+
+- **WHEN** `PLEX_SERVER_ID` is set and the account's resources do not include it
+- **THEN** no PMS read runs, history and Continue Watching degrade to nothing, and
+  the history success watermark does not advance, so the first full import still
+  runs once the server becomes visible
 
 #### Scenario: Failed account validation stops sibling discovery
 

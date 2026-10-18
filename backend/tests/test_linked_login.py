@@ -17,7 +17,7 @@ from tasterr.auth.login import (
     resolve_user,
 )
 from tasterr.auth.sessions import resolve_session, revoke_session
-from tasterr.clients.plex import PlexCloudAccount
+from tasterr.clients.plex import PlexAuthClient, PlexCloudAccount, PlexResourceAccess
 from tasterr.clients.seerr import SeerrClient, SeerrLogin, SeerrUser
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
@@ -158,3 +158,102 @@ async def test_plex_only_display_fallback(maker: async_sessionmaker[AsyncSession
     async with maker() as db:
         user, _ = await complete_login(db, SECRET, PLEX, None, None)
         assert (user.display_name, user.avatar_url) == ("Plex name", "thumb")
+
+
+@pytest.mark.parametrize(
+    "result,previous,expected",
+    [
+        (True, False, True),
+        (False, True, False),
+        (401, True, False),
+        (500, True, False),
+        (302, True, False),
+        (502, True, True),
+        (503, True, True),
+        (504, True, True),
+        (503, False, False),
+        ("transport", True, True),
+        ("timeout", True, True),
+        ("malformed", True, False),
+        ("invalid-json", True, False),
+        ("absent", True, False),
+    ],
+)
+async def test_plex_admin_resource_classification_and_dormant_seerr(
+    maker: async_sessionmaker[AsyncSession],
+    result: bool | int | str,
+    previous: bool,
+    expected: bool,
+) -> None:
+    async with maker() as db:
+        user = await resolve_user(db, SECRET, PLEX, SEERR)
+        user.is_admin = previous
+        await db.commit()
+        calls = 0
+
+        async def response(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            assert request.url.host == "plex.tv" and request.url.path == "/api/v2/resources"
+            assert request.headers["x-plex-token"] == "token"
+            assert not db.dirty and not db.new
+            async with maker() as observer:
+                observer.add(User(display_name="independent writer"))
+                await observer.commit()
+            if result == "transport":
+                raise httpx.ConnectError("unavailable")
+            if result == "timeout":
+                raise httpx.ReadTimeout("unavailable")
+            if result == "malformed":
+                return httpx.Response(200, json={"unexpected": "body"})
+            if result == "invalid-json":
+                return httpx.Response(200, text="invalid")
+            if result == "absent":
+                return httpx.Response(200, json=[])
+            if type(result) is int:
+                return httpx.Response(result)
+            return httpx.Response(200, json=[{"clientIdentifier": "pinned", "owned": result}])
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as http:
+            user, _ = await complete_login(
+                db,
+                SECRET,
+                PLEX,
+                None,
+                None,
+                plex=PlexAuthClient(http, "client"),
+                server_id="pinned",
+            )
+        assert calls == 1
+        assert user.is_admin is expected
+
+
+@pytest.mark.parametrize("owned,seerr_status", [(True, 503), (False, 200), (False, 503)])
+@pytest.mark.parametrize("previous", [False, True])
+async def test_any_admin_grant_wins_over_outage(
+    maker: async_sessionmaker[AsyncSession],
+    owned: bool,
+    seerr_status: int,
+    previous: bool,
+) -> None:
+    async with maker() as db:
+        existing = await resolve_user(db, SECRET, PLEX, SEERR)
+        existing.is_admin = previous
+        await db.commit()
+
+        def response(request: httpx.Request) -> httpx.Response:
+            assert request.url.host == "seerr"
+            return httpx.Response(seerr_status, json={"id": 7, "permissions": 2})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as http:
+            user, _ = await complete_login(
+                db,
+                SECRET,
+                PLEX,
+                None,
+                SeerrClient(http, "http://seerr", "key"),
+                plex=PlexAuthClient(http, "client"),
+                server_id="pinned",
+                plex_resources=[PlexResourceAccess(clientIdentifier="pinned", owned=owned)],
+            )
+        assert user.is_admin is (owned or seerr_status == 200 or previous)

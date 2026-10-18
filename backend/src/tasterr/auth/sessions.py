@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.db.models import User, UserSession, utcnow
 
 SESSION_TTL = timedelta(days=30)
+SESSION_ABSOLUTE_TTL = timedelta(days=90)
 # Persist the slide at most hourly: ±1h precision on a 30-day window is
 # immaterial and avoids a DB write on every authenticated request.
 SLIDE_AFTER = timedelta(hours=1)
@@ -69,14 +70,15 @@ async def resolve_session(db: AsyncSession, token: str) -> ResolvedSession | Non
     session, user = row[0], row[1]
 
     now = utcnow()
-    if session.expires_at <= now:
+    absolute_expiry = session.created_at + SESSION_ABSOLUTE_TTL
+    if min(session.expires_at, absolute_expiry) <= now:
         await db.delete(session)
         await db.commit()
         return None
     slid = now - session.last_seen_at >= SLIDE_AFTER
     if slid:
         session.last_seen_at = now
-        session.expires_at = now + SESSION_TTL
+        session.expires_at = min(now + SESSION_TTL, absolute_expiry)
         await db.commit()
     return ResolvedSession(session=session, user=user, slid=slid)
 
@@ -88,5 +90,10 @@ async def revoke_session(db: AsyncSession, session: UserSession) -> None:
 
 async def sweep_expired(db: AsyncSession) -> None:
     """Boot-time cleanup; per-request expiry handling covers the steady state."""
-    await db.execute(delete(UserSession).where(UserSession.expires_at <= utcnow()))
+    now = utcnow()
+    await db.execute(
+        delete(UserSession).where(
+            (UserSession.expires_at <= now) | (UserSession.created_at <= now - SESSION_ABSOLUTE_TTL)
+        )
+    )
     await db.commit()

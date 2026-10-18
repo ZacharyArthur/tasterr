@@ -48,7 +48,7 @@ async def get_home(
     await schedule_history(request, settings, db, authed.user.id)
     plex: PlexCatalogService | None = None
     plex_account_token: SecretStr | None = None
-    link = await get_link(db, authed.user.id, "plex") if settings.seerr_configured else None
+    link = await get_link(db, authed.user.id, "plex") if settings.plex_configured else None
     encrypted = link.credential_enc if link else None
     secret = settings.tasterr_secret_key
     if (
@@ -67,6 +67,7 @@ async def get_home(
                     request.app.state.http,
                     plex_client_identifier(secret_key),
                     max_connection_probes=settings.tasterr_plex_max_connection_probes,
+                    server_id=settings.plex_server_id,
                 ),
                 catalog,
                 request.app.state.catalog_cache,

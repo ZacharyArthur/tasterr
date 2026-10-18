@@ -10,7 +10,8 @@ preferences, with validated defaults, explicit overrides and safe public respons
 
 Application deployment settings SHALL be loaded via a pydantic-settings model.
 Secrets and connection values (`TMDB_API_KEY`, `SEERR_INTERNAL_URL`,
-`SEERR_EXTERNAL_URL`, `SEERR_API_KEY`, `TASTERR_SECRET_KEY`, `DATABASE_PATH`, bind
+`SEERR_EXTERNAL_URL`, `SEERR_API_KEY`, `PLEX_SERVER_ID`, `TASTERR_SECRET_KEY`,
+`DATABASE_PATH`, bind
 host/port) SHALL come from the environment only — never from the database, never
 editable via any API. The separate DB-backed runtime preferences SHALL contain no
 deployment-setting, secret, token, cookie, credential, or internal/external URL
@@ -28,6 +29,11 @@ field.
 #### Scenario: Runtime settings cannot override deployment settings
 - **WHEN** runtime preferences are read from or written to the database
 - **THEN** no deployment setting or secret value can be represented or changed
+
+#### Scenario: Plex server id is validated
+- **WHEN** `PLEX_SERVER_ID` is set to an empty value or one containing characters
+  other than letters, digits, and hyphens, or longer than 64 characters
+- **THEN** settings validation fails at boot instead of disabling the gate silently
 
 ### Requirement: PublicConfig projection contains no secrets
 

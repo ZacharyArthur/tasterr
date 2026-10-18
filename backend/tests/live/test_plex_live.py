@@ -25,6 +25,7 @@ from tasterr.clients.errors import UpstreamError
 from tasterr.clients.plex import (
     PRODUCT,
     RESOURCES_URL,
+    PlexAuthClient,
     PlexCloudAccount,
     PlexMediaClient,
     PlexPmsItem,
@@ -46,6 +47,21 @@ requires_roles = pytest.mark.skipif(
     not all(token for _role, token in TOKENS),
     reason=("TASTERR_LIVE_PLEX_OWNER_TOKEN/MANAGED_TOKEN/SHARED_TOKEN must all be set"),
 )
+
+
+@pytest.mark.parametrize("role,token", TOKENS[1:], ids=["managed", "shared"])
+async def test_non_owner_sees_pinned_server_with_owned_false(role: str, token: str) -> None:
+    pinned = os.environ.get("PLEX_SERVER_ID", "")
+    if not pinned or not token:
+        pytest.skip("PLEX_SERVER_ID and the role's live Plex token must be set")
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as http:
+        try:
+            resources = await PlexAuthClient(http, CLIENT_ID).resources(token)
+        except UpstreamError:
+            pytest.fail(f"{role} resource membership contract failed", pytrace=False)
+    matching = [resource for resource in resources if resource.client_identifier == pinned]
+    _require(len(matching) == 1, f"{role} cannot see the pinned server")
+    _require(matching[0].owned is False, f"{role} unexpectedly owns the pinned server")
 
 
 class _ResourceShape(BaseModel):

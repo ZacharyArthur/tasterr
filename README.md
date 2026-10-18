@@ -26,8 +26,10 @@ low-correlation picks keep discovery broad. These features need no Plex URL or t
 configuration: they reuse the encrypted token created by Plex sign-in, stored on
 the linked account across sign-in methods, and degrade cleanly when Plex is
 unavailable. Every member can manage
-linked accounts or delete their local Tasterr account from **Account**. Seerr
-request history syncs incrementally in the background.
+linked accounts or delete their local Tasterr account from **Account**. Seerr is
+optional with `PLEX_SERVER_ID` configured; it adds requests, availability, local
+sign-in, and incremental request-history sync. The pinned Plex server's owner is
+an administrator even without Seerr.
 
 Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
 history or Plex progress, persist household groups, or run more than one process.
@@ -43,18 +45,20 @@ history or Plex progress, persist household groups, or run more than one process
   <a href="docs/screenshots/search.jpg"><img src="docs/screenshots/search.jpg" width="49%" alt="Tasterr search results with availability"></a>
 </p>
 
-## Quick start with an existing Seerr
+## Quick start
 
-Prerequisites are Docker with Compose, a running Seerr instance, a TMDB v3 API key,
-and a Seerr API key. A shared Docker network is not required when Seerr is reachable
-through a routable LAN hostname or address.
+Prerequisites are Docker with Compose, a TMDB v3 API key, and either a Plex server
+or a running Seerr instance. A shared Docker network is not required when Seerr is
+reachable through a routable LAN hostname or address.
 
 1. Copy `.env.example` to `.env`.
-2. Set `SEERR_INTERNAL_URL` to a URL reachable from inside the Tasterr container,
+2. For Plex-only, set `PLEX_SERVER_ID` to the server's machine identifier (Plex Web
+   → Settings → General, or `/identity`) and remove the three `SEERR_*` values.
+   With Seerr, set `SEERR_INTERNAL_URL` to a URL reachable from inside the Tasterr container,
    such as `http://seerr.home.arpa:5055`. Set `SEERR_EXTERNAL_URL` to the URL
    household browsers use for Seerr.
-3. Fill `TMDB_API_KEY`, `SEERR_API_KEY`, and a randomly
-   generated `TASTERR_SECRET_KEY`.
+3. Fill `TMDB_API_KEY`, a randomly generated `TASTERR_SECRET_KEY`, and, when using
+   Seerr, `SEERR_API_KEY`.
 4. Start and verify Tasterr:
 
    ```console
@@ -63,9 +67,20 @@ through a routable LAN hostname or address.
    curl --fail http://127.0.0.1:8000/api/v1/health
    ```
 
-Open `http://127.0.0.1:8000`, sign in with an existing Seerr account, and use the
-Settings screen as a Seerr administrator to select the region, streaming services,
+Open `http://127.0.0.1:8000`, choose **Continue with Plex** or **Continue with Seerr**,
+and use the Settings screen as the pinned Plex owner or a Seerr administrator to select the region, streaming services,
 rails, theme, and accent. SQLite migrations run automatically on first boot.
+
+Setting `PLEX_SERVER_ID` restricts every Plex sign-in and link to accounts that can
+see that server, including shared and Plex Home accounts. Members without access
+lose Plex sign-in even if Seerr admitted them before. History and Continue Watching
+read only that server going forward; existing `watched_plex` signals imported from
+other servers remain until cleared or reset. Without the setting, Seerr accepting
+the Plex token remains the sign-in gate.
+
+Removing Seerr removes the bridge between sign-in methods. Before unsetting it,
+members using Seerr email/password should link Plex (or Jellyfin when available)
+from `/account`, or their next sign-in creates a new, empty Tasterr account.
 
 Compose publishes Tasterr on host loopback by default. For intentional direct LAN
 access, set `TASTERR_HTTP_PORT=8000` (or a specific LAN IP and port) in `.env` and
@@ -79,8 +94,8 @@ for Seerr on another host.
 ### Run the published image
 
 To deploy a release without cloning the repository, save this as `compose.yaml`
-and create `.env` from [`.env.example`](.env.example), using the five configuration
-values listed above. Pin the desired version from the
+and create `.env` from [`.env.example`](.env.example), using the configuration
+for your chosen sign-in method above. Pin the desired version from the
 [Tasterr GHCR package](https://github.com/users/ZacharyArthur/packages/container/package/tasterr):
 
 ```yaml
@@ -108,6 +123,7 @@ replace the `env_file` block with this explicit mapping:
 ```yaml
     environment:
       - TMDB_API_KEY
+      - PLEX_SERVER_ID
       - SEERR_INTERNAL_URL
       - SEERR_EXTERNAL_URL
       - SEERR_API_KEY

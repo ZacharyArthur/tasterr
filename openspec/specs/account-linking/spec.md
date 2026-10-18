@@ -159,7 +159,9 @@ attempt SHALL NOT be stored or logged.
 At each sign-in, `is_admin` SHALL be re-derived from every linked account the
 user holds, not only the sign-in account: a Seerr link grants admin when that
 Seerr user's permissions (read by id with the global API key) include ADMIN (bit
-2). A user SHALL be admin when any check grants it. When no check grants
+2), and, when `PLEX_SERVER_ID` is set, a Plex link grants admin when the
+link's token sees that server as `owned`. A user SHALL be admin when any check
+grants it. When no check grants
 admin, the previous `is_admin` SHALL be kept if any check errored, and SHALL
 become false only when every check completed without granting it. A check
 errors only on an outage (transport error, timeout, or HTTP 502, 503, or 504);
@@ -192,6 +194,18 @@ sign-ins.
   sign-in (for example Seerr is down for a Seerr admin who is a shared Plex user)
 - **THEN** the user's previous `is_admin` value is kept
 
+#### Scenario: Plex server owner is admin without Seerr
+
+- **WHEN** the owner of the `PLEX_SERVER_ID` server signs in on a deployment
+  without Seerr
+- **THEN** `is_admin` is true
+
+#### Scenario: Shared Plex user is not admin
+
+- **WHEN** a user whose Plex account sees the configured server as shared, not
+  owned, signs in with no other admin grant
+- **THEN** `is_admin` is false
+
 ### Requirement: Display identity follows a fixed account priority
 
 At each sign-in, the user's display name and avatar URL SHALL be refreshed from
@@ -215,8 +229,9 @@ user's initials, not an avatar image, for every user.
 
 `GET /api/v1/account` SHALL require the shared session dependency and return,
 for each provider configured on this server (a provider is configured when its
-sign-in method is currently available; in this change both Plex and Seerr sign-in
-are available exactly when Seerr and `TASTERR_SECRET_KEY` are configured), whether the caller has
+sign-in method is available as `/auth/methods` reports it: Plex when
+`PLEX_SERVER_ID` is set or Seerr is configured, Seerr when Seerr is configured,
+each also requiring `TASTERR_SECRET_KEY`), whether the caller has
 it linked and
 that link's display name and link time, plus whether unlinking is allowed. A
 provider the caller has linked but that is no longer configured SHALL also be
@@ -228,9 +243,10 @@ handles, popup, and same-origin rules); linking Seerr manually SHALL clear
 `users.seerr_unlinked_at`; Seerr via
 `POST /api/v1/account/links/seerr` with method `plex` (one step, using the
 caller's stored Plex token; 409 when the caller has no Plex link) or `local` (email and password forwarded once to
-Seerr). A link SHALL be created only when the account would be admitted by signing in
-with it at that moment (for Plex, the active Plex sign-in gate, which in this change
-is Seerr accepting the token); otherwise the attempt SHALL fail with a
+Seerr). A link-creation endpoint for a provider whose sign-in method is unavailable
+SHALL return 503 and store nothing; unlinking is never blocked by availability. A link SHALL be created only when the account would be admitted by signing in
+with it at that moment (for Plex, the active Plex sign-in gate: Seerr accepting
+the token when `PLEX_SERVER_ID` is unset); otherwise the attempt SHALL fail with a
 generic 403 and store nothing, so every link is a real way to sign in. When the admission check cannot complete
 because of an upstream outage, the attempt SHALL fail with the generic upstream
 error and store nothing. A Seerr
@@ -418,3 +434,18 @@ member SHALL still be able to unlink it.
 - **WHEN** the operator configures the provider again
 - **THEN** the member's existing link and credential work again with no action
   from them
+
+### Requirement: Plex links require access to the configured server
+
+When `PLEX_SERVER_ID` is set, linking a Plex account from the account page SHALL
+require that the account's plex.tv resources include that server, using the
+same check as Plex sign-in; otherwise the link SHALL be refused with a generic
+403 and nothing stored. Linking a Plex account SHALL be available only when Plex
+sign-in is available, and linking a Seerr account only when the Seerr sign-in
+method is available;
+otherwise the link endpoints return 503 and store nothing.
+
+#### Scenario: Plex account without server access cannot be linked
+
+- **WHEN** a member links a Plex account that cannot see the configured server
+- **THEN** the response is a generic 403 and no link or token is stored

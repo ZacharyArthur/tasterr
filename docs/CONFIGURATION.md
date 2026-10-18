@@ -17,6 +17,7 @@ or place secret values directly in a Compose file.
 | Variable | Required | Default | Purpose |
 |---|---:|---|---|
 | `TMDB_API_KEY` | For browsing | unset | TMDB v3 key used server-side for catalog reads. |
+| `PLEX_SERVER_ID` | For Plex sign-in without Seerr | unset | Plex server machine identifier (1–64 letters, digits, or hyphens). Gates Plex sign-in/linking by server membership and pins history and Continue Watching. Find it in Plex Web → Settings → General or `/identity`. Never sent to browsers. |
 | `SEERR_INTERNAL_URL` | For Seerr integration | unset | Server-only HTTP(S) base URL used for identity, availability, history, and requests. |
 | `SEERR_EXTERNAL_URL` | No | unset | Browser-visible HTTP(S) base URL for fallback “Request in Seerr” links. Embedded credentials are rejected. |
 | `SEERR_API_KEY` | For Seerr reads | unset | Server-only Seerr API key. User-attributed request writes use the member's Seerr session instead. |
@@ -30,7 +31,9 @@ or place secret values directly in a Compose file.
 | `TASTERR_HIDE_LIBRARY_ITEMS` | No | unset | Override household library hiding with `true` or `false`; locks the admin control. |
 | `TASTERR_EXCLUDED_SERVICE_IDS` | No | unset | Override subscription-service exclusions with a JSON array of up to eight unique positive TMDB provider IDs, e.g. `[8]`; `[]` explicitly clears exclusions and locks the control. |
 
-Empty or missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
+Missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
+An explicitly empty or malformed `PLEX_SERVER_ID` fails boot; omit it to use the
+Seerr gate. Seerr is optional when `PLEX_SERVER_ID` and `TASTERR_SECRET_KEY` are set.
 The proxy allowlist accepts literal IP addresses and CIDRs only; empty entries,
 hostnames, URLs, malformed networks, and wildcard trust fail boot.
 
@@ -84,8 +87,11 @@ For the default host-only or host-proxy path, start with
 LAN, first set `TASTERR_HTTP_PORT=8000` (or a specific LAN bind) and restrict the host
 firewall to the intended network. Boot upgrades SQLite to the current
 Alembic revision, expires stale sessions, and then reports health at
-`/api/v1/health`. Sign in with an existing Seerr account. Seerr's admin permission is
-re-derived on each login and controls access to Tasterr's Settings screen.
+`/api/v1/health`. Sign in with an admitted Plex account or an existing Seerr account.
+Admin grants from Seerr permissions and the pinned Plex server's ownership are
+re-derived at each sign-in and control access to Tasterr's Settings screen. Sessions
+slide for 30 days but expire absolutely 90 days after creation, requiring sign-in
+and fresh admission/admin checks.
 
 ## Runtime household settings
 
@@ -137,6 +143,21 @@ after local sign-in. Users without a Plex link perform no live Plex read.
 bounded server-side discovery and is never exposed to the browser.
 
 ## Plex-aware operation
+
+`PLEX_SERVER_ID` pins history and Continue Watching to one machine identifier.
+Find it in Plex Web → Settings → General or the server's `/identity` response.
+Every Plex sign-in and link checks membership in the plex.tv resources list;
+owners, shared users, and Plex Home users qualify without a PMS probe. Setting it
+removes Plex sign-in for members who cannot see that server, even if Seerr
+admitted them before. Without it, Seerr must accept the Plex token.
+
+Pinning applies going forward: `watched_plex` rows already imported from other
+servers stay until cleared or reset. A pinned server missing from resources yields
+no media reads and does not advance the history success watermark.
+
+Removing Seerr removes the bridge between sign-in methods. Before unsetting its
+values, members who use Seerr email/password should link Plex (or Jellyfin when
+available) from `/account`, or their next sign-in creates a new, empty Tasterr account.
 
 Plex history sync is best-effort and never blocks sign-in or Home. Tasterr evaluates
 one bounded import per user with a Plex link at most every six hours. Continue Watching is
@@ -196,11 +217,13 @@ same headers as defense-in-depth but must not weaken them.
 - TMDB unset or unavailable: health still responds, but catalog browsing reports a
   generic unavailable state until TMDB recovers or is configured.
 - Seerr unset: TMDB browsing remains available to existing sessions; availability
-  is Unknown and request controls are disabled. Seerr is still the sign-in bridge
-  in this release, so removing its configuration prevents new sign-ins.
+  is Unknown and request controls are disabled. Plex sign-in remains available with
+  `PLEX_SERVER_ID` and the secret key set; otherwise new sign-ins are unavailable.
 - Seerr temporarily down: browsing and learned recommendations continue; badges
   degrade to Unknown and request attempts fail generically or offer the validated
   external Seerr link.
+  With a pinned server, Seerr refusing the Plex token never blocks sign-in; a
+  Seerr outage blocks only a would-be new user, preserving the existing-user bridge.
 - A Seerr cookie expires: a member with a Plex link gets one silent re-authentication
   attempt with its encrypted token. Otherwise the request opens **Connect Seerr**;
   successful linking retries the original selection once.
@@ -298,8 +321,10 @@ outside the repository, restrict that file to the current user, load it only int
 the devcontainer shell, and run `just test-live`. Owner, managed, and shared Plex
 tokens are supplied as `TASTERR_LIVE_PLEX_OWNER_TOKEN`,
 `TASTERR_LIVE_PLEX_MANAGED_TOKEN`, and `TASTERR_LIVE_PLEX_SHARED_TOKEN`. All three
-are required for the five-test Plex suite; if any is unavailable, the complete suite
-skips and the release record must state that generically.
+are required for the original Plex suite; if any is unavailable, those cases skip
+and the release record must state that generically. The pinned-membership cases
+also require `PLEX_SERVER_ID` and independently check each available managed/shared
+token sees that server with `owned: false`, without probing PMS.
 
 ```console
 chmod 600 /tmp/tasterr-live.env

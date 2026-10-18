@@ -2,7 +2,9 @@
 
 ## Purpose
 TBD - created by archiving change m0-scaffold. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Multi-stage image serves the full app
 The Dockerfile SHALL build in two stages — node builds the SPA, a python:3.13-slim
 stage installs the backend with uv and serves both `/api/v1/*` and the SPA. The
@@ -16,8 +18,9 @@ runtime MUST run as a non-root user and define a healthcheck against
 
 ### Requirement: Compose example wires the stack
 
-`docker-compose.yml` SHALL start Tasterr on a Compose-managed network and reach an
-existing Seerr exclusively through `SEERR_INTERNAL_URL`, without requiring a
+`docker-compose.yml` SHALL start Tasterr on a Compose-managed network and, when
+Seerr is configured, reach it
+exclusively through `SEERR_INTERNAL_URL`, without requiring a
 pre-created external network. A separate optional override SHALL let Tasterr join an
 operator-named external network when Seerr runs on the same Docker host in another
 Compose project and service-name discovery is desired. The base example SHALL keep
@@ -59,6 +62,11 @@ require an explicit `TASTERR_HTTP_PORT` override.
   block
 - **THEN** Compose starts Tasterr only and leaves the household's existing Seerr
   lifecycle untouched
+
+#### Scenario: Plex-only deployment needs no Seerr
+
+- **WHEN** `docker compose up` runs with `PLEX_SERVER_ID` set and no Seerr values
+- **THEN** Tasterr starts, passes its healthcheck, and offers Plex sign-in
 
 ### Requirement: Env example is complete and placeholder-only
 `.env.example` SHALL list every environment variable the app reads, with
@@ -172,4 +180,3 @@ only when the effective request scheme is HTTPS after trusted-proxy processing.
 - **THEN** the response includes the one-year HSTS policy
 - **AND WHEN** the effective request scheme is direct or forwarded untrusted HTTP
 - **THEN** the response omits HSTS
-

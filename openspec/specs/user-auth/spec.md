@@ -11,11 +11,20 @@ PIN at plex.tv (product `Tasterr`, a stable client identifier) and returns an
 opaque poll handle plus the plex.tv approval URL. The handle is polled with a
 same-origin-protected `POST /api/v1/auth/plex/pin/poll` carrying
 `{pin_id: <handle>}` in the body; it reports pending until the PIN is claimed.
-Once claimed, the backend SHALL validate the Plex token against the plex.tv
-account endpoint, exchange it at Seerr `/api/v1/auth/plex`, resolve the Tasterr
-user through linked accounts (see `account-linking`), mint a Tasterr session, set
-the session cookie, and return the user. Seerr refusing the Plex account SHALL
-fail sign-in with a generic 401 and SHALL create no user, link, or session. The
+Plex sign-in SHALL be available when `PLEX_SERVER_ID` is set or Seerr is
+configured. Once claimed, the backend SHALL validate the Plex token against the
+plex.tv account endpoint and admit the account: when `PLEX_SERVER_ID` is set, only
+if the account's plex.tv resources include that server (owner, shared, and Plex
+Home users alike), checked on every sign-in; otherwise only if Seerr
+`/api/v1/auth/plex` accepts the token. When Seerr is configured the backend SHALL
+also attempt the Seerr exchange for auto-linking; with `PLEX_SERVER_ID` set, a
+Seerr refusal SHALL NOT block sign-in, and a Seerr outage SHALL block only a
+sign-in that would create a new user (see `account-linking`). An admitted account SHALL be
+resolved to a Tasterr user through linked accounts (see `account-linking`), and
+the backend SHALL mint a Tasterr session, set the session cookie, and return the
+user. A refused account SHALL get a generic 401 with no user, link, or session
+created; a server-access check that cannot complete SHALL fail closed with a
+generic upstream error. The
 Plex auth token MUST never be returned to the browser, and no `GET` endpoint
 SHALL mint a session — the poll is a POST guarded by the same-origin check so a
 cross-site page cannot trigger a session-swapping completion by top-level
@@ -29,14 +38,35 @@ navigation.
 #### Scenario: Poll after PIN is claimed
 - **WHEN** the SPA posts the handle to `/auth/plex/pin/poll` after the user
   approves the PIN at plex.tv
-- **THEN** the backend logs the user into Seerr, resolves their Tasterr user
+- **THEN** the backend admits the account, resolves their Tasterr user
   through linked accounts, mints a session, sets the session cookie, and
   responds `{status: "ok"}` with the user
 
 #### Scenario: Seerr refuses the Plex account
-- **WHEN** a claimed PIN's Plex account is rejected by Seerr
+- **WHEN** `PLEX_SERVER_ID` is unset and Seerr rejects a claimed PIN's Plex account
 - **THEN** the response is a generic 401 and no user, linked account, or session
   is created
+
+#### Scenario: Account without server access is refused
+- **WHEN** `PLEX_SERVER_ID` is set and a claimed PIN's account cannot see that
+  server
+- **THEN** the response is a generic 401 and no user, linked account, or session
+  is created, even if Seerr would accept the account
+
+#### Scenario: Existing link does not bypass the server gate
+- **WHEN** a Plex account already linked to a user loses access to the
+  configured server and signs in
+- **THEN** sign-in is refused with a generic 401
+
+#### Scenario: Seerr outage does not block a server-gated sign-in
+- **WHEN** `PLEX_SERVER_ID` is set, the account can see that server, and Seerr
+  refuses the token, or is down while the Plex account is already linked
+- **THEN** sign-in succeeds without a Seerr auto-link
+
+#### Scenario: Seerr outage blocks a first sign-in
+- **WHEN** `PLEX_SERVER_ID` is set, Seerr is configured but down, and the Plex
+  account is linked to no user
+- **THEN** sign-in fails with the generic upstream error and no user is created
 
 #### Scenario: Poll handle is opaque and single-use
 - **WHEN** a login has completed for a handle, the handle has expired, or the
@@ -76,7 +106,9 @@ the account exists.
 Sessions SHALL use a 256-bit random token delivered as an HttpOnly, `SameSite=Lax`
 cookie, marked `Secure` when the request is HTTPS (respecting proxy forwarding
 headers). Only the token's SHA-256 hash is stored. Sessions expire 30 days after
-last activity (sliding). Every login mints a fresh token; validation of an
+last activity (sliding) and SHALL never outlive 90 days from creation, whatever
+the activity, so every member signs in again at least every 90 days and the
+sign-in gate and admin derivation re-run. Every login mints a fresh token; validation of an
 expired or unknown token fails with 401 and expired rows are deleted.
 
 #### Scenario: Token is stored hashed only
@@ -95,6 +127,11 @@ expired or unknown token fails with 401 and expired rows are deleted.
 #### Scenario: Login never reuses a token
 - **WHEN** a user logs in while already holding a session cookie
 - **THEN** a brand-new token is minted (no session fixation)
+
+#### Scenario: Absolute lifetime forces a fresh sign-in
+- **WHEN** a session has been active continuously for 90 days since creation
+- **THEN** the next request fails 401, the row is deleted, and the member must
+  sign in again, re-running the server-access check and admin derivation
 
 ### Requirement: Upstream session material is protected at rest
 
@@ -193,23 +230,6 @@ logs.
 - **WHEN** login attempts exceed the configured tight limit
 - **THEN** further attempts receive 429 until the window relaxes
 
-### Requirement: Auth degrades when Seerr is unavailable or unconfigured
-When Seerr settings or `TASTERR_SECRET_KEY` are unset, login endpoints SHALL
-return 503 with a generic "authentication unavailable" error. When Seerr has an
-outage (transport error, timeout, or HTTP 502, 503, or 504, as defined in
-`account-linking`), login fails with a generic upstream-unavailable error that
-carries no upstream body or internal URL; any other Seerr error is a refusal and
-fails with the generic 401. The rest of the app (health, SPA
-serving) keeps working.
-
-#### Scenario: Auth not configured
-- **WHEN** login is attempted while Seerr or the secret key is unconfigured
-- **THEN** the response is 503 with a generic message and no configuration detail
-
-#### Scenario: Seerr down during login
-- **WHEN** Seerr times out, is unreachable, or returns 502, 503, or 504 during login
-- **THEN** the client receives a generic error, and `/api/v1/health` still responds
-
 ### Requirement: Outbound auth calls are bounded and typed
 All plex.tv and Seerr calls SHALL live in `clients/`, carry explicit timeouts,
 parse responses into typed models (unknown fields dropped), and never forward
@@ -222,8 +242,12 @@ browser headers upstream or upstream headers/bodies downstream.
 
 ### Requirement: SPA login experience
 
-The login screen SHALL offer both paths: "Sign in with Plex" and a local
-email/password form. Plex sign-in SHALL attempt to open a script-created popup
+The login screen SHALL offer exactly the sign-in methods `GET /api/v1/auth/methods`
+reports as available, as a full-width stack of rounded pill buttons in the style
+of common single-sign-on buttons, each with its service's mark as inline SVG and a
+"Continue with …" label: "Continue with Plex" and "Continue with Seerr". A method
+that needs credentials SHALL expand its email/password form in place when
+activated. Plex sign-in SHALL attempt to open a script-created popup
 context directly from the user's activation, sever that context's access to its
 opener before navigating to the backend-provided Plex approval URL, and retain
 only an in-memory handle for best-effort cleanup. The SPA SHALL poll until
@@ -282,6 +306,18 @@ the current confirmed auth state and query cache.
 
 - **WHEN** a copy operation completes after its pending PIN has expired or ended
 - **THEN** feedback from that obsolete approval flow does not reappear
+
+#### Scenario: Only configured methods are offered
+
+- **WHEN** the login screen loads on a deployment with `PLEX_SERVER_ID` set and
+  Seerr unconfigured
+- **THEN** only "Continue with Plex" is shown
+
+#### Scenario: Credential form expands in place
+
+- **WHEN** the user activates "Continue with Seerr"
+- **THEN** its email/password form expands below the button without leaving the
+  screen
 
 #### Scenario: Local login from the SPA
 
@@ -353,3 +389,45 @@ or influence cookie security.
 #### Scenario: Untrusted forwarding headers are ignored
 - **WHEN** a non-allowlisted peer supplies forwarded client IP or scheme headers
 - **THEN** auth uses the socket peer and direct request scheme instead
+
+### Requirement: Sign-in methods are advertised without secrets
+
+`GET /api/v1/auth/methods` SHALL be unauthenticated by explicit decision (the
+login screen needs it before a session exists) and SHALL return only booleans for
+each sign-in method: `plex` (true when `PLEX_SERVER_ID` is set or Seerr is
+configured) and `seerr` (true when Seerr is configured), each also requiring
+`TASTERR_SECRET_KEY`. It SHALL NOT return URLs, server ids, keys, or any other
+configuration, and SHALL perform no upstream call.
+
+#### Scenario: Methods reflect configuration
+
+- **WHEN** only `PLEX_SERVER_ID` and the secret key are configured
+- **THEN** the response is `plex: true, seerr: false`
+
+#### Scenario: Methods carry no configuration detail
+
+- **WHEN** every integration is configured and the response is inspected
+- **THEN** it contains only method booleans and no URL, id, or secret
+
+### Requirement: Auth degrades when no sign-in method is available
+
+When `TASTERR_SECRET_KEY` is unset or no sign-in method is available, sign-in
+endpoints SHALL return 503 with a generic "authentication unavailable" error, and
+an endpoint for an unavailable method SHALL do the same. When an upstream needed
+for a sign-in has an outage (transport error, timeout, or HTTP 502, 503, or 504,
+as defined in `account-linking`), that sign-in SHALL fail with a generic
+upstream-unavailable error that carries no upstream body or internal URL. Seerr
+SHALL NOT be required for Plex sign-in when `PLEX_SERVER_ID` is set. The rest of
+the app (health, SPA serving) keeps working.
+
+#### Scenario: Auth not configured
+- **WHEN** sign-in is attempted with no secret key or no available method
+- **THEN** the response is 503 with a generic message and no configuration detail
+
+#### Scenario: Plex sign-in works without Seerr
+- **WHEN** `PLEX_SERVER_ID` and the secret key are set and Seerr is unconfigured
+- **THEN** Plex sign-in is available and Seerr local sign-in returns 503
+
+#### Scenario: Upstream down during sign-in
+- **WHEN** plex.tv or Seerr has an outage during a sign-in that needs it
+- **THEN** the client receives a generic error, and `/api/v1/health` still responds

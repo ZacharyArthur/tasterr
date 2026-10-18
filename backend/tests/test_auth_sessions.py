@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.factories import user_with_links
 
 from tasterr.auth.sessions import (
+    SESSION_ABSOLUTE_TTL,
     SESSION_TTL,
     hash_token,
     mint_session,
@@ -127,6 +128,28 @@ async def test_slide_is_throttled_below_threshold(db: AsyncSession) -> None:
     assert resolved.slid is False
     assert resolved.session.last_seen_at == recent
     assert resolved.session.expires_at == expires
+
+
+async def test_absolute_expiry_deletes_active_session(db: AsyncSession) -> None:
+    user = await _user(db)
+    token = await mint_session(db, user.id)
+    row = (await db.scalars(select(UserSession))).one()
+    row.created_at = utcnow() - SESSION_ABSOLUTE_TTL
+    await db.commit()
+    assert await resolve_session(db, token) is None
+    assert await _session_count(db) == 0
+
+
+async def test_slide_stops_at_absolute_expiry(db: AsyncSession) -> None:
+    user = await _user(db)
+    token = await mint_session(db, user.id)
+    row = (await db.scalars(select(UserSession))).one()
+    row.created_at = utcnow() - SESSION_ABSOLUTE_TTL + timedelta(hours=3)
+    row.last_seen_at = utcnow() - timedelta(hours=2)
+    await db.commit()
+    resolved = await resolve_session(db, token)
+    assert resolved is not None and resolved.slid
+    assert resolved.session.expires_at == row.created_at + SESSION_ABSOLUTE_TTL
 
 
 async def test_every_login_mints_a_fresh_token(db: AsyncSession) -> None:

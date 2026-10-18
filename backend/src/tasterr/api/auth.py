@@ -29,7 +29,7 @@ from tasterr.auth.sessions import revoke_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.plex import PlexAuthClient
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
-from tasterr.db.models import User
+from tasterr.db.models import Provider, User
 from tasterr.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -75,11 +75,16 @@ class LocalLoginRequest(BaseModel):
     password: str
 
 
+class AuthMethodsResponse(BaseModel):
+    plex: bool
+    seerr: bool
+
+
 @dataclass
 class AuthContext:
     secret_key: str
     plex: PlexAuthClient
-    seerr: SeerrAuthClient
+    seerr: SeerrAuthClient | None
     pins: PinStore
     seerr_read: SeerrClient | None = None
 
@@ -87,19 +92,51 @@ class AuthContext:
 def get_auth_context(
     request: Request, settings: Annotated[Settings, Depends(get_settings)]
 ) -> AuthContext:
-    """Auth requires Seerr and the secret key; fail loudly at this boundary
-    (M0 decision: unconfigured integrations degrade, never crash boot)."""
     secret = settings.tasterr_secret_key
-    if secret is None or not settings.seerr_configured or settings.seerr_internal_url is None:
+    if secret is None or not settings.plex_configured:
         raise HTTPException(status_code=503, detail="Authentication unavailable")
     secret_key = secret.get_secret_value()
     return AuthContext(
         secret_key=secret_key,
         plex=PlexAuthClient(request.app.state.http, plex_client_identifier(secret_key)),
-        seerr=SeerrAuthClient(request.app.state.http, settings.seerr_internal_url),
+        seerr=SeerrAuthClient(request.app.state.http, settings.seerr_internal_url)
+        if settings.seerr_configured and settings.seerr_internal_url is not None
+        else None,
         pins=cast("PinStore", request.app.state.pin_store),
         seerr_read=build_seerr(request, settings),
     )
+
+
+def provider_available(settings: Settings, provider: Provider) -> bool:
+    return settings.tasterr_secret_key is not None and (
+        settings.plex_configured if provider == "plex" else settings.seerr_configured
+    )
+
+
+@router.get("/auth/methods", response_model=AuthMethodsResponse)
+def auth_methods(settings: Annotated[Settings, Depends(get_settings)]) -> AuthMethodsResponse:
+    return AuthMethodsResponse(
+        plex=provider_available(settings, "plex"),
+        seerr=provider_available(settings, "seerr"),
+    )
+
+
+def get_seerr_auth_context(
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AuthContext:
+    if not provider_available(settings, "seerr"):
+        raise HTTPException(status_code=503, detail="Authentication unavailable")
+    return ctx
+
+
+def get_plex_auth_context(
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AuthContext:
+    if not provider_available(settings, "plex"):
+        raise HTTPException(status_code=503, detail="Authentication unavailable")
+    return ctx
 
 
 def login_rate_limit(request: Request) -> None:
@@ -118,7 +155,7 @@ def _set_cookie(request: Request, response: Response, token: str) -> None:
     dependencies=[Depends(require_same_origin), Depends(login_rate_limit)],
 )
 async def create_plex_pin(
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(get_plex_auth_context)],
 ) -> PinCreateResponse:
     try:
         pin = await ctx.plex.create_pin()
@@ -142,7 +179,7 @@ async def poll_plex_pin(
     payload: PinPollRequest,
     request: Request,
     response: Response,
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(get_plex_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> PinPollResponse:
@@ -172,13 +209,28 @@ async def poll_plex_pin(
     except (UpstreamRejected, UpstreamUnavailable) as error:
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
 
+    resources = None
+    if settings.plex_server_id is not None:
+        try:
+            resources = await ctx.plex.resources(plex_token)
+        except (UpstreamRejected, UpstreamUnavailable) as error:
+            raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+        if not any(item.client_identifier == settings.plex_server_id for item in resources):
+            raise HTTPException(status_code=401, detail="Sign-in failed")
+
+    login = None
+    seerr_unavailable = False
     try:
-        login = await ctx.seerr.login_plex(plex_token)
+        if ctx.seerr is not None:
+            login = await ctx.seerr.login_plex(plex_token)
     except UpstreamRejected as error:  # Seerr refused this Plex account
         logger.info("auth: plex login rejected by seerr")
-        raise HTTPException(status_code=401, detail="Sign-in failed") from error
+        if settings.plex_server_id is None:
+            raise HTTPException(status_code=401, detail="Sign-in failed") from error
     except UpstreamUnavailable as error:
-        raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+        if settings.plex_server_id is None:
+            raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+        seerr_unavailable = True
 
     try:
         user, token = await complete_login(
@@ -187,7 +239,13 @@ async def poll_plex_pin(
             ProvenAccount.plex(plex_account, plex_token),
             login,
             ctx.seerr_read,
+            seerr_unavailable=seerr_unavailable,
+            plex=ctx.plex,
+            server_id=settings.plex_server_id,
+            plex_resources=resources,
         )
+    except UpstreamUnavailable as error:
+        raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
     except AccountConflict as error:
         raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
     _set_cookie(request, response, token)
@@ -204,10 +262,11 @@ async def local_login(
     payload: LocalLoginRequest,
     request: Request,
     response: Response,
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(get_seerr_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
+    assert ctx.seerr is not None
     try:
         login = await ctx.seerr.login_local(payload.email, payload.password)
     except UpstreamRejected as error:
@@ -225,6 +284,8 @@ async def local_login(
             ProvenAccount.seerr(login),
             login,
             ctx.seerr_read,
+            plex=ctx.plex,
+            server_id=settings.plex_server_id,
         )
     except AccountConflict as error:
         raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error

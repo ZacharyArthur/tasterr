@@ -47,16 +47,29 @@ and no retry storm.
 
 ## Identity, sessions, and requests
 
-Local credentials are forwarded directly to Seerr and never stored. A Plex login
-token is used for Seerr authentication and then retained only as Fernet ciphertext
+Local credentials are forwarded directly to Seerr and never stored. With
+`PLEX_SERVER_ID`, Plex sign-in checks membership in the plex.tv resources list on
+every sign-in, without probing PMS. Owners, shared users, and Plex Home users
+qualify. Without it, Seerr accepting the token remains the gate. Seerr is optional
+for server-gated Plex sign-in; when configured, auto-link is best-effort: refusal
+does not block, and an outage blocks only a would-be new user to avoid splitting
+existing identities. A Plex login token is retained only as Fernet ciphertext
 for bounded caller-scoped Plex reads and silent Seerr re-authentication. On success,
 Tasterr resolves a local user through proven linked accounts and mints a fresh
 opaque browser session. An existing sign-in link wins, then the authenticated
 Seerr bridge, then a new local user. Admin derives from all configured links at
-sign-in; display identity follows Seerr then Plex.
+sign-in; Seerr admin permissions or ownership of the pinned Plex resource grant
+admin. The Plex owner check reuses the sign-in resources read; offline PMS never
+prevents admission or an owner grant. If no check grants, an outage preserves the
+previous value; other failures and unconfigured providers do not. Display identity
+follows Seerr then Plex.
 Only a SHA-256 hash of the browser token is stored. The browser receives the raw
 token once in an HttpOnly, SameSite=Lax cookie, marked Secure when the trusted request
 scheme is HTTPS.
+Sessions expire after 30 days of inactivity and absolutely 90 days after creation.
+Sliding expiry and the refreshed cookie's Max-Age stop at that cap, so sign-in
+admission and admin derivation rerun at least quarterly. The unauthenticated
+`GET /auth/methods` returns only availability booleans for the login screen.
 
 The server stores the member's Seerr session cookie and Plex token as Fernet
 ciphertext on their linked accounts using `TASTERR_SECRET_KEY`; local passwords
@@ -90,7 +103,8 @@ link timestamps, then schedules normal background imports, Seerr before Plex.
 
 For any user with a Plex link, whichever method they signed in with, a separate
 six-hour, per-user single-flight path validates
-the cloud account, discovers at most four advertised servers, resolves that caller's
+the cloud account, discovers only the `PLEX_SERVER_ID` resource when set (otherwise
+at most four advertised servers), resolves that caller's
 PMS-local account row independently on each server, and imports bounded canonical
 `watched_plex` title facts. Account lists resolve owner/admin ids; an explicit 403
 uses the validated positive cloud id for Plex's self-only non-admin history path.
@@ -100,6 +114,9 @@ show's TMDB GUID. Raw rows, rating keys, account/server identifiers, URLs, and p
 counts are discarded. Only canonical watched signals and two attempt/success
 timestamps on the owning link are durable. Dormant links retain credentials but
 perform no upstream work until their provider is configured again.
+The pin filters before connection probing and applies to both history and Continue
+Watching. If the pinned resource is absent, no PMS read runs and the history
+success watermark does not advance. Previously imported watched signals remain.
 
 Continue Watching is live presentation data. It validates the same Plex capability,
 merges bounded per-server results by the caller's last-viewed time, resolves browser

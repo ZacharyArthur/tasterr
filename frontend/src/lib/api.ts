@@ -5,6 +5,7 @@ import type { components, paths } from "./api.gen";
 export type HealthResponse =
 	paths["/api/v1/health"]["get"]["responses"]["200"]["content"]["application/json"];
 export type User = components["schemas"]["UserResponse"];
+export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
 export type AccountResponse = components["schemas"]["AccountResponse"];
 export type AccountProvider = components["schemas"]["AccountProvider"];
 export type SeerrLinkBody = Pick<
@@ -112,6 +113,10 @@ function putJson<T>(path: string, body: unknown): Promise<T> {
 
 export function getHealth(): Promise<HealthResponse> {
 	return request<HealthResponse>("/api/v1/health");
+}
+
+export function getAuthMethods(): Promise<AuthMethods> {
+	return request<AuthMethods>("/api/v1/auth/methods");
 }
 
 /** null = not signed in — 401 is auth state here, not an error. */

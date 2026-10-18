@@ -41,7 +41,7 @@ from tasterr.rails.registry import RailContext
 from tasterr.recommend.signals import SignalKind
 from tasterr.recommend.store import record_signal
 from tasterr.runtime_settings import RailType, RuntimeSettings
-from tasterr.settings import Settings
+from tasterr.settings import Settings, get_settings
 
 SECRET = "test-secret-key"
 
@@ -640,10 +640,16 @@ def test_plex_backed_home_evaluates_history_sync(
     assert captured == [(1, True)]
 
 
+@pytest.mark.parametrize("pin", [None, "pinned"])
 def test_home_passes_configured_plex_connection_probe_limit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pin: str | None
 ) -> None:
     app = _app(tmp_path, plex_max_connection_probes=8)
+    settings = cast("Settings", app.dependency_overrides[get_settings]())
+    settings.plex_server_id = pin
+    if pin is not None:
+        settings.seerr_internal_url = None
+        settings.seerr_api_key = None
     app.dependency_overrides[get_catalog] = lambda: cast("CatalogService", FakeCatalog())
     captured: list[int] = []
 
@@ -654,7 +660,9 @@ def test_home_passes_configured_plex_connection_probe_limit(
             _client_identifier: str,
             *,
             max_connection_probes: int,
+            server_id: str | None,
         ) -> None:
+            assert server_id == pin
             captured.append(max_connection_probes)
 
         async def account(self, _account_token: str) -> PlexCloudAccount:

@@ -48,6 +48,14 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Credentials are forwarded to Seerr, never stored, never logged.
 - [ ] Token comparisons are constant-time (compare hashes, `secrets.compare_digest`).
 - [ ] Fresh session token on every login (no fixation); logout deletes the row.
+- [ ] Sessions expire after 30 days of inactivity and at 90 days from creation;
+      sliding expiry and cookie Max-Age never extend past the absolute cap.
+- [ ] With `PLEX_SERVER_ID`, every Plex sign-in and link checks membership in
+      plex.tv resources only, without PMS probing. The pinned resource's `owned`
+      flag grants admin at sign-in; outages preserve previous admin only when no
+      configured link grants it. Unconfigured providers neither grant nor error.
+- [ ] `/auth/methods` is explicitly unauthenticated, returns only method booleans,
+      and performs no upstream call. `PLEX_SERVER_ID` stays out of `PublicConfig`.
 - [ ] Links come only from successful authentication in the same request, never
       identity/email matching or administrator assignment. PIN link handles are
       bound to their creating session and cannot complete sign-in.
@@ -73,8 +81,10 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 #### Advertised Plex Media Server connections
 
-- [ ] Select at most four Plex Media Server resources, owned-first then by advertised
-      machine id; attempt at most the configured 3–12 connections per resource
+- [ ] With `PLEX_SERVER_ID`, select only that resource before probing for media
+      reads; admission and owner checks never probe PMS. Otherwise select at most
+      four Plex Media Server resources, owned-first then by advertised machine id.
+      Attempt at most the configured 3–12 connections per resource
       (default six). Reserve one available candidate per local HTTPS, remote-direct,
       and relay category before filling remaining slots, then preserve category and
       stable URI priority for deterministic winner selection.

@@ -72,6 +72,12 @@ function renderApp(
 		defaultOptions: { queries: { retry: false } },
 	}),
 ) {
+	const fetch = window.fetch;
+	vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+		String(input) === "/api/v1/auth/methods"
+			? Promise.resolve(jsonResponse({ plex: true, seerr: true }))
+			: fetch(input, init),
+	);
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter initialEntries={[initialEntry]}>
@@ -173,7 +179,7 @@ test("unauthenticated visitors see the login screen only", async () => {
 	);
 	renderApp();
 	expect(
-		await screen.findByRole("button", { name: "Sign in with Plex" }),
+		await screen.findByRole("button", { name: "Continue with Plex" }),
 	).toBeTruthy();
 	expect(screen.queryByText("Sign out")).toBeNull();
 });
@@ -195,7 +201,7 @@ test("authenticated users see the routed browse shell", async () => {
 	expect(screen.getByText(/not endorsed or certified/)).toBeTruthy(); // TMDB attribution
 	expect(screen.getByRole("img", { name: "TMDB" })).toBeTruthy(); // TMDB logo
 	expect(
-		screen.queryByRole("button", { name: "Sign in with Plex" }),
+		screen.queryByRole("button", { name: "Continue with Plex" }),
 	).toBeNull();
 });
 
@@ -221,7 +227,7 @@ test("logout returns to the login screen", async () => {
 	renderApp();
 	fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
 	expect(
-		await screen.findByRole("button", { name: "Sign in with Plex" }),
+		await screen.findByRole("button", { name: "Continue with Plex" }),
 	).toBeTruthy();
 });
 
@@ -268,10 +274,13 @@ test("local account switch clears user A data and blocks a late query", async ()
 	).toBeGreaterThan(0);
 	expect(queryClient.getQueryState(["home"])?.fetchStatus).toBe("fetching");
 	fireEvent.click(signOut);
-	await screen.findByRole("button", { name: "Sign in with Plex" });
+	await screen.findByRole("button", { name: "Continue with Plex" });
 	expectUserAQueriesRemoved(queryClient);
 	expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
 
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Continue with Seerr" }),
+	);
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "viewer-b@example.test" },
 	});
@@ -342,7 +351,7 @@ test("Plex account switch clears user A data before user B arrives", async () =>
 
 	fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
 	fireEvent.click(
-		await screen.findByRole("button", { name: "Sign in with Plex" }),
+		await screen.findByRole("button", { name: "Continue with Plex" }),
 	);
 	await waitFor(() =>
 		expect(fetchMock).toHaveBeenCalledWith(
@@ -499,8 +508,11 @@ test("a late logout response cannot replace a newer confirmed user", async () =>
 		),
 	);
 	await queryClient.refetchQueries({ queryKey: ["auth", "me"] });
-	await screen.findByRole("button", { name: "Sign in with Plex" });
+	await screen.findByRole("button", { name: "Continue with Plex" });
 
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Continue with Seerr" }),
+	);
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "viewer-b@example.test" },
 	});
@@ -515,7 +527,7 @@ test("a late logout response cannot replace a newer confirmed user", async () =>
 	expect(queryClient.getQueryData(["auth", "me"])).toEqual(USER_B);
 	expect(screen.getByRole("button", { name: "Viewer B" })).toBeTruthy();
 	expect(
-		screen.queryByRole("button", { name: "Sign in with Plex" }),
+		screen.queryByRole("button", { name: "Continue with Plex" }),
 	).toBeNull();
 });
 
@@ -571,6 +583,9 @@ test("failed local login preserves the confirmed signed-out state and cache", as
 	);
 	renderApp("/", queryClient);
 
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Continue with Seerr" }),
+	);
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "viewer-b@example.test" },
 	});

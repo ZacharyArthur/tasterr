@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 from weakref import WeakValueDictionary
@@ -206,15 +207,23 @@ class SessionCookieSlide:
 
         async def send_with_refresh(message: Message) -> None:
             if message["type"] == "http.response.start":
-                token = cast("str | None", scope.get("state", {}).get("session_cookie_refresh"))
-                if token is not None:
+                refresh = cast(
+                    "tuple[str, datetime] | None",
+                    scope.get("state", {}).get("session_cookie_refresh"),
+                )
+                if refresh is not None:
+                    token, expires_at = refresh
                     message.setdefault("headers", [])
                     headers = MutableHeaders(scope=message)
                     prefix = f"{COOKIE_NAME}="
                     if not any(v.startswith(prefix) for v in headers.getlist("set-cookie")):
                         headers.append(
                             "set-cookie",
-                            session_cookie_header(token, secure=scope.get("scheme") == "https"),
+                            session_cookie_header(
+                                token,
+                                secure=scope.get("scheme") == "https",
+                                expires_at=expires_at,
+                            ),
                         )
             await send(message)
 

@@ -23,7 +23,7 @@ from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.http import create_http_client
-from tasterr.clients.plex import PlexAuthClient, PlexCloudAccount, PlexPin
+from tasterr.clients.plex import PlexAuthClient, PlexCloudAccount, PlexPin, PlexResourceAccess
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrLogin, SeerrUser
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
@@ -44,6 +44,9 @@ class FakePlex:
         self.token: str | None = None
         self.expired = False
         self.delay = 0.0  # lets race tests widen the poll window
+        self.resource_list = [PlexResourceAccess(clientIdentifier="pinned", owned=False)]
+        self.resource_error: Exception | None = None
+        self.resource_calls = 0
 
     async def create_pin(self) -> PlexPin:
         return self.pin
@@ -61,6 +64,12 @@ class FakePlex:
 
     async def account(self, token: str) -> PlexCloudAccount:
         return PlexCloudAccount(id=8, username="plex-viewer")
+
+    async def resources(self, token: str) -> list[PlexResourceAccess]:
+        self.resource_calls += 1
+        if self.resource_error is not None:
+            raise self.resource_error
+        return self.resource_list
 
 
 class FakeSeerr:
@@ -101,18 +110,25 @@ class Harness:
     pins: PinStore = field(default_factory=PinStore)
 
 
-def _harness(tmp_path: Path, *, configured: bool = True, with_secret: bool = True) -> Harness:
+def _harness(
+    tmp_path: Path,
+    *,
+    configured: bool = True,
+    with_secret: bool = True,
+    server_id: str | None = None,
+) -> Harness:
     overrides: dict[str, object] = {
         "database_path": tmp_path / "tasterr.db",
         "static_dir": tmp_path / "static",
+        "plex_server_id": server_id,
     }
     if configured:
         overrides |= {
             "seerr_internal_url": "http://seerr:5055",
             "seerr_api_key": "seerr-api-key",
         }
-        if with_secret:
-            overrides |= {"tasterr_secret_key": SECRET}
+    if with_secret:
+        overrides |= {"tasterr_secret_key": SECRET}
     harness = Harness(
         app=create_app(Settings.model_validate(overrides)), db_path=tmp_path / "tasterr.db"
     )
@@ -129,12 +145,12 @@ def _harness(tmp_path: Path, *, configured: bool = True, with_secret: bool = Tru
             yield
 
     harness.app.router.lifespan_context = isolated_lifespan
-    if configured and with_secret:
+    if (configured or server_id is not None) and with_secret:
         # Real get_auth_context still guards the unconfigured case (tested below).
         harness.app.dependency_overrides[get_auth_context] = lambda: AuthContext(
             secret_key=SECRET,
             plex=cast(PlexAuthClient, harness.plex),
-            seerr=cast(SeerrAuthClient, harness.seerr),
+            seerr=cast(SeerrAuthClient, harness.seerr) if configured else None,
             pins=harness.pins,
             seerr_read=SeerrClient(
                 httpx.AsyncClient(
@@ -146,7 +162,9 @@ def _harness(tmp_path: Path, *, configured: bool = True, with_secret: bool = Tru
                 ),
                 "http://seerr",
                 "key",
-            ),
+            )
+            if configured
+            else None,
         )
     return harness
 

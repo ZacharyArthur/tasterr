@@ -187,7 +187,7 @@ def schedule_plex_history(
     if (
         plex_token_enc is None
         or secret is None
-        or not settings.seerr_configured
+        or not settings.plex_configured
         or (attempted_at is not None and attempted_at > utcnow() - HISTORY_THROTTLE)
     ):
         return
@@ -208,6 +208,7 @@ def schedule_plex_history(
             state.http,
             plex_client_identifier(secret_key),
             max_connection_probes=settings.tasterr_plex_max_connection_probes,
+            server_id=settings.plex_server_id,
         )
         history = PlexCatalogService(plex, None, cast("Cache", state.catalog_cache))
         await import_plex_history(maker, history, secret_key, plex_token_enc, user_id)
@@ -313,7 +314,7 @@ def _unix_seconds(value: datetime) -> int:
 async def schedule_history(
     request: Request, settings: Settings, db: AsyncSession, user_id: int
 ) -> None:
-    if not settings.seerr_configured or settings.tasterr_secret_key is None:
+    if not settings.plex_configured or settings.tasterr_secret_key is None:
         return
     seerr = await get_link(db, user_id, "seerr")
     plex = await get_link(db, user_id, "plex")

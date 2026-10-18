@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auth Methods */
+        get: operations["auth_methods_api_v1_auth_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/plex/pin": {
         parameters: {
             query?: never;
@@ -557,6 +574,13 @@ export interface components {
             theme: components["schemas"]["Theme"];
             /** @default crimson */
             accent: components["schemas"]["Accent"];
+        };
+        /** AuthMethodsResponse */
+        AuthMethodsResponse: {
+            /** Plex */
+            plex: boolean;
+            /** Seerr */
+            seerr: boolean;
         };
         /**
          * Availability
@@ -1344,6 +1368,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicConfig"];
+                };
+            };
+        };
+    };
+    auth_methods_api_v1_auth_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMethodsResponse"];
                 };
             };
         };

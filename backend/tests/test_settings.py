@@ -44,6 +44,7 @@ def test_library_override_rejects_invalid_values(
 
 
 ENV_VARS = (
+    "PLEX_SERVER_ID",
     "TMDB_API_KEY",
     "SEERR_INTERNAL_URL",
     "SEERR_EXTERNAL_URL",
@@ -100,12 +101,30 @@ def test_boot_with_nothing_set(clean_env: None) -> None:
 
     assert settings.tmdb_api_key is None
     assert settings.seerr_api_key is None
+    assert settings.plex_server_id is None
     assert settings.tasterr_secret_key is None
     assert settings.tmdb_configured is False
     assert settings.seerr_configured is False
     assert settings.database_path == Path("data/tasterr.db")
     assert settings.tasterr_forwarded_allow_ips == "127.0.0.1"
     assert settings.tasterr_plex_max_connection_probes == 6
+
+
+@pytest.mark.parametrize("value", ["server-123", "A" * 64, "a"])
+def test_plex_server_id_from_env(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PLEX_SERVER_ID", value)
+    assert Settings().plex_server_id == value
+
+
+@pytest.mark.parametrize("value", ["", "a" * 65, "server_id", "server.id", "a b", "é", "a\n"])
+def test_invalid_plex_server_id_fails_boot(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PLEX_SERVER_ID", value)
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_plex_connection_probe_limit_populates_from_env(

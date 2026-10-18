@@ -266,6 +266,28 @@ async def test_server_selection_is_capped_at_four() -> None:
     assert identities == 4
 
 
+async def test_discovery_probes_only_pinned_server_among_many() -> None:
+    resources = [
+        _resource(f"machine-{index}", f"https://machine-{index}.plex.direct:32400")
+        for index in range(8)
+    ]
+    probes: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "plex.tv":
+            return httpx.Response(200, json=resources)
+        probes.append(request.url.host or "")
+        return _identity("machine-7")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        discovery = await PlexMediaClient(http, CLIENT_ID, server_id="machine-7").discover_servers(
+            "account-token"
+        )
+    assert [server.machine_identifier for server in discovery.servers] == ["machine-7"]
+    assert discovery.complete
+    assert probes == ["machine-7.plex.direct"]
+
+
 async def test_connection_attempts_are_capped_at_six() -> None:
     uris = tuple(f"https://server-{index}.plex.direct:32400" for index in range(7))
     attempts = 0

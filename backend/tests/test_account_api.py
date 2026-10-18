@@ -21,7 +21,8 @@ from tasterr.auth.crypto import decrypt_token
 from tasterr.auth.login import CONFLICT_GUIDANCE, get_link
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.cache import CacheOpts
-from tasterr.clients.plex import PlexCloudAccount
+from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.plex import PlexCloudAccount, PlexResourceAccess
 from tasterr.db.engine import create_engine
 from tasterr.db.models import LinkedAccount, Profile, Signal, User, UserSession
 from tasterr.recommend.seed import reserve_seed
@@ -54,6 +55,60 @@ def link_plex(client: TestClient) -> httpx.Response:
     return client.post(
         "/api/v1/account/links/plex/pin/poll", json={"pin_id": created.json()["pin_id"]}
     )
+
+
+def test_pinned_link_admission_and_dormant_seerr_unlink(tmp_path: Path) -> None:
+    harness = _harness(tmp_path, server_id="pinned")
+    harness.plex.token = PLEX_TOKEN
+    settings = cast(Settings, harness.app.dependency_overrides[get_settings]())
+    with TestClient(harness.app) as client:
+        login(client)
+        harness.plex.resource_list = []
+        assert link_plex(client).status_code == 403
+
+        async def no_plex(db: AsyncSession) -> None:
+            assert await get_link(db, 1, "plex") is None
+            assert len((await db.scalars(select(UserSession))).all()) == 1
+
+        db_call(harness.db_path, no_plex)
+        harness.plex.resource_list = [PlexResourceAccess(clientIdentifier="pinned", owned=False)]
+        harness.seerr.down = True
+        calls = harness.seerr.login_calls
+        assert link_plex(client).status_code == 200
+        assert harness.seerr.login_calls == calls
+        settings.seerr_internal_url = None
+        settings.seerr_api_key = None
+        rows = client.get("/api/v1/account").json()["providers"]
+        assert [(row["provider"], row["available"], row["can_unlink"]) for row in rows] == [
+            ("plex", True, False),
+            ("seerr", False, True),
+        ]
+        assert client.post("/api/v1/account/links/seerr", json=LOCAL).status_code == 503
+        assert client.post("/api/v1/account/links/seerr/unlink", json={}).status_code == 204
+        assert client.get("/api/v1/account").json()["providers"][0]["linked"]
+        settings.plex_server_id = None
+        assert client.post("/api/v1/account/links/plex/pin").status_code == 503
+        assert (
+            client.post("/api/v1/account/links/plex/pin/poll", json={"pin_id": "any"}).status_code
+            == 503
+        )
+
+
+@pytest.mark.parametrize("outage", [False, True])
+def test_pinned_link_resource_failure_stores_nothing(tmp_path: Path, outage: bool) -> None:
+    harness = _harness(tmp_path, server_id="pinned")
+    harness.plex.token = PLEX_TOKEN
+    harness.plex.resource_error = UpstreamUnavailable("outage") if outage else UpstreamRejected(401)
+    with TestClient(harness.app) as client:
+        login(client)
+        response = link_plex(client)
+        assert response.status_code == (502 if outage else 403)
+        assert "set-cookie" not in response.headers
+
+        async def verify(db: AsyncSession) -> None:
+            assert await get_link(db, 1, "plex") is None
+
+        db_call(harness.db_path, verify)
 
 
 def test_summary_link_refresh_unlink_and_credentials_survive_logout(tmp_path: Path) -> None:

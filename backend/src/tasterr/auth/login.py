@@ -2,14 +2,15 @@
 
 from dataclasses import dataclass
 
+from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tasterr.auth.crypto import encrypt_token
+from tasterr.auth.crypto import decrypt_token, encrypt_token
 from tasterr.auth.sessions import mint_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
-from tasterr.clients.plex import PlexCloudAccount
+from tasterr.clients.plex import PlexAuthClient, PlexCloudAccount, PlexResourceAccess
 from tasterr.clients.seerr import SeerrClient, SeerrLogin
 from tasterr.db.io import finish_io
 from tasterr.db.models import LinkedAccount, Provider, User, utcnow
@@ -101,6 +102,8 @@ async def resolve_user(
     secret_key: str,
     account: ProvenAccount,
     seerr_login: SeerrLogin | None,
+    *,
+    seerr_unavailable: bool = False,
 ) -> User:
     for attempt in range(2):
         try:
@@ -109,6 +112,8 @@ async def resolve_user(
             resolved = owner or bridge
             user = await db.get(User, resolved.user_id) if resolved else None
             if user is None:
+                if seerr_unavailable:
+                    raise UpstreamUnavailable("Seerr auto-link unavailable")
                 user = User(display_name=account.display_name, avatar_url=account.avatar_url)
                 db.add(user)
                 await db.flush()
@@ -129,19 +134,42 @@ async def resolve_user(
 
 
 async def derive_admin(
-    links: list[LinkedAccount], previous: bool, seerr: SeerrClient | None
+    links: list[LinkedAccount],
+    previous: bool,
+    seerr: SeerrClient | None,
+    *,
+    secret_key: str,
+    plex: PlexAuthClient | None,
+    server_id: str | None,
+    plex_resources: list[PlexResourceAccess] | None,
 ) -> bool:
+    errored = False
     for link in links:
         if link.provider == "seerr" and seerr is not None:
             try:
                 upstream = await seerr.user(int(link.external_id))
             except UpstreamUnavailable:
-                return previous
+                errored = True
+                continue
             except UpstreamRejected:
                 continue
             if upstream.permissions & ADMIN_PERMISSION:
                 return True
-    return False
+        if link.provider == "plex" and plex is not None and server_id is not None:
+            try:
+                resources = plex_resources
+                if resources is None:
+                    if link.credential_enc is None:
+                        continue
+                    resources = await plex.resources(decrypt_token(secret_key, link.credential_enc))
+            except UpstreamUnavailable:
+                errored = True
+                continue
+            except (UpstreamRejected, InvalidToken):
+                continue
+            if any(item.client_identifier == server_id and item.owned for item in resources):
+                return True
+    return previous if errored else False
 
 
 async def complete_login(
@@ -150,12 +178,27 @@ async def complete_login(
     account: ProvenAccount,
     seerr_login: SeerrLogin | None,
     seerr: SeerrClient | None,
+    *,
+    seerr_unavailable: bool = False,
+    plex: PlexAuthClient | None = None,
+    server_id: str | None = None,
+    plex_resources: list[PlexResourceAccess] | None = None,
 ) -> tuple[User, str]:
-    user = await resolve_user(db, secret_key, account, seerr_login)
+    user = await resolve_user(
+        db, secret_key, account, seerr_login, seerr_unavailable=seerr_unavailable
+    )
     links = list(
         (await db.scalars(select(LinkedAccount).where(LinkedAccount.user_id == user.id))).all()
     )
-    is_admin = await derive_admin(links, user.is_admin, seerr)
+    is_admin = await derive_admin(
+        links,
+        user.is_admin,
+        seerr,
+        secret_key=secret_key,
+        plex=plex,
+        server_id=server_id,
+        plex_resources=plex_resources,
+    )
     display = next(
         (link for provider in ("seerr", "plex") for link in links if link.provider == provider),
         None,

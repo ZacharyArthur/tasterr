@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     seerr_internal_url: str | None = None
     seerr_external_url: str | None = None
     seerr_api_key: SecretStr | None = None
+    plex_server_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9-]{1,64}$")
     tasterr_secret_key: SecretStr | None = None
 
     database_path: Path = Path("data/tasterr.db")
@@ -124,6 +125,10 @@ class Settings(BaseSettings):
     @property
     def seerr_configured(self) -> bool:
         return self.seerr_internal_url is not None and self.seerr_api_key is not None
+
+    @property
+    def plex_configured(self) -> bool:
+        return self.plex_server_id is not None or self.seerr_configured
 
 
 class PublicConfig(BaseModel):

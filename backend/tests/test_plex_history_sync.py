@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Never, cast
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import text
@@ -17,6 +18,7 @@ from tasterr.api.taste import cancel_plex_history, schedule_plex_history
 from tasterr.auth.crypto import encrypt_token
 from tasterr.cache import Cache
 from tasterr.catalog.plex import PlexCatalogService, PlexHistoryResult, PlexWatch
+from tasterr.clients.plex import PlexMediaClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import User
@@ -134,6 +136,33 @@ async def test_first_import_commits_attempt_before_reads_and_batches_writes(
             assert (
                 await connection.execute(text("select count(*) from signals"))
             ).scalar_one() == 205
+    finally:
+        await engine.dispose()
+
+
+async def test_absent_pinned_server_does_not_advance_watermark(tmp_path: Path) -> None:
+    engine, maker, user_id = await _database(tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "plex.tv"
+        if request.url.path == "/api/v2/user":
+            return httpx.Response(200, json={"id": 1, "username": "viewer"})
+        assert request.url.path == "/api/v2/resources"
+        return httpx.Response(200, json=[])
+
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            plex = PlexMediaClient(http, "client", server_id="missing")
+            assert not (await plex.discover_servers("token")).complete
+            history = PlexCatalogService(plex, None, Cache())
+            assert await history.continue_watching(user_id, "token") == []
+            await taste_api.import_plex_history(
+                maker, history, SECRET, encrypt_token(SECRET, "token"), user_id
+            )
+        async with maker() as db:
+            link = await plex_link(db, user_id)
+            assert link.sync_attempted_at is not None
+            assert link.sync_synced_at is None
     finally:
         await engine.dispose()
 
@@ -316,8 +345,10 @@ async def test_scheduler_is_single_flight_and_waits_for_seerr_seed(
     assert request.app.state.plex_history_tasks == {}
 
 
+@pytest.mark.parametrize("pin", [None, "pinned"])
 async def test_scheduler_passes_configured_plex_connection_probe_limit(
     monkeypatch: pytest.MonkeyPatch,
+    pin: str | None,
 ) -> None:
     request = _request()
     captured: list[int] = []
@@ -329,7 +360,9 @@ async def test_scheduler_passes_configured_plex_connection_probe_limit(
             _client_identifier: str,
             *,
             max_connection_probes: int,
+            server_id: str | None,
         ) -> None:
+            assert server_id == pin
             captured.append(max_connection_probes)
 
     async def fake_import(*_args: object) -> None:
@@ -343,8 +376,12 @@ async def test_scheduler_passes_configured_plex_connection_probe_limit(
             "seerr_api_key": "key",
             "tasterr_secret_key": SECRET,
             "tasterr_plex_max_connection_probes": 8,
+            "plex_server_id": pin,
         }
     )
+    if pin is not None:
+        settings.seerr_internal_url = None
+        settings.seerr_api_key = None
 
     schedule_plex_history(request, settings, 1, None, "ciphertext")
     await request.app.state.plex_history_tasks[1]

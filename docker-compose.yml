@@ -1,4 +1,5 @@
-# Tasterr reaches an existing Seerr through SEERR_INTERNAL_URL. A routable LAN
+# Seerr is optional: set PLEX_SERVER_ID for Plex-only sign-in and media reads.
+# When configured, Tasterr reaches Seerr through SEERR_INTERNAL_URL. A routable LAN
 # hostname or address needs no shared Docker network; the URL never leaves the
 # server. See docker-compose.seerr-network.yml for optional same-host wiring.
 services:

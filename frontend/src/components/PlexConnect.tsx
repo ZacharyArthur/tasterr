@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+	type ReactNode,
 	useCallback,
 	useEffect,
 	useEffectEvent,
@@ -77,12 +78,16 @@ export function PlexConnect({
 	pollPin,
 	onApproved,
 	label,
+	icon,
+	buttonClassName,
 	requireUser = false,
 }: {
 	createPin: () => Promise<PinCreateResponse>;
 	pollPin: (pin: string) => Promise<PlexPoll>;
 	onApproved: (data: PlexPoll) => void;
 	label: string;
+	icon?: ReactNode;
+	buttonClassName?: string;
 	requireUser?: boolean;
 }) {
 	const approved = useEffectEvent(onApproved);
@@ -224,8 +229,12 @@ export function PlexConnect({
 					startPlex.mutate();
 				}}
 				disabled={startPlex.isPending || pin !== null}
-				className="min-h-11 rounded bg-app-accent px-4 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text disabled:opacity-60"
+				className={
+					buttonClassName ??
+					"min-h-11 rounded bg-app-accent px-4 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text disabled:opacity-60"
+				}
 			>
+				{icon}
 				{pin !== null ? "Waiting for Plex approval…" : label}
 			</button>
 			{pin !== null && (

@@ -61,6 +61,7 @@ CLIENT_SAFE_FIELDS = {
 
 def _sentineled_settings() -> Settings:
     values: dict[str, object] = {
+        "plex_server_id": f"{SENTINEL}-plex-server-id",
         "tasterr_hide_library_items": True,
         "tasterr_excluded_service_ids": [8],
     }

@@ -14,6 +14,7 @@ test("local login, browse, detail, and request use the real backend", async ({
 	});
 
 	await page.goto("/");
+	await page.getByRole("button", { name: "Continue with Seerr" }).click();
 	await page.getByLabel("Email").fill("viewer@example.invalid");
 	await page.getByLabel("Password").fill("placeholder-password");
 	await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -43,6 +44,7 @@ test("missing 4K upgrade uses Seerr defaults and keeps standard available", asyn
 	page,
 }) => {
 	await page.goto("/");
+	await page.getByRole("button", { name: "Continue with Seerr" }).click();
 	await page.getByLabel("Email").fill("viewer@example.invalid");
 	await page.getByLabel("Password").fill("placeholder-password");
 	await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -72,6 +74,7 @@ test("phone advanced 4K selection supports cancellation and keyboard confirmatio
 }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto("/");
+	await page.getByRole("button", { name: "Continue with Seerr" }).click();
 	await page.getByLabel("Email").fill("viewer@example.invalid");
 	await page.getByLabel("Password").fill("placeholder-password");
 	await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -119,6 +122,7 @@ test("phone advanced 4K selection supports cancellation and keyboard confirmatio
 
 test("4K TV request keeps the whole-series contract", async ({ page }) => {
 	await page.goto("/");
+	await page.getByRole("button", { name: "Continue with Seerr" }).click();
 	await page.getByLabel("Email").fill("viewer@example.invalid");
 	await page.getByLabel("Password").fill("placeholder-password");
 	await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -145,6 +149,7 @@ test("phone TV season dialog sends only the chosen seasons", async ({
 }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto("/");
+	await page.getByRole("button", { name: "Continue with Seerr" }).click();
 	await page.getByLabel("Email").fill("viewer@example.invalid");
 	await page.getByLabel("Password").fill("placeholder-password");
 	await page.getByRole("button", { name: "Sign in", exact: true }).click();

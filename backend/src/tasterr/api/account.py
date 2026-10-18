@@ -17,8 +17,10 @@ from tasterr.api.auth import (
     AuthContext,
     PinCreateResponse,
     PinPollRequest,
-    get_auth_context,
+    get_plex_auth_context,
+    get_seerr_auth_context,
     login_rate_limit,
+    provider_available,
 )
 from tasterr.api.taste import cancel_plex_history, cancel_seed, history_guard, schedule_history
 from tasterr.auth.crypto import decrypt_token
@@ -42,11 +44,8 @@ router = APIRouter(dependencies=[Depends(require_session)])
 Db = Annotated[AsyncSession, Depends(get_db)]
 Member = Annotated[AuthedSession, Depends(require_session)]
 Config = Annotated[Settings, Depends(get_settings)]
-Auth = Annotated[AuthContext, Depends(get_auth_context)]
-
-
-def provider_available(settings: Settings, _provider: Provider) -> bool:
-    return settings.seerr_configured and settings.tasterr_secret_key is not None
+Auth = Annotated[AuthContext, Depends(get_plex_auth_context)]
+SeerrAuth = Annotated[AuthContext, Depends(get_seerr_auth_context)]
 
 
 class AccountProvider(BaseModel):
@@ -185,7 +184,13 @@ async def poll_link_pin(
         logger.info("account: link plex unavailable")
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
     try:
-        await ctx.seerr.login_plex(token)
+        if settings.plex_server_id is not None:
+            resources = await ctx.plex.resources(token)
+            if not any(item.client_identifier == settings.plex_server_id for item in resources):
+                raise HTTPException(status_code=403, detail="Account cannot be linked")
+        else:
+            assert ctx.seerr is not None
+            await ctx.seerr.login_plex(token)
     except UpstreamRejected as error:
         logger.info("account: link plex refused")
         raise HTTPException(status_code=403, detail="Account cannot be linked") from error
@@ -206,8 +211,14 @@ async def poll_link_pin(
     ],
 )
 async def link_seerr(
-    payload: SeerrLinkBody, authed: Member, ctx: Auth, db: Db, settings: Config, request: Request
+    payload: SeerrLinkBody,
+    authed: Member,
+    ctx: SeerrAuth,
+    db: Db,
+    settings: Config,
+    request: Request,
 ) -> None:
+    assert ctx.seerr is not None
     try:
         if payload.method == "local":
             login = await ctx.seerr.login_local(payload.email, payload.password)
