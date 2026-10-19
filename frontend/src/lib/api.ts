@@ -9,6 +9,8 @@ export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
 export type JellyfinCredentials = components["schemas"]["JellyfinLoginRequest"];
 export type AccountResponse = components["schemas"]["AccountResponse"];
 export type AccountProvider = components["schemas"]["AccountProvider"];
+export type TasteSourceBody = components["schemas"]["TasteSourceBody"];
+export type TasteSource = TasteSourceBody["source"];
 export type SeerrLinkBody = Pick<
 	components["schemas"]["SeerrLinkBody"],
 	"method"
@@ -312,6 +314,14 @@ export function getExplain(
 /** Wipe the caller's signals + profile and re-seed from Seerr history. */
 export function resetRecommendations(): Promise<void> {
 	return postJson<void>("/api/v1/recommendations/reset");
+}
+
+export function setTasteSource(body: TasteSourceBody): Promise<void> {
+	return postJson<void>("/api/v1/account/taste-sources", body);
+}
+
+export function clearTasteSource(source: TasteSource): Promise<void> {
+	return postJson<void>(`/api/v1/account/taste-sources/${source}/clear`);
 }
 
 export function getHouseholdMembers(): Promise<HouseholdMember[]> {

@@ -157,6 +157,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/taste-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Taste Source */
+        post: operations["set_taste_source_api_v1_account_taste_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/taste-sources/{source}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear Taste Source */
+        post: operations["clear_taste_source_api_v1_account_taste_sources__source__clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account": {
         parameters: {
             query?: never;
@@ -601,6 +635,10 @@ export interface components {
         AccountResponse: {
             /** Providers */
             providers: components["schemas"]["AccountProvider"][];
+            /** Taste Sources */
+            taste_sources: {
+                [key: string]: boolean;
+            };
         };
         /** Appearance */
         Appearance: {
@@ -1298,6 +1336,16 @@ export interface components {
             /** Recorded Signals */
             recorded_signals: number;
         };
+        /** TasteSourceBody */
+        TasteSourceBody: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "seerr" | "plex" | "jellyfin" | "browsing";
+            /** Enabled */
+            enabled: boolean;
+        };
         /**
          * Theme
          * @enum {string}
@@ -1594,6 +1642,66 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    set_taste_source_api_v1_account_taste_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TasteSourceBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_taste_source_api_v1_account_taste_sources__source__clear_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source: "seerr" | "plex" | "jellyfin" | "browsing";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

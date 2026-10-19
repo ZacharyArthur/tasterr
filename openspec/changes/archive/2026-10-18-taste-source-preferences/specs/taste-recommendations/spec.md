@@ -183,8 +183,8 @@ before cancelling, deleting, clearing any sync timestamp, or scheduling anything
 ### Requirement: Members choose which taste sources count
 
 Each user SHALL have a set of switched-off taste sources, empty by default. The
-switchable sources and their signal kinds SHALL be: `seerr_requests`
-(`seed_request_history`), `plex_history` (`watched_plex`), `jellyfin_history`
+switchable sources and their signal kinds SHALL be: `seerr`
+(`seed_request_history`), `plex` (`watched_plex`), `jellyfin`
 (`watched_jellyfin`), and `browsing` (`detail_open`). `request`, `watchlist`, and
 `not_interested` SHALL always count. `GET /api/v1/account` SHALL include each
 source's on/off state; `POST /api/v1/account/taste-sources` with

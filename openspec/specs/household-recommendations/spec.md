@@ -2,13 +2,17 @@
 
 ## Purpose
 TBD - created by archiving change v2-plex-aware-personalization. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: Household member discovery exposes only blend-safe identity
 
 `GET /api/v1/recommendations/household-members` SHALL require the shared session
 dependency and return known local Tasterr users using only local id, display name,
 avatar URL, and `has_taste_signals`, which SHALL be true exactly when that user has
-at least one stored taste signal. The list SHALL include the caller and SHALL be
+at least one stored taste signal of a kind that counts toward their profile (not
+from a source they switched off). Whether a member switched sources off SHALL NOT
+be revealed. The list SHALL include the caller and SHALL be
 ordered by ascending local user id. This coarse
 activity boolean is sufficient for selection but SHALL NOT claim that upstream
 profile materialization will succeed. The endpoint SHALL NOT return auth/admin
@@ -25,8 +29,9 @@ perform no profile/catalog/Plex work.
 
 #### Scenario: Caller is present and activity eligibility is stable
 
-- **WHEN** an authenticated caller with at least one stored signal requests the
-  member list before and after profile-cache invalidation
+- **WHEN** an authenticated caller with at least one stored signal of a kind that
+  counts toward their profile requests the member list before and after
+  profile-cache invalidation
 - **THEN** the caller is included with `has_taste_signals=true` both times
 
 #### Scenario: Member ordering is stable
@@ -43,6 +48,11 @@ perform no profile/catalog/Plex work.
 
 - **WHEN** a caller without a valid session requests household members
 - **THEN** the response is 401 and no household state is returned
+
+#### Scenario: Switched-off signals do not make a member selectable
+
+- **WHEN** a member's only stored signals come from a source they switched off
+- **THEN** they are listed with `has_taste_signals=false`, and nothing says why
 
 ### Requirement: Household blend requests are caller-inclusive and bounded
 

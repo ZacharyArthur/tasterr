@@ -69,6 +69,31 @@ def _body(kind: str = "detail_open", retract: bool = False) -> dict[str, object]
     return {"media_type": "movie", "tmdb_id": 42, "kind": kind, "retract": retract}
 
 
+def test_browsing_off_keeps_validation_and_response_without_storing(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        assert (
+            client.post(
+                "/api/v1/account/taste-sources", json={"source": "browsing", "enabled": False}
+            ).status_code
+            == 204
+        )
+        assert client.post("/api/v1/signals", json=_body()).json() == {"recorded": False}
+        assert client.post("/api/v1/signals", json=_body(retract=True)).status_code == 422
+        for invalid in ({"tmdb_id": 0}, {"media_type": "other"}, {"kind": "request"}):
+            assert client.post("/api/v1/signals", json=_body() | invalid).status_code == 422
+        assert _stored_signals(tmp_path / "tasterr.db") == []
+        assert client.post("/api/v1/signals", json=_body("watchlist")).json() == {"recorded": True}
+        assert (
+            client.post(
+                "/api/v1/account/taste-sources", json={"source": "browsing", "enabled": True}
+            ).status_code
+            == 204
+        )
+        assert client.post("/api/v1/signals", json=_body()).json() == {"recorded": True}
+
+
 def test_unauthenticated_signal_is_rejected(tmp_path: Path) -> None:
     with _client(_app(tmp_path)) as client:
         response = client.post("/api/v1/signals", json=_body())

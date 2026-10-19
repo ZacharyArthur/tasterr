@@ -117,7 +117,16 @@ test("the account URL renders connected accounts through the shell router", asyn
 		vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
 			if (url === "/api/v1/auth/me") return jsonResponse(USER);
-			if (url === "/api/v1/account") return jsonResponse({ providers: [] });
+			if (url === "/api/v1/account")
+				return jsonResponse({
+					providers: [],
+					taste_sources: {
+						seerr: true,
+						plex: true,
+						jellyfin: true,
+						browsing: true,
+					},
+				});
 			if (url === "/api/v1/config") return jsonResponse(CONFIG);
 			return jsonResponse({ state: "done" });
 		}),

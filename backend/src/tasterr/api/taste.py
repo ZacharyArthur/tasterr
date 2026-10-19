@@ -34,6 +34,7 @@ from tasterr.recommend import store
 from tasterr.recommend.jellyfin_history import read_history
 from tasterr.recommend.seed import HISTORY_THROTTLE, reserve_seed, seed_in_background
 from tasterr.recommend.service import TasteService
+from tasterr.recommend.signals import TasteSource
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
 
@@ -394,20 +395,44 @@ def _unix_seconds(value: datetime) -> int:
 
 
 async def schedule_history(
-    request: Request, settings: Settings, db: AsyncSession, user_id: int
+    request: Request,
+    settings: Settings,
+    db: AsyncSession,
+    user_id: int,
+    *,
+    source: TasteSource | None = None,
 ) -> None:
     if settings.tasterr_secret_key is None:
         return
-    seerr = await get_link(db, user_id, "seerr")
-    plex = await get_link(db, user_id, "plex")
-    jellyfin = await get_link(db, user_id, "jellyfin")
-    if seerr is not None and settings.seerr_configured:
+    if user_id in request.app.state.plex_history_resets:
+        return
+    async with history_guard(request, user_id):
+        seerr = await get_link(db, user_id, "seerr")
+        plex = await get_link(db, user_id, "plex")
+        jellyfin = await get_link(db, user_id, "jellyfin")
+        excluded = await store.excluded_sources(db, user_id)
+    if (
+        seerr is not None
+        and settings.seerr_configured
+        and "seerr" not in excluded
+        and source in (None, "seerr")
+    ):
         schedule_seed(request, settings, user_id, seerr.sync_attempted_at)
-    if plex is not None and settings.plex_configured:
+    if (
+        plex is not None
+        and settings.plex_configured
+        and "plex" not in excluded
+        and source in (None, "plex")
+    ):
         schedule_plex_history(
             request, settings, user_id, plex.sync_attempted_at, plex.credential_enc
         )
-    if jellyfin is not None and settings.jellyfin_configured:
+    if (
+        jellyfin is not None
+        and settings.jellyfin_configured
+        and "jellyfin" not in excluded
+        and source in (None, "jellyfin")
+    ):
         schedule_jellyfin_history(request, settings, user_id, jellyfin.sync_attempted_at)
 
 
@@ -428,3 +453,11 @@ async def cancel_seed(request: Request, user_id: int) -> None:
     tasks = cast("dict[int, asyncio.Task[None]]", request.app.state.seed_tasks)
     await _cancel_history_task(tasks, user_id)
     request.app.state.seeding.discard(user_id)
+
+
+async def cancel_source_history(request: Request, user_id: int, source: TasteSource) -> None:
+    if source == "browsing":
+        return
+    await {"seerr": cancel_seed, "plex": cancel_plex_history, "jellyfin": cancel_jellyfin_history}[
+        source
+    ](request, user_id)

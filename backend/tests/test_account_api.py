@@ -159,6 +159,8 @@ def test_summary_link_refresh_unlink_and_credentials_survive_logout(tmp_path: Pa
         ("/account/links/seerr", LOCAL),
         ("/account/links/plex/unlink", {}),
         ("/account/delete", {"confirm": "Viewer"}),
+        ("/account/taste-sources", {"source": "browsing", "enabled": False}),
+        ("/account/taste-sources/browsing/clear", {}),
     ],
 )
 def test_mutation_guards(tmp_path: Path, path: str, body: dict[str, object]) -> None:

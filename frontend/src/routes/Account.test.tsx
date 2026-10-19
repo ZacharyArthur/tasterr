@@ -5,9 +5,10 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { AccountResponse } from "../lib/api";
+import type { AccountResponse, TasteSource } from "../lib/api";
 import { setConfirmedSession } from "../lib/auth";
 import { Account } from "./Account";
 
@@ -22,6 +23,7 @@ const USER = {
 	is_admin: false,
 };
 const SUMMARY: AccountResponse = {
+	taste_sources: { plex: true, seerr: true, jellyfin: true, browsing: true },
 	providers: [
 		{
 			provider: "plex",
@@ -41,8 +43,12 @@ const SUMMARY: AccountResponse = {
 		},
 	],
 };
-function setup(summary = SUMMARY, error = false) {
-	const fetch = vi.fn(async (input: RequestInfo | URL) => {
+function setup(
+	summary: Pick<AccountResponse, "providers"> &
+		Partial<Pick<AccountResponse, "taste_sources">> = SUMMARY,
+	error = false,
+) {
+	const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
 		const url = String(input);
 		const status = url.endsWith("/account") ? 200 : error ? 409 : 204;
 		return {
@@ -50,7 +56,7 @@ function setup(summary = SUMMARY, error = false) {
 			status,
 			json: async () =>
 				status === 200
-					? summary
+					? { ...SUMMARY, ...summary }
 					: {
 							detail:
 								"Sign in with each account, keep one, delete the other Tasterr account, then link again.",
@@ -75,6 +81,237 @@ test("member sees providers, name, and deletion controls", async () => {
 	expect(
 		screen.getByRole("button", { name: "Delete my Tasterr account" }),
 	).toBeTruthy();
+});
+
+const sources: TasteSource[] = ["plex", "seerr", "jellyfin", "browsing"];
+const sourceLabels = {
+	plex: "Plex history",
+	seerr: "Seerr request history",
+	jellyfin: "Jellyfin history",
+	browsing: "Browsing activity",
+};
+const clearNames = {
+	plex: "Clear imported history from Plex",
+	seerr: "Clear imported history from Seerr",
+	jellyfin: "Clear imported history from Jellyfin",
+	browsing: "Clear browsing activity",
+};
+
+test.each([
+	"plex",
+	"seerr",
+	"jellyfin",
+] as const)("%s controls stay on configured, dormant, and retained-history cards", async (provider) => {
+	for (const [available, linked] of [
+		[true, true],
+		[true, false],
+		[false, true],
+		[false, false],
+	]) {
+		const view = setup({
+			providers: [{ provider, available, linked, can_unlink: true }],
+		});
+		const toggle = await screen.findByRole("switch", {
+			name: `Use ${sourceLabels[provider]} for recommendations`,
+		});
+		const card = within(toggle.closest("section") as HTMLElement);
+		const clearButton = card.getByRole("button", {
+			name: clearNames[provider],
+		});
+		expect(clearButton.getAttribute("aria-label")).toContain(
+			clearButton.textContent?.trim(),
+		);
+		if (!available && !linked) {
+			expect(card.queryByText("Not connected")).toBeNull();
+			expect(card.queryByText("No longer available on this server")).toBeNull();
+			expect(card.queryByRole("button", { name: /Link|Unlink/ })).toBeNull();
+		}
+		view.cache.clear();
+		cleanup();
+	}
+});
+
+test.each(
+	sources,
+)("%s clears only after confirmation and supports cancel", async (source) => {
+	const { fetch } = setup({
+		providers: [
+			...SUMMARY.providers,
+			{
+				provider: "jellyfin",
+				available: true,
+				linked: false,
+				can_unlink: false,
+			},
+		],
+	});
+	fireEvent.click(
+		await screen.findByRole("button", {
+			name: clearNames[source],
+		}),
+	);
+	const path = `/api/v1/account/taste-sources/${source}/clear`;
+	expect(fetch.mock.calls.some(([url]) => String(url) === path)).toBe(false);
+	fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+	expect(screen.queryByRole("dialog")).toBeNull();
+	expect(fetch.mock.calls.some(([url]) => String(url) === path)).toBe(false);
+	fireEvent.click(screen.getByRole("button", { name: clearNames[source] }));
+	fireEvent.click(screen.getByRole("button", { name: "Confirm clear" }));
+	await waitFor(() =>
+		expect(fetch).toHaveBeenCalledWith(
+			path,
+			expect.objectContaining({ method: "POST" }),
+		),
+	);
+	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("clearing a retained-history card restores focus when the card disappears", async () => {
+	const { fetch } = setup({
+		providers: [
+			{ provider: "plex", available: false, linked: false, can_unlink: false },
+		],
+	});
+	const trigger = await screen.findByRole("button", { name: clearNames.plex });
+	trigger.focus();
+	fireEvent.click(trigger);
+	fetch.mockImplementation(async (input) =>
+		String(input).endsWith("/account")
+			? ({
+					ok: true,
+					status: 200,
+					json: async () => ({ ...SUMMARY, providers: [] }),
+				} as Response)
+			: ({ ok: true, status: 204 } as Response),
+	);
+	fireEvent.click(screen.getByRole("button", { name: "Confirm clear" }));
+	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	await waitFor(() =>
+		expect(screen.queryByRole("button", { name: clearNames.plex })).toBeNull(),
+	);
+	await waitFor(() =>
+		expect(document.activeElement).toBe(
+			screen.getByRole("heading", { name: "Connected accounts" }),
+		),
+	);
+});
+
+test("failed toggle is optimistic, rolls back, and shows only a generic error", async () => {
+	const { fetch, cache } = setup();
+	const toggle = await screen.findByRole("switch", {
+		name: "Use Plex history for recommendations",
+	});
+	let finish: ((response: Response) => void) | undefined;
+	const pending = new Promise<Response>((resolve) => {
+		finish = resolve;
+	});
+	fetch.mockImplementation(async (input) =>
+		String(input).endsWith("/taste-sources")
+			? pending
+			: ({ ok: true, status: 200, json: async () => SUMMARY } as Response),
+	);
+	fireEvent.click(toggle);
+	await waitFor(() => expect(toggle).toHaveProperty("checked", false));
+	expect(
+		cache.getQueryData<AccountResponse>(["account"])?.taste_sources.plex,
+	).toBe(false);
+	finish?.({
+		ok: false,
+		status: 500,
+		json: async () => ({ detail: "private failure detail" }),
+	} as Response);
+	expect(await screen.findByRole("alert")).toHaveProperty(
+		"textContent",
+		"Could not update taste source. Try again.",
+	);
+	expect(toggle).toHaveProperty("checked", true);
+	expect(screen.queryByText("private failure detail")).toBeNull();
+});
+
+test.each(
+	sources,
+)("%s toggle follows server state and refreshes taste queries", async (source) => {
+	const summary = {
+		...SUMMARY,
+		providers: [
+			...SUMMARY.providers,
+			{
+				provider: "jellyfin" as const,
+				available: true,
+				linked: false,
+				can_unlink: false,
+			},
+		],
+		taste_sources: { ...SUMMARY.taste_sources, [source]: false },
+	};
+	const { fetch, cache } = setup(summary);
+	const toggle = await screen.findByRole("switch", {
+		name: `Use ${sourceLabels[source]} for recommendations`,
+	});
+	expect(toggle).toHaveProperty("checked", false);
+	for (const key of [
+		"home",
+		"rails",
+		"explain",
+		"household-members",
+		"taste-onboarding",
+	])
+		cache.setQueryData([key], {});
+	fetch.mockImplementation(async (input, init) => {
+		if (String(input).endsWith("/taste-sources")) {
+			summary.taste_sources = { ...summary.taste_sources, [source]: true };
+			expect(init?.body).toBe(JSON.stringify({ source, enabled: true }));
+			return { ok: true, status: 204 } as Response;
+		}
+		return { ok: true, status: 200, json: async () => summary } as Response;
+	});
+	fireEvent.click(toggle);
+	await waitFor(() => expect(toggle).toHaveProperty("checked", true));
+	await waitFor(() =>
+		expect(cache.getQueryState(["home"])?.isInvalidated).toBe(true),
+	);
+	for (const key of [
+		"rails",
+		"explain",
+		"household-members",
+		"taste-onboarding",
+	])
+		expect(cache.getQueryState([key])?.isInvalidated).toBe(true);
+});
+
+test("late toggle failure cannot restore another member's account state", async () => {
+	const { fetch, cache } = setup();
+	const toggle = await screen.findByRole("switch", {
+		name: "Use Plex history for recommendations",
+	});
+	let finish: ((response: Response) => void) | undefined;
+	const pending = new Promise<Response>((resolve) => {
+		finish = resolve;
+	});
+	let currentAccount = SUMMARY;
+	fetch.mockImplementation(async (input) =>
+		String(input).endsWith("/taste-sources")
+			? pending
+			: ({
+					ok: true,
+					status: 200,
+					json: async () => currentAccount,
+				} as Response),
+	);
+	fireEvent.click(toggle);
+	await waitFor(() => expect(toggle).toHaveProperty("checked", false));
+	const nextAccount = { ...SUMMARY, providers: [] };
+	currentAccount = nextAccount;
+	await setConfirmedSession(cache, { ...USER, id: 2 });
+	cache.setQueryData(["account"], nextAccount);
+	finish?.({
+		ok: false,
+		status: 500,
+		json: async () => ({ detail: "failed" }),
+	} as Response);
+	await pending;
+	await screen.findByRole("alert");
+	expect(cache.getQueryData(["account"])).toEqual(nextAccount);
 });
 
 test("Jellyfin card links with credentials and offers the history choice on unlink", async () => {

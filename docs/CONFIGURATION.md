@@ -283,6 +283,14 @@ signals, session material, and household viewing behavior.
 
 ## Upgrade and rollback
 
+Migration `0009` adds per-user taste-source preferences, with every source on by
+default. To roll back across it, stop the writer and back up/validate the database,
+then use the current image's Alembic downgrade to `0008` before starting the
+previous image. The downgrade removes the switched-off source settings and
+invalidates affected profiles so they rebuild from all retained signals; no
+history is deleted. The previous image resumes imports for every configured
+linked provider. An image-only rollback across `0009` is unsupported.
+
 Migration `0008` extends the unique signal index for `watched_jellyfin`. To roll back
 across it, stop the writer and back up/validate the database first, then use the
 current image's Alembic downgrade to `0007` before starting the previous image.

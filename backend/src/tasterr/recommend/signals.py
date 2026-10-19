@@ -6,6 +6,7 @@ signal row at record time, so history keeps the weight it earned even if these
 constants are retuned later.
 """
 
+from collections.abc import Iterable
 from typing import Literal, get_args
 
 from tasterr.catalog.models import MAX_TMDB_ID as MAX_TMDB_ID
@@ -49,3 +50,15 @@ STRONG_POSITIVE_KINDS: frozenset[SignalKind] = frozenset(
 )
 
 ALL_KINDS: frozenset[SignalKind] = frozenset(get_args(SignalKind))
+
+TasteSource = Literal["seerr", "plex", "jellyfin", "browsing"]
+SOURCE_KINDS: dict[TasteSource, frozenset[SignalKind]] = {
+    "seerr": frozenset(("seed_request_history",)),
+    "plex": frozenset(("watched_plex",)),
+    "jellyfin": frozenset(("watched_jellyfin",)),
+    "browsing": frozenset(("detail_open",)),
+}
+
+
+def excluded_kinds(sources: Iterable[TasteSource]) -> frozenset[SignalKind]:
+    return frozenset(kind for source in sources for kind in SOURCE_KINDS[source])

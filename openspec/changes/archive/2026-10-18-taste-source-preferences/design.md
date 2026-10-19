@@ -16,6 +16,13 @@ off invalidates the cached profile; switching back on invalidates it again. No
 rows are touched, so the toggle is instant and lossless. Deletion is a separate,
 explicit "Clear imported history" action.
 
+Profile builds freeze their eligible signal inputs before fetching vectors.
+Before publishing a result, the store acquires SQLite's write lock with a no-op
+update of the owning user and re-reads those inputs. It saves only if the inputs
+still match, in that same transaction, so a concurrent toggle, clear, reset,
+replacement signal, or rewatch cannot resurrect stale taste. A superseded build
+returns no profile and the next read can rebuild; no new version column is needed.
+
 ### 2. One per-user JSON column
 
 `users.taste_excluded_sources` holds the switched-off source names (empty by
@@ -23,6 +30,9 @@ default). Alternatives: a `use_for_taste` flag per linked account (but browsing
 has no link, and Seerr history would split across two places), or a settings
 table row per user (more machinery for four booleans). The source → kinds map is
 a constant in `recommend/signals.py`, the existing home for signal vocabulary.
+Source names match their linked-account providers (`seerr`, `plex`, `jellyfin`),
+with `browsing` independent of a link. These preferences are new, so no stored
+names or existing API callers need migration.
 
 ### 3. Off also means "stop collecting"
 
@@ -86,5 +96,7 @@ settings.
 **Database & migrations:** `0009` adds one non-secret column with a safe default;
 copies no data. Household endpoints never expose another member's sources (the
 profile is the only thing blended).
+The downgrade uses native SQLite DROP COLUMN, supported by the pinned production
+runtime, so the users table and its AUTOINCREMENT high-water mark stay intact.
 
 **Dependencies:** none added.

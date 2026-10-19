@@ -1,17 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AccountDialog } from "../components/AccountDialog";
 import { ConnectSeerr } from "../components/ConnectSeerr";
 import { JellyfinCredentialsForm } from "../components/JellyfinCredentialsForm";
 import { PlexConnect } from "../components/PlexConnect";
 import {
 	type AccountProvider,
+	type AccountResponse,
 	ApiError,
+	clearTasteSource,
 	createLinkPlexPin,
 	deleteAccount,
 	getAccount,
 	linkJellyfin,
 	pollLinkPlexPin,
+	setTasteSource,
+	type TasteSource,
 	type User,
 	unlinkAccount,
 } from "../lib/api";
@@ -22,6 +26,12 @@ import {
 } from "../lib/auth";
 
 const providerNames = { plex: "Plex", jellyfin: "Jellyfin", seerr: "Seerr" };
+const sourceLabels: Record<TasteSource, string> = {
+	plex: "Plex history",
+	jellyfin: "Jellyfin history",
+	seerr: "Seerr request history",
+	browsing: "Browsing activity",
+};
 
 export function Account({ user }: { user: User }) {
 	const cache = useQueryClient();
@@ -33,6 +43,20 @@ export function Account({ user }: { user: User }) {
 	const [deleteHistory, setDeleteHistory] = useState(false);
 	const [deleting, setDeleting] = useState(false);
 	const [confirm, setConfirm] = useState("");
+	const [clearing, setClearing] = useState<TasteSource | null>(null);
+	const accountsHeading = useRef<HTMLHeadingElement>(null);
+	const clearTrigger = useRef<HTMLButtonElement>(null);
+	const refreshTaste = () => {
+		for (const key of [
+			"home",
+			"rails",
+			"explain",
+			"household-members",
+			"taste-onboarding",
+		]) {
+			void cache.invalidateQueries({ queryKey: [key] });
+		}
+	};
 	const refresh = async () => {
 		await cache.invalidateQueries({ queryKey: ["account"] });
 		void cache.invalidateQueries({ queryKey: ["home"] });
@@ -64,10 +88,94 @@ export function Account({ user }: { user: User }) {
 				return setConfirmedSession(cache, null);
 		},
 	});
+	const toggle = useMutation({
+		mutationFn: setTasteSource,
+		onMutate: async (body) => {
+			const epoch = captureSession(cache);
+			await cache.cancelQueries({ queryKey: ["account"] });
+			const previous = cache.getQueryData<AccountResponse>(["account"]);
+			if (previous && isSessionCurrent(cache, epoch)) {
+				cache.setQueryData<AccountResponse>(["account"], {
+					...previous,
+					taste_sources: {
+						...previous.taste_sources,
+						[body.source]: body.enabled,
+					},
+				});
+			}
+			return { epoch, previous };
+		},
+		onError: (_error, _body, context) => {
+			if (context?.previous && isSessionCurrent(cache, context.epoch)) {
+				cache.setQueryData(["account"], context.previous);
+			}
+		},
+		onSuccess: (_data, _body, context) => {
+			if (isSessionCurrent(cache, context.epoch)) {
+				refreshTaste();
+				return cache.invalidateQueries({ queryKey: ["account"] });
+			}
+		},
+	});
+	const clear = useMutation({
+		mutationFn: clearTasteSource,
+		onMutate: () => captureSession(cache),
+		onSuccess: async (_data, _source, epoch) => {
+			if (!isSessionCurrent(cache, epoch)) return;
+			setClearing(null);
+			refreshTaste();
+			await refresh();
+		},
+	});
+	useEffect(() => {
+		if (!clear.isSuccess) return;
+		if (clearTrigger.current && !clearTrigger.current.isConnected) {
+			accountsHeading.current?.focus();
+		}
+		clearTrigger.current = null;
+	}, [clear.isSuccess]);
+	const sourceControls = (source: TasteSource) => (
+		<>
+			<label className="flex min-h-11 items-center gap-2">
+				<input
+					type="checkbox"
+					role="switch"
+					aria-checked={account.data?.taste_sources[source] ?? true}
+					checked={account.data?.taste_sources[source] ?? true}
+					disabled={toggle.isPending || clear.isPending}
+					onChange={(event) =>
+						toggle.mutate({ source, enabled: event.target.checked })
+					}
+				/>
+				Use {sourceLabels[source]} for recommendations
+			</label>
+			<button
+				type="button"
+				className="min-h-11 text-left underline"
+				aria-label={
+					source === "browsing"
+						? "Clear browsing activity"
+						: `Clear imported history from ${providerNames[source]}`
+				}
+				disabled={clear.isPending || toggle.isPending}
+				onClick={(event) => {
+					clearTrigger.current = event.currentTarget;
+					clear.reset();
+					setClearing(source);
+				}}
+			>
+				{source === "browsing"
+					? "Clear browsing activity"
+					: "Clear imported history"}
+			</button>
+		</>
+	);
 	return (
 		<main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
 			<h1 className="text-2xl font-semibold">Account</h1>
-			<h2 className="text-lg font-semibold">Connected accounts</h2>
+			<h2 ref={accountsHeading} tabIndex={-1} className="text-lg font-semibold">
+				Connected accounts
+			</h2>
 			{account.isPending && <p>Loading accounts…</p>}
 			{account.isError && <p role="alert">Could not load accounts.</p>}
 			{account.data?.providers.map((provider) => (
@@ -76,8 +184,12 @@ export function Account({ user }: { user: User }) {
 					className="flex flex-col gap-3 rounded border border-app-border bg-app-panel p-4"
 				>
 					<h3 className="font-semibold">{providerNames[provider.provider]}</h3>
-					<p>{provider.linked ? provider.display_name : "Not connected"}</p>
-					{!provider.available && <p>No longer available on this server</p>}
+					{(provider.linked || provider.available) && (
+						<p>{provider.linked ? provider.display_name : "Not connected"}</p>
+					)}
+					{!provider.available && provider.linked && (
+						<p>No longer available on this server</p>
+					)}
 					{provider.linked ? (
 						<>
 							<button
@@ -120,8 +232,18 @@ export function Account({ user }: { user: User }) {
 							</button>
 						))
 					)}
+					{sourceControls(provider.provider)}
 				</section>
 			))}
+			{account.data && (
+				<section className="flex flex-col gap-3 rounded border border-app-border bg-app-panel p-4">
+					<h2 className="text-lg font-semibold">Browsing activity</h2>
+					{sourceControls("browsing")}
+				</section>
+			)}
+			{toggle.isError && (
+				<p role="alert">Could not update taste source. Try again.</p>
+			)}
 			<section className="flex flex-col gap-3 rounded border border-status-error p-4">
 				<h2 className="text-lg font-semibold">Danger zone</h2>
 				<button
@@ -217,6 +339,37 @@ export function Account({ user }: { user: User }) {
 						Permanently delete account
 					</button>
 					{remove.isError && <p role="alert">Could not delete your account.</p>}
+				</AccountDialog>
+			)}
+			{clearing && (
+				<AccountDialog
+					title={`Clear ${sourceLabels[clearing]}`}
+					onCancel={() => setClearing(null)}
+				>
+					<p>
+						{clearing === "browsing"
+							? "Delete stored browsing activity?"
+							: "Delete history imported from this account?"}{" "}
+						Your source setting stays the same.
+					</p>
+					{clearing !== "browsing" && (
+						<p>
+							Recent activity may return on the next sync. If this source has
+							never finished syncing, its full history window may return. Switch
+							it off to stop importing.
+						</p>
+					)}
+					<button
+						type="button"
+						disabled={clear.isPending}
+						className="min-h-11 rounded bg-app-accent p-2 text-white"
+						onClick={() => clear.mutate(clearing)}
+					>
+						Confirm clear
+					</button>
+					{clear.isError && (
+						<p role="alert">Could not clear history. Try again.</p>
+					)}
 				</AccountDialog>
 			)}
 		</main>

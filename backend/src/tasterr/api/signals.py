@@ -11,10 +11,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.api.runtime_settings import RuntimeSettingsDep
-from tasterr.api.taste import refresh_profile
+from tasterr.api.taste import history_guard, refresh_profile
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
 from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.recommend import store
@@ -58,6 +59,17 @@ async def post_signal(
             db, authed.user.id, payload.media_type, payload.tmdb_id, payload.kind
         )
         recorded = False
+    elif payload.kind == "detail_open":
+        await db.commit()
+        async with history_guard(request, authed.user.id):
+            await db.execute(text("BEGIN IMMEDIATE"))
+            if "browsing" in await store.excluded_sources(db, authed.user.id):
+                await db.commit()
+                return SignalResponse(recorded=False)
+            recorded = await store.record_signal(
+                db, authed.user.id, payload.media_type, payload.tmdb_id, payload.kind
+            )
+            await db.commit()
     else:
         recorded = await store.record_signal(
             db, authed.user.id, payload.media_type, payload.tmdb_id, payload.kind

@@ -8,10 +8,11 @@ TBD - created by archiving change add-plex-play-and-taste-onboarding. Update Pur
 ### Requirement: Onboarding eligibility follows cold-start outcome
 
 `GET /api/v1/taste-onboarding` SHALL return, checked in this order: `done` when
-the user has any signal or has previously completed/dismissed the picker;
+the user has any signal of a kind that counts toward their profile (not from a
+source they switched off) or has previously completed/dismissed the picker;
 otherwise `pending` while any of the user's history syncs (Seerr request history
 or a watch-history sync) is reserved or running; otherwise `show`. A user with
-signals is therefore never `pending`, even while a routine sync runs. The endpoint SHALL use only the session user's server-side
+signals that count is therefore never `pending`, even while a routine sync runs. The endpoint SHALL use only the session user's server-side
 state and SHALL make no outbound request.
 
 #### Scenario: Seed is still running
@@ -26,8 +27,14 @@ state and SHALL make no outbound request.
 
 #### Scenario: Seed produced signals
 
-- **WHEN** the user has one or more stored signals
+- **WHEN** the user has one or more stored signals of kinds that count
 - **THEN** onboarding state is `done`
+
+#### Scenario: Only switched-off signals still offers the picker
+
+- **WHEN** an unseen user's only signals come from a source they switched off
+  and no sync is running
+- **THEN** onboarding state is `show`
 
 #### Scenario: Established user stays done during a routine sync
 

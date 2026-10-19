@@ -28,6 +28,7 @@ from tasterr.api.taste import (
     cancel_jellyfin_history,
     cancel_plex_history,
     cancel_seed,
+    cancel_source_history,
     history_guard,
     schedule_history,
 )
@@ -45,6 +46,8 @@ from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.catalog.plex import continue_watching_key
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.db.models import LinkedAccount, Provider, Signal, User, utcnow
+from tasterr.recommend import store
+from tasterr.recommend.signals import SOURCE_KINDS, TasteSource
 from tasterr.recommend.store import invalidate_profile
 from tasterr.settings import Settings, get_settings
 
@@ -69,6 +72,7 @@ class AccountProvider(BaseModel):
 
 class AccountResponse(BaseModel):
     providers: list[AccountProvider]
+    taste_sources: dict[TasteSource, bool]
 
 
 class LinkPollResponse(BaseModel):
@@ -90,12 +94,65 @@ class DeleteAccountBody(BaseModel):
     confirm: str = Field(max_length=4096)
 
 
+class TasteSourceBody(BaseModel):
+    source: TasteSource
+    enabled: bool
+
+
+@router.post(
+    "/account/taste-sources",
+    status_code=204,
+    dependencies=[Depends(require_same_origin), Depends(mutation_rate_limit)],
+)
+async def set_taste_source(
+    payload: TasteSourceBody, authed: Member, db: Db, settings: Config, request: Request
+) -> None:
+    user_id = authed.user.id
+    await db.commit()
+    async with history_guard(request, user_id):
+        if not payload.enabled:
+            await cancel_source_history(request, user_id, payload.source)
+        await db.execute(text("BEGIN IMMEDIATE"))
+        changed = await store.set_source_enabled(db, user_id, payload.source, payload.enabled)
+        if changed and payload.enabled and payload.source != "browsing":
+            link = await get_link(db, user_id, payload.source)
+            if link is not None:
+                link.sync_attempted_at = None
+                link.sync_synced_at = None
+        await db.commit()
+    if changed and payload.enabled and payload.source != "browsing":
+        await schedule_history(request, settings, db, user_id, source=payload.source)
+
+
+@router.post(
+    "/account/taste-sources/{source}/clear",
+    status_code=204,
+    dependencies=[Depends(require_same_origin), Depends(mutation_rate_limit)],
+)
+async def clear_taste_source(source: TasteSource, authed: Member, db: Db, request: Request) -> None:
+    user_id = authed.user.id
+    await db.commit()
+    async with history_guard(request, user_id):
+        await cancel_source_history(request, user_id, source)
+        await db.execute(text("BEGIN IMMEDIATE"))
+        await db.execute(
+            delete(Signal).where(Signal.user_id == user_id, Signal.kind.in_(SOURCE_KINDS[source]))
+        )
+        await invalidate_profile(db, user_id)
+        await db.commit()
+
+
 @router.get("/account", response_model=AccountResponse)
 async def account_summary(authed: Member, db: Db, settings: Config) -> AccountResponse:
     links = (
         await db.scalars(select(LinkedAccount).where(LinkedAccount.user_id == authed.user.id))
     ).all()
+    retained_kinds = set(
+        await db.scalars(select(Signal.kind).where(Signal.user_id == authed.user.id).distinct())
+    )
+    excluded = await store.excluded_sources(db, authed.user.id)
     return AccountResponse(
+        taste_sources={source: source not in excluded for source in SOURCE_KINDS},
         providers=[
             AccountProvider(
                 provider=provider,
@@ -113,7 +170,8 @@ async def account_summary(authed: Member, db: Db, settings: Config) -> AccountRe
             if (link := next((item for item in links if item.provider == provider), None))
             is not None
             or provider_available(settings, provider)
-        ]
+            or bool(SOURCE_KINDS[provider] & retained_kinds)
+        ],
     )
 
 
@@ -308,12 +366,7 @@ async def unlink_account(
     # Release the auth read before waiting, so it cannot block the current writer's commit.
     await db.commit()
     async with history_guard(request, user_id):
-        if provider == "seerr":
-            await cancel_seed(request, user_id)
-        elif provider == "plex":
-            await cancel_plex_history(request, user_id)
-        else:
-            await cancel_jellyfin_history(request, user_id)
+        await cancel_source_history(request, user_id, provider)
         await db.execute(text("BEGIN IMMEDIATE"))
         links = (
             await db.scalars(select(LinkedAccount).where(LinkedAccount.user_id == user_id))
@@ -335,12 +388,7 @@ async def unlink_account(
             await db.execute(
                 delete(Signal).where(
                     Signal.user_id == user_id,
-                    Signal.kind
-                    == {
-                        "seerr": "seed_request_history",
-                        "plex": "watched_plex",
-                        "jellyfin": "watched_jellyfin",
-                    }[provider],
+                    Signal.kind.in_(SOURCE_KINDS[provider]),
                 )
             )
             await invalidate_profile(db, user_id)

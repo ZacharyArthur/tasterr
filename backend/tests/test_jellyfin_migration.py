@@ -20,6 +20,7 @@ async def test_upgrade_upserts_all_unique_kinds_and_downgrade_has_no_orphans(
             assert (await connection.execute(text("PRAGMA foreign_keys"))).scalar_one() == 1
             await connection.commit()
             await connection.run_sync(_upgrade, "0008")
+            await connection.run_sync(_upgrade, "head")
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
             for user_id in (1, 2, 3):

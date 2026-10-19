@@ -23,7 +23,7 @@ from tasterr.db.models import Signal, utcnow
 from tasterr.recommend import store
 from tasterr.recommend.explain import Explanation, explain
 from tasterr.recommend.features import FeatureRecord, build_record
-from tasterr.recommend.profile import SignalInput, blend_profiles, compute_profile
+from tasterr.recommend.profile import blend_profiles, compute_profile
 from tasterr.recommend.scorer import (
     Candidate,
     engaged_titles,
@@ -117,18 +117,19 @@ class TasteService:
         return await self.recompute_profile(user_id)
 
     async def recompute_profile(self, user_id: int) -> dict[str, float]:
-        signals = await store.load_signals(self._db, user_id)
+        signals = await store.load_profile_inputs(self._db, user_id)
         if not signals:
             return {}
-        keys = [_key(signal) for signal in signals]
+        keys = [signal.key for signal in signals]
         vectors = await self.ensure_vectors(keys)
         vector = compute_profile(
-            [SignalInput(_key(s), s.weight, s.created_at) for s in signals],
+            signals,
             {key: record.vector for key, record in vectors.items()},
             utcnow(),
         )
-        await store.save_profile(self._db, user_id, vector)
-        return vector
+        if await store.save_profile_if_current(self._db, user_id, vector, signals):
+            return vector
+        return {}
 
     # ── rails ──────────────────────────────────────────────────────────────
 
@@ -141,7 +142,12 @@ class TasteService:
         hidden = hidden_titles(kinds)
         # Hidden and already-engaged titles never *surface*; engaged titles
         # still *source* the pool (their recs are the recommendations).
-        pool = await self._candidate_pool(profile, signals, hidden, hidden | engaged_titles(kinds))
+        pool = await self._candidate_pool(
+            profile,
+            await store.load_taste_signals(self._db, user_id),
+            hidden,
+            hidden | engaged_titles(kinds),
+        )
         if not pool:
             return []
         candidates = await self._to_candidates(list(pool))
@@ -154,7 +160,7 @@ class TasteService:
         profile = await self.profile_vector(user_id)
         if not profile:
             return None
-        signals = await store.load_signals(self._db, user_id)
+        signals = await store.load_taste_signals(self._db, user_id)
         hidden = hidden_titles((_key(s), _kind(s)) for s in signals)
         source_keys = self._source_titles(signals, hidden)
         Random(f"more-like:{user_id}:{date.today().isoformat()}").shuffle(source_keys)
@@ -209,7 +215,7 @@ class TasteService:
             kinds = [(_key(signal), _kind(signal)) for signal in signals]
             hidden = hidden_titles(kinds)
             vetoed.update(hidden | engaged_titles(kinds))
-            members.append((profile, signals, hidden))
+            members.append((profile, await store.load_taste_signals(self._db, user_id), hidden))
 
         profile = blend_profiles(member_profile for member_profile, _, _ in members)
         if not profile:

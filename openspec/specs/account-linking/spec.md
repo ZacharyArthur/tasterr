@@ -260,7 +260,10 @@ are set, Seerr when Seerr is configured, each also requiring
 it linked and
 that link's display name and link time, plus whether unlinking is allowed. A
 provider the caller has linked but that is no longer configured SHALL also be
-returned, flagged `available: false`. It
+returned, flagged `available: false`. A provider that is neither configured nor
+linked but for which the caller still has imported signals SHALL also be
+returned, flagged `available: false` and unlinked, so its taste-source controls
+stay reachable. It
 SHALL NOT return provider account ids, credentials, sync internals, or any other
 user's data. Linking SHALL be: Plex via a session-gated PIN flow
 (`POST /api/v1/account/links/plex/pin` and `.../pin/poll`, mirroring sign-in
@@ -294,7 +297,8 @@ the link poll SHALL refuse sign-in handles the same way. Failures SHALL be gener
 
 - **WHEN** a member requests `/account`
 - **THEN** the response lists configured providers, plus any linked provider no
-  longer configured flagged `available: false`, each with linked state,
+  longer configured, and any unconfigured provider with retained imported
+  signals, the last two flagged `available: false`, each with linked state,
   display name, link time, and unlink eligibility, and no ids or credentials
 
 #### Scenario: Link Seerr with the stored Plex token
@@ -418,8 +422,9 @@ The SPA SHALL provide an `/account` route for every signed-in user, reached from
 the avatar menu, while `/settings` stays admin-only. It SHALL show a Connected
 accounts section with one card per configured provider (linked state, account
 name, Link or Unlink in the sign-in button style) and a danger zone with "Delete
-my Tasterr account". Unconfigured providers SHALL be hidden unless the member has them linked; a
-linked provider that is no longer configured SHALL keep a card marked "no longer
+my Tasterr account". Unconfigured providers SHALL be hidden unless the member has them linked or still
+has imported signals from them; an unlinked one kept for its signals shows only
+its taste-source controls, and a linked provider that is no longer configured SHALL keep a card marked "no longer
 available on this server" with Unlink. Unlink SHALL confirm
 with an unticked "Also delete history imported from this account" option and
 SHALL be disabled with "This is your only way to sign in" when no other link can
@@ -444,6 +449,13 @@ account from its account page, then link again.
 - **WHEN** linking fails because the account belongs to another Tasterr user
 - **THEN** the page explains how to keep one Tasterr account, delete the other,
   and relink, without naming the other user
+
+#### Scenario: Retained history keeps a card after the provider is removed
+
+- **WHEN** a member unlinked Jellyfin, kept its history, and the operator then
+  removed Jellyfin
+- **THEN** a Jellyfin card with only the taste-source toggle and clear action
+  remains
 
 ### Requirement: Links to an unconfigured provider are dormant
 

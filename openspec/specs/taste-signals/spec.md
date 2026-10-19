@@ -12,6 +12,8 @@ user with a validated body: `media_type` constrained to `movie` or `tv`, an
 integer `tmdb_id` between 1 and 2,147,483,647 inclusive, and `kind` constrained
 to the client-recordable kinds — `detail_open`, `watchlist`, `not_interested`.
 Each stored signal SHALL carry its kind's fixed weight and a creation timestamp.
+A `detail_open` post SHALL succeed without storing anything while the user has
+switched off the `browsing` taste source.
 Signals SHALL be scoped to the authenticated user only: a signal is attributed
 to the session user, and no endpoint SHALL expose one user's signals to another.
 
@@ -35,6 +37,11 @@ to the session user, and no endpoint SHALL expose one user's signals to another.
 
 - **WHEN** the posted `tmdb_id` is outside the supported range
 - **THEN** input validation rejects it before any signal or profile side effect
+
+#### Scenario: Browsing switched off
+
+- **WHEN** a user with `browsing` switched off posts a `detail_open` signal
+- **THEN** the response is success and no signal row is stored
 
 ### Requirement: Server-recorded kinds are not accepted from the client
 

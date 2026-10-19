@@ -14,6 +14,11 @@ from tasterr.settings import Settings
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 READ_ONLY_POSTS = {("POST", "/api/v1/availability")}
 EXPECTED_GUARDS = {
+    ("POST", "/api/v1/account/taste-sources"): {"require_same_origin", "mutation_rate_limit"},
+    ("POST", "/api/v1/account/taste-sources/{source}/clear"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+    },
     ("POST", "/api/v1/account/links/jellyfin"): {
         "require_same_origin",
         "mutation_rate_limit",
@@ -135,6 +140,8 @@ def test_every_response_bearing_api_route_has_an_explicit_model() -> None:
             "/api/v1/account/links/jellyfin",
             "/api/v1/account/links/{provider}/unlink",
             "/api/v1/account/delete",
+            "/api/v1/account/taste-sources",
+            "/api/v1/account/taste-sources/{source}/clear",
         )
     }  # intentional 204 responses
 

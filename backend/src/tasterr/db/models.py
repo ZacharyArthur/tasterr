@@ -1,10 +1,37 @@
 """Local identities, linked accounts, sessions, and taste storage."""
 
+import logging
 from datetime import UTC, datetime
 from typing import Literal, get_args
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, text
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
+from sqlalchemy.types import TypeDecorator
+
+from tasterr.recommend.signals import TasteSource
+
+_SOURCES = TypeAdapter(list[TasteSource])
+logger = logging.getLogger("tasterr.db")
+
+
+class TasteSources(TypeDecorator[list[TasteSource]]):
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value: object, dialect: Dialect) -> str:
+        return _SOURCES.dump_json(_SOURCES.validate_python(value)).decode()
+
+    def process_result_value(self, value: object, dialect: Dialect) -> list[TasteSource]:
+        try:
+            if isinstance(value, str):
+                return _SOURCES.validate_json(value)
+        except ValidationError:
+            pass
+        logger.warning("taste sources: unreadable preferences")
+        return []
+
 
 Provider = Literal["plex", "jellyfin", "seerr"]
 SIGNAL_UNIQUE_INDEX_WHERE = text(
@@ -32,6 +59,9 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(default=False)
     taste_onboarding_seen: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
     seerr_unlinked_at: Mapped[datetime | None] = mapped_column(DateTime())
+    taste_excluded_sources: Mapped[list[TasteSource]] = mapped_column(
+        TasteSources(), default=list, server_default=text("'[]'")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     last_login_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
 

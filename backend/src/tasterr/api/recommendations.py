@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import exists, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.api.availability import get_availability
@@ -25,7 +25,7 @@ from tasterr.api.taste import (
 from tasterr.auth.deps import AuthedSession, get_db, require_same_origin, require_session
 from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.catalog.models import Rail
-from tasterr.db.models import LinkedAccount, Signal, User
+from tasterr.db.models import LinkedAccount, User
 from tasterr.rails.registry import MIN_RAIL_ITEMS
 from tasterr.recommend import store
 from tasterr.recommend.signals import MediaType
@@ -116,19 +116,21 @@ async def household_blend(
     )
 
 
-async def _load_household_members(db: AsyncSession) -> list[HouseholdMember]:
-    has_signals = exists(select(Signal.id).where(Signal.user_id == User.id))
-    result = await db.execute(
-        select(User.id, User.display_name, User.avatar_url, has_signals).order_by(User.id)
-    )
+async def _load_household_members(
+    db: AsyncSession, user_ids: list[int] | None = None
+) -> list[HouseholdMember]:
+    query = select(User).order_by(User.id)
+    if user_ids is not None:
+        query = query.where(User.id.in_(user_ids))
+    users = await db.scalars(query)
     return [
         HouseholdMember(
-            id=user_id,
-            display_name=display_name,
-            avatar_url=avatar_url,
-            has_taste_signals=has_taste_signals,
+            id=user.id,
+            display_name=user.display_name,
+            avatar_url=user.avatar_url,
+            has_taste_signals=await store.has_signals(db, user.id),
         )
-        for user_id, display_name, avatar_url, has_taste_signals in result.all()
+        for user in users
     ]
 
 
@@ -137,11 +139,10 @@ async def _validate_household_audience(
 ) -> list[int]:
     if caller_id not in requested_ids:
         raise _blend_unavailable()
-    has_signals = exists(select(Signal.id).where(Signal.user_id == User.id))
-    result = await db.execute(
-        select(User.id, has_signals).where(User.id.in_(requested_ids)).order_by(User.id)
-    )
-    members = {user_id: eligible for user_id, eligible in result.all()}
+    members = {
+        member.id: member.has_taste_signals
+        for member in await _load_household_members(db, requested_ids)
+    }
     if len(members) != len(requested_ids) or not all(members.values()):
         raise _blend_unavailable()
     return sorted(members)

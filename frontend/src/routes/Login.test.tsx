@@ -715,12 +715,14 @@ test.each([
 	}
 	expect(await screen.findByText(message)).toBeTruthy();
 	expect(screen.queryByText("Waiting for Plex approval…")).toBeNull();
-	expect(
-		cache
-			.getQueryCache()
-			.findAll({ type: "active" })
-			.some((query) => query.queryKey.includes("conflict")),
-	).toBe(false);
+	await vi.waitFor(() =>
+		expect(
+			cache
+				.getQueryCache()
+				.findAll({ type: "active" })
+				.some((query) => query.queryKey.includes("conflict")),
+		).toBe(false),
+	);
 	expect(
 		mock.mock.calls.filter(([url]) => String(url).endsWith("/pin/poll")),
 	).toHaveLength(method === "plex" ? 1 : 0);

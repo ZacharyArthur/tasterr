@@ -263,7 +263,7 @@ async def test_migration_0006_preserves_data_and_matches_user_model(tmp_path: Pa
             "plex_history_synced_at",
             "seerr_user_id",
             "auth_type",
-        } == model_columns - {"seerr_unlinked_at"}
+        } == model_columns - {"seerr_unlinked_at", "taste_excluded_sources"}
     finally:
         await engine.dispose()
 

@@ -23,7 +23,7 @@ from tasterr.recommend.seed import seed_in_background
 
 
 @pytest.mark.parametrize("provider", ["plex", "seerr", "jellyfin"])
-@pytest.mark.parametrize("action", ["unlink", "delete", "reset"])
+@pytest.mark.parametrize("action", ["unlink", "delete", "reset", "switch-off", "clear"])
 async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: Provider, action: str
 ) -> None:
@@ -114,8 +114,14 @@ async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
             )
         elif action == "delete":
             response = await client.post("/api/v1/account/delete", json={"confirm": "Viewer"})
-        else:
+        elif action == "reset":
             response = await client.post("/api/v1/recommendations/reset")
+        elif action == "switch-off":
+            response = await client.post(
+                "/api/v1/account/taste-sources", json={"source": provider, "enabled": False}
+            )
+        else:
+            response = await client.post(f"/api/v1/account/taste-sources/{provider}/clear")
         assert response.status_code == 204
         assert cancelled.is_set() and task.cancelled()
         assert tasks == {} and state.seeding == set()
@@ -126,6 +132,11 @@ async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
             if action == "reset":
                 assert link is not None
                 assert link.sync_attempted_at is link.sync_synced_at is None
+            elif action in ("switch-off", "clear"):
+                assert link is not None and link.sync_attempted_at is not None
+                user = await db.get(User, 1)
+                assert user is not None
+                assert (provider in user.taste_excluded_sources) is (action == "switch-off")
             else:
                 assert link is None
             assert (await db.get(User, 1) is None) is (action == "delete")

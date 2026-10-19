@@ -14,21 +14,31 @@ from datetime import datetime
 from typing import Any, cast
 
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import delete, select, tuple_
+from sqlalchemy import delete, select, tuple_, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.db.io import finish_io
-from tasterr.db.models import SIGNAL_UNIQUE_INDEX_WHERE, Profile, Signal, TitleFeatures, utcnow
+from tasterr.db.models import (
+    SIGNAL_UNIQUE_INDEX_WHERE,
+    Profile,
+    Signal,
+    TitleFeatures,
+    User,
+    utcnow,
+)
 from tasterr.recommend.features import FeatureRecord
+from tasterr.recommend.profile import SignalInput
 from tasterr.recommend.signals import (
     SIGNAL_WEIGHTS,
     TOGGLE_KINDS,
     UNIQUE_PER_TITLE_KINDS,
     MediaType,
     SignalKind,
+    TasteSource,
     TitleKey,
+    excluded_kinds,
 )
 
 _VECTOR = TypeAdapter(dict[str, float])
@@ -142,17 +152,62 @@ async def load_signals(db: AsyncSession, user_id: int) -> list[Signal]:
     """All of one user's signals, newest first."""
     result = await finish_io(
         db.execute(
-            select(Signal).where(Signal.user_id == user_id).order_by(Signal.created_at.desc())
+            select(Signal)
+            .where(Signal.user_id == user_id)
+            .order_by(Signal.created_at.desc())
+            .execution_options(populate_existing=True)
         )
     )
     return list(result.scalars().all())
 
 
 async def has_signals(db: AsyncSession, user_id: int) -> bool:
+    excluded = excluded_kinds(await excluded_sources(db, user_id))
     result = await finish_io(
-        db.execute(select(Signal.id).where(Signal.user_id == user_id).limit(1))
+        db.execute(
+            select(Signal.id)
+            .where(Signal.user_id == user_id, Signal.kind.not_in(excluded))
+            .limit(1)
+        )
     )
     return result.first() is not None
+
+
+async def excluded_sources(db: AsyncSession, user_id: int) -> list[TasteSource]:
+    sources = await finish_io(
+        db.scalar(select(User.taste_excluded_sources).where(User.id == user_id))
+    )
+    return sources if sources is not None else []
+
+
+async def load_taste_signals(db: AsyncSession, user_id: int) -> list[Signal]:
+    excluded = excluded_kinds(await excluded_sources(db, user_id))
+    return [signal for signal in await load_signals(db, user_id) if signal.kind not in excluded]
+
+
+async def load_profile_inputs(db: AsyncSession, user_id: int) -> list[SignalInput]:
+    return [
+        SignalInput(
+            ("tv" if row.media_type == "tv" else "movie", row.tmdb_id), row.weight, row.created_at
+        )
+        for row in await load_taste_signals(db, user_id)
+    ]
+
+
+async def set_source_enabled(
+    db: AsyncSession, user_id: int, source: TasteSource, enabled: bool
+) -> bool:
+    user = await finish_io(db.get(User, user_id, populate_existing=True))
+    if user is None:
+        return False
+    sources = user.taste_excluded_sources
+    if enabled == (source not in sources):
+        return False
+    user.taste_excluded_sources = (
+        [item for item in sources if item != source] if enabled else [*sources, source]
+    )
+    await invalidate_profile(db, user_id)
+    return True
 
 
 async def load_features(
@@ -236,6 +291,17 @@ async def save_profile(db: AsyncSession, user_id: int, vector: dict[str, float])
         set_={"vector": statement.excluded.vector, "computed_at": statement.excluded.computed_at},
     )
     await finish_io(db.execute(statement))
+
+
+async def save_profile_if_current(
+    db: AsyncSession, user_id: int, vector: dict[str, float], inputs: list[SignalInput]
+) -> bool:
+    # Acquire SQLite's write lock before checking, so invalidation cannot race publication.
+    await finish_io(db.execute(update(User).where(User.id == user_id).values(id=User.id)))
+    if sorted(await load_profile_inputs(db, user_id)) != sorted(inputs):
+        return False
+    await save_profile(db, user_id, vector)
+    return True
 
 
 async def title_toggles(
