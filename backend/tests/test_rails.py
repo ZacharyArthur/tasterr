@@ -21,6 +21,7 @@ from tasterr.catalog.models import (
 from tasterr.catalog.plex import PlexCatalogService
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamUnavailable
+from tasterr.db.models import User
 from tasterr.rails.composer import build_extra_rails, build_home
 from tasterr.rails.registry import (
     EXTRA_PAGE_SIZE,
@@ -192,9 +193,8 @@ def _resume(*ids: int) -> list[MediaSummary]:
 
 
 def _plex_ctx(fake: FakeCatalog, plex: FakePlexCatalog) -> RailContext:
-    from tasterr.db.models import User
 
-    user = User(id=1, seerr_user_id=1, display_name="member", auth_type="plex")
+    user = User(id=1, display_name="member")
     return RailContext(
         cast("CatalogService", fake),
         user=user,
@@ -845,10 +845,9 @@ class FakeTaste:
 
 
 def _personal_ctx(fake: FakeCatalog, taste: FakeTaste) -> RailContext:
-    from tasterr.db.models import User
     from tasterr.recommend.service import TasteService
 
-    user = User(id=1, seerr_user_id=1, display_name="member", auth_type="plex", is_admin=False)
+    user = User(id=1, display_name="member", is_admin=False)
     return RailContext(cast("CatalogService", fake), user=user, taste=cast("TasteService", taste))
 
 
@@ -884,7 +883,7 @@ async def test_personalized_home_orders_and_titles_rails() -> None:
     assert [item.id for item in my_list.items] == [500]
 
 
-async def test_plex_watch_source_uses_honest_more_like_title() -> None:
+async def test_watch_source_uses_honest_more_like_title() -> None:
     taste = FakeTaste()
     taste.more_like_result = ("Top Gun", True, [_summary(700 + i) for i in range(6)])
 

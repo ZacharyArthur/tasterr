@@ -7,7 +7,7 @@ import {
 	screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { ME_QUERY_KEY } from "../lib/auth";
+import { ME_QUERY_KEY, setConfirmedSession } from "../lib/auth";
 import { Login } from "./Login";
 
 beforeEach(() => {
@@ -29,7 +29,15 @@ function stubFetch(routes: Record<string, Route>) {
 		// from the Plex create (POST /pin) under the same path prefix.
 		const method = init?.method ?? "GET";
 		const key = `${method} ${String(input)}`;
-		const route = routes[key] ?? routes[String(input)];
+		const route =
+			routes[key] ??
+			routes[String(input)] ??
+			(key === "GET /api/v1/auth/methods"
+				? () => ({
+						status: 200,
+						body: { plex: true, jellyfin: true, seerr: true },
+					})
+				: undefined);
 		if (route === undefined) {
 			throw new Error(`unexpected fetch: ${String(input)}`);
 		}
@@ -44,7 +52,7 @@ function stubFetch(routes: Record<string, Route>) {
 	return mock;
 }
 
-function renderLogin(
+async function renderLogin(
 	queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	}),
@@ -53,6 +61,11 @@ function renderLogin(
 		<QueryClientProvider client={queryClient}>
 			<Login />
 		</QueryClientProvider>,
+	);
+	await vi.waitFor(() =>
+		expect(queryClient.getQueryState(["auth", "methods"])?.status).toBe(
+			"success",
+		),
 	);
 	return queryClient;
 }
@@ -63,6 +76,49 @@ const USER = {
 	avatar_url: null,
 	is_admin: false,
 };
+
+test.each([
+	{ plex: true, jellyfin: false, seerr: false },
+	{ plex: false, jellyfin: true, seerr: false },
+	{ plex: false, jellyfin: false, seerr: true },
+	{ plex: true, jellyfin: true, seerr: true },
+	{ plex: false, jellyfin: false, seerr: false },
+])("shows only available methods: %j", async (methods) => {
+	const fetch = stubFetch({
+		"GET /api/v1/auth/methods": () => ({ status: 200, body: methods }),
+	});
+	await renderLogin();
+	expect(
+		Boolean(screen.queryByRole("button", { name: "Continue with Plex" })),
+	).toBe(methods.plex);
+	expect(
+		Boolean(screen.queryByRole("button", { name: "Continue with Seerr" })),
+	).toBe(methods.seerr);
+	expect(
+		Boolean(screen.queryByRole("button", { name: "Continue with Jellyfin" })),
+	).toBe(methods.jellyfin);
+	expect(screen.queryByLabelText("Email")).toBeNull();
+	if (!methods.plex && !methods.jellyfin && !methods.seerr)
+		expect(screen.getByRole("alert").textContent).toBe(
+			"Sign-in is currently unavailable.",
+		);
+	expect(fetch).toHaveBeenCalledOnce();
+});
+
+test("Seerr form expands and collapses in place", async () => {
+	stubFetch({});
+	await renderLogin();
+	const button = screen.getByRole("button", { name: "Continue with Seerr" });
+	expect(button.getAttribute("aria-expanded")).toBe("false");
+	expect(screen.queryByLabelText("Email")).toBeNull();
+	fireEvent.click(button);
+	expect(button.getAttribute("aria-expanded")).toBe("true");
+	expect(screen.getByLabelText("Email")).toBeTruthy();
+	expect(screen.getByLabelText("Password")).toBeTruthy();
+	fireEvent.click(button);
+	expect(button.getAttribute("aria-expanded")).toBe("false");
+	expect(screen.queryByLabelText("Email")).toBeNull();
+});
 
 function fakeApprovalWindow(closed = false) {
 	const close = vi.fn();
@@ -105,9 +161,9 @@ test("plex flow protects and closes its approval window after polling succeeds",
 		defaultOptions: { queries: { retry: false } },
 	});
 	queryClient.setQueryData(["title", "movie", 7], { owner: "A" });
-	renderLogin(queryClient);
+	await renderLogin(queryClient);
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	await screen.findByText("Waiting for Plex approval…");
 	const approvalLink = screen.getByRole("link", {
@@ -167,9 +223,9 @@ test("plex flow rejects a completed poll without a user", async () => {
 		defaultOptions: { queries: { retry: false } },
 	});
 	queryClient.setQueryData(["pre-login"], "keep");
-	renderLogin(queryClient);
+	await renderLogin(queryClient);
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	expect(
 		await screen.findByText("Plex sign-in failed — try again."),
@@ -180,7 +236,7 @@ test("plex flow rejects a completed poll without a user", async () => {
 	expect(
 		(
 			screen.getByRole("button", {
-				name: "Sign in with Plex",
+				name: "Continue with Plex",
 			}) as HTMLButtonElement
 		).disabled,
 	).toBe(false);
@@ -205,16 +261,16 @@ test("plex flow: expired handle surfaces a retry message", async () => {
 		"open",
 		vi.fn(() => approval),
 	);
-	renderLogin();
+	await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	expect(
 		await screen.findByText("Plex sign-in expired — try again."),
 	).toBeTruthy();
 	// The button is armed again for a fresh attempt.
 	expect(
-		screen.getByRole("button", { name: "Sign in with Plex" }),
+		screen.getByRole("button", { name: "Continue with Plex" }),
 	).toBeTruthy();
 	expect(close).toHaveBeenCalledOnce();
 });
@@ -228,9 +284,9 @@ test("plex flow closes its blank window when PIN creation fails", async () => {
 		"open",
 		vi.fn(() => approval),
 	);
-	renderLogin();
+	await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	expect(
 		await screen.findByText("Could not reach Plex — try again."),
@@ -256,9 +312,9 @@ test("plex flow can complete when the approval window is blocked", async () => {
 		"open",
 		vi.fn(() => null),
 	);
-	const queryClient = renderLogin();
+	const queryClient = await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	await vi.waitFor(() =>
 		expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER),
@@ -299,9 +355,9 @@ test("plex flow shows a reachable approval link after popup blocking", async () 
 		configurable: true,
 		value: execCommand,
 	});
-	renderLogin();
+	await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	const link = await screen.findByRole("link", { name: "open it here" });
 	expect((link as HTMLAnchorElement).href).toBe("https://app.plex.tv/auth#?x");
@@ -316,6 +372,7 @@ test("plex flow shows a reachable approval link after popup blocking", async () 
 	const copyButton = screen.getByRole("button", {
 		name: "Copy approval URL",
 	});
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Seerr" }));
 	const email = screen.getByLabelText("Email");
 	email.focus();
 	fireEvent.click(copyButton);
@@ -347,9 +404,9 @@ test("plex flow re-announces repeated copy results", async () => {
 		"open",
 		vi.fn(() => approval),
 	);
-	renderLogin();
+	await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 	const copyButton = await screen.findByRole("button", {
 		name: "Copy approval URL",
 	});
@@ -396,9 +453,9 @@ test("plex flow ignores copy feedback after the PIN expires", async () => {
 		"open",
 		vi.fn(() => approval),
 	);
-	renderLogin();
+	await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 	const copyButton = await screen.findByRole("button", {
 		name: "Copy approval URL",
 	});
@@ -443,12 +500,13 @@ test("plex flow reports when both clipboard paths fail", async () => {
 		"open",
 		vi.fn(() => null),
 	);
-	renderLogin();
+	await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 	const copyButton = await screen.findByRole("button", {
 		name: "Copy approval URL",
 	});
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Seerr" }));
 	const email = screen.getByLabelText("Email");
 	email.focus();
 	const restoreFocus = vi.spyOn(email, "focus").mockImplementation(() => {
@@ -475,9 +533,9 @@ test("plex flow centers the approval window in the current browser window", asyn
 	const { approval } = fakeApprovalWindow();
 	const open = vi.fn(() => approval);
 	vi.stubGlobal("open", open);
-	renderLogin();
+	await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	expect(open).toHaveBeenCalledWith(
 		"",
@@ -508,9 +566,9 @@ test("plex flow can complete after the user closes the approval window", async (
 		"open",
 		vi.fn(() => approval),
 	);
-	const queryClient = renderLogin();
+	const queryClient = await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	await vi.waitFor(() =>
 		expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER),
@@ -548,9 +606,9 @@ test("plex flow can complete when the browser severs the approval proxy", async 
 		"open",
 		vi.fn(() => approval),
 	);
-	const queryClient = renderLogin();
+	const queryClient = await renderLogin();
 
-	fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
 
 	await vi.waitFor(() =>
 		expect(queryClient.getQueryData(ME_QUERY_KEY)).toEqual(USER),
@@ -566,8 +624,9 @@ test("local login posts credentials and refreshes auth state", async () => {
 		defaultOptions: { queries: { retry: false } },
 	});
 	queryClient.setQueryData(["home"], { owner: "A" });
-	renderLogin(queryClient);
+	await renderLogin(queryClient);
 
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Seerr" }));
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "a@b.c" },
 	});
@@ -597,8 +656,9 @@ test("local login failure shows the generic backend message", async () => {
 			body: { detail: "Invalid email or password" },
 		}),
 	});
-	renderLogin();
+	await renderLogin();
 
+	fireEvent.click(screen.getByRole("button", { name: "Continue with Seerr" }));
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "a@b.c" },
 	});
@@ -608,4 +668,129 @@ test("local login failure shows the generic backend message", async () => {
 	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
 	expect(await screen.findByText("Invalid email or password")).toBeTruthy();
+});
+
+test.each([
+	"plex",
+	"local",
+	"jellyfin",
+])("%s conflict shows server guidance and stops polling", async (method) => {
+	const message =
+		"Sign in with each account, keep one, delete the other, then link again.";
+	const mock = stubFetch({
+		"POST /api/v1/auth/plex/pin": () => ({
+			status: 200,
+			body: { pin_id: "conflict", auth_url: "https://app.plex.tv/auth" },
+		}),
+		"POST /api/v1/auth/plex/pin/poll": () => ({
+			status: 409,
+			body: { detail: message },
+		}),
+		"/api/v1/auth/local": () => ({ status: 409, body: { detail: message } }),
+		"/api/v1/auth/jellyfin": () => ({ status: 409, body: { detail: message } }),
+	});
+	vi.stubGlobal("open", () => null);
+	const cache = await renderLogin();
+	if (method === "plex")
+		fireEvent.click(screen.getByRole("button", { name: "Continue with Plex" }));
+	else {
+		fireEvent.click(
+			screen.getByRole("button", {
+				name:
+					method === "jellyfin"
+						? "Continue with Jellyfin"
+						: "Continue with Seerr",
+			}),
+		);
+		fireEvent.change(
+			screen.getByLabelText(method === "jellyfin" ? "Username" : "Email"),
+			{
+				target: { value: "a@b.c" },
+			},
+		);
+		fireEvent.change(screen.getByLabelText("Password"), {
+			target: { value: "pw" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+	}
+	expect(await screen.findByText(message)).toBeTruthy();
+	expect(screen.queryByText("Waiting for Plex approval…")).toBeNull();
+	await vi.waitFor(() =>
+		expect(
+			cache
+				.getQueryCache()
+				.findAll({ type: "active" })
+				.some((query) => query.queryKey.includes("conflict")),
+		).toBe(false),
+	);
+	expect(
+		mock.mock.calls.filter(([url]) => String(url).endsWith("/pin/poll")),
+	).toHaveLength(method === "plex" ? 1 : 0);
+});
+
+test("Jellyfin form expands in place and resets cached session data on success", async () => {
+	const fetch = stubFetch({
+		"/api/v1/auth/jellyfin": () => ({ status: 200, body: USER }),
+	});
+	const cache = await renderLogin();
+	cache.setQueryData(["home"], { owner: "prior" });
+	fireEvent.click(
+		screen.getByRole("button", { name: "Continue with Jellyfin" }),
+	);
+	fireEvent.change(screen.getByLabelText("Username"), {
+		target: { value: "viewer" },
+	});
+	fireEvent.change(screen.getByLabelText("Password"), {
+		target: { value: "pw" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+	await vi.waitFor(() =>
+		expect(cache.getQueryData(ME_QUERY_KEY)).toEqual(USER),
+	);
+	expect(cache.getQueryData(["home"])).toBeUndefined();
+	expect(cache.getMutationCache().getAll()).toEqual([]);
+	expect(fetch).toHaveBeenCalledWith(
+		"/api/v1/auth/jellyfin",
+		expect.objectContaining({
+			body: JSON.stringify({ username: "viewer", password: "pw" }),
+		}),
+	);
+});
+
+test("a late Jellyfin login cannot overwrite a newer confirmed session", async () => {
+	let resolve!: (response: Response) => void;
+	const pending = new Promise<Response>((done) => {
+		resolve = done;
+	});
+	const fetch = vi.fn(async (input: RequestInfo | URL) =>
+		String(input) === "/api/v1/auth/methods"
+			? ({
+					ok: true,
+					status: 200,
+					json: async () => ({ plex: false, jellyfin: true, seerr: false }),
+				} as Response)
+			: pending,
+	);
+	vi.stubGlobal("fetch", fetch);
+	const cache = await renderLogin();
+	fireEvent.click(
+		screen.getByRole("button", { name: "Continue with Jellyfin" }),
+	);
+	fireEvent.change(screen.getByLabelText("Username"), {
+		target: { value: "viewer" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+	await vi.waitFor(() =>
+		expect(fetch).toHaveBeenCalledWith(
+			"/api/v1/auth/jellyfin",
+			expect.anything(),
+		),
+	);
+	const newer = { ...USER, id: 2, display_name: "Other" };
+	await setConfirmedSession(cache, newer);
+	await act(async () => {
+		resolve({ ok: true, status: 200, json: async () => USER } as Response);
+		await pending;
+	});
+	expect(cache.getQueryData(ME_QUERY_KEY)).toEqual(newer);
 });

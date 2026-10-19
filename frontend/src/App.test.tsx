@@ -72,6 +72,14 @@ function renderApp(
 		defaultOptions: { queries: { retry: false } },
 	}),
 ) {
+	const fetch = window.fetch;
+	vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+		String(input) === "/api/v1/auth/methods"
+			? Promise.resolve(
+					jsonResponse({ plex: true, jellyfin: true, seerr: true }),
+				)
+			: fetch(input, init),
+	);
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter initialEntries={[initialEntry]}>
@@ -102,6 +110,33 @@ function deferred<T>() {
 	});
 	return { promise, resolve };
 }
+
+test("the account URL renders connected accounts through the shell router", async () => {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "/api/v1/auth/me") return jsonResponse(USER);
+			if (url === "/api/v1/account")
+				return jsonResponse({
+					providers: [],
+					taste_sources: {
+						seerr: true,
+						plex: true,
+						jellyfin: true,
+						browsing: true,
+					},
+				});
+			if (url === "/api/v1/config") return jsonResponse(CONFIG);
+			return jsonResponse({ state: "done" });
+		}),
+	);
+	renderApp("/account");
+	expect(
+		await screen.findByRole("heading", { name: "Connected accounts" }),
+	).toBeTruthy();
+	expect(screen.queryByText("Trending Now")).toBeNull();
+});
 
 test("a non-admin direct settings URL redirects before protected data is fetched", async () => {
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -155,7 +190,7 @@ test("unauthenticated visitors see the login screen only", async () => {
 	);
 	renderApp();
 	expect(
-		await screen.findByRole("button", { name: "Sign in with Plex" }),
+		await screen.findByRole("button", { name: "Continue with Plex" }),
 	).toBeTruthy();
 	expect(screen.queryByText("Sign out")).toBeNull();
 });
@@ -171,13 +206,13 @@ test("authenticated users see the routed browse shell", async () => {
 		}),
 	);
 	renderApp();
-	expect(await screen.findByText("Viewer")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer" })).toBeTruthy();
 	expect(await screen.findByText("Trending Now")).toBeTruthy();
 	expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
 	expect(screen.getByText(/not endorsed or certified/)).toBeTruthy(); // TMDB attribution
 	expect(screen.getByRole("img", { name: "TMDB" })).toBeTruthy(); // TMDB logo
 	expect(
-		screen.queryByRole("button", { name: "Sign in with Plex" }),
+		screen.queryByRole("button", { name: "Continue with Plex" }),
 	).toBeNull();
 });
 
@@ -203,11 +238,14 @@ test("logout returns to the login screen", async () => {
 	renderApp();
 	fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
 	expect(
-		await screen.findByRole("button", { name: "Sign in with Plex" }),
+		await screen.findByRole("button", { name: "Continue with Plex" }),
 	).toBeTruthy();
 });
 
-test("local account switch clears user A data and blocks a late query", async () => {
+test.each([
+	"local",
+	"jellyfin",
+])("%s account switch clears user A data and blocks a late query", async (method) => {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
@@ -230,7 +268,7 @@ test("local account switch clears user A data and blocks a late query", async ()
 	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input);
 		if (url === "/api/v1/auth/logout") return jsonResponse(null, 204);
-		if (url === "/api/v1/auth/local") return userBLogin.promise;
+		if (url === `/api/v1/auth/${method}`) return userBLogin.promise;
 		if (url === "/api/v1/home") return userBHome.promise;
 		if (url === "/api/v1/config") return jsonResponse(CONFIG);
 		if (url === "/api/v1/rails?cursor=0") return jsonResponse(RAILS);
@@ -250,20 +288,31 @@ test("local account switch clears user A data and blocks a late query", async ()
 	).toBeGreaterThan(0);
 	expect(queryClient.getQueryState(["home"])?.fetchStatus).toBe("fetching");
 	fireEvent.click(signOut);
-	await screen.findByRole("button", { name: "Sign in with Plex" });
+	await screen.findByRole("button", { name: "Continue with Plex" });
 	expectUserAQueriesRemoved(queryClient);
 	expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
 
-	fireEvent.change(screen.getByLabelText("Email"), {
-		target: { value: "viewer-b@example.test" },
-	});
+	fireEvent.click(
+		await screen.findByRole("button", {
+			name:
+				method === "jellyfin"
+					? "Continue with Jellyfin"
+					: "Continue with Seerr",
+		}),
+	);
+	fireEvent.change(
+		screen.getByLabelText(method === "jellyfin" ? "Username" : "Email"),
+		{
+			target: { value: "viewer-b@example.test" },
+		},
+	);
 	fireEvent.change(screen.getByLabelText("Password"), {
 		target: { value: "password" },
 	});
 	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 	await waitFor(() =>
 		expect(fetchMock).toHaveBeenCalledWith(
-			"/api/v1/auth/local",
+			`/api/v1/auth/${method}`,
 			expect.objectContaining({ method: "POST" }),
 		),
 	);
@@ -271,7 +320,7 @@ test("local account switch clears user A data and blocks a late query", async ()
 	expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
 
 	userBLogin.resolve(jsonResponse(USER_B));
-	expect(await screen.findByText("Viewer B")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer B" })).toBeTruthy();
 	lateUserAHome.resolve({
 		hero: [],
 		rails: [
@@ -286,7 +335,7 @@ test("local account switch clears user A data and blocks a late query", async ()
 	await lateUserACompleted.promise;
 	await lateRequest;
 	expect(queryClient.getQueryData(["home"])).toBeUndefined();
-	expect(screen.queryByText("Viewer A Private")).toBeNull();
+	expect(screen.queryByRole("button", { name: "Viewer A Private" })).toBeNull();
 
 	userBHome.resolve(jsonResponse(HOME_B));
 	expect(await screen.findByText("For Viewer B")).toBeTruthy();
@@ -324,7 +373,7 @@ test("Plex account switch clears user A data before user B arrives", async () =>
 
 	fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
 	fireEvent.click(
-		await screen.findByRole("button", { name: "Sign in with Plex" }),
+		await screen.findByRole("button", { name: "Continue with Plex" }),
 	);
 	await waitFor(() =>
 		expect(fetchMock).toHaveBeenCalledWith(
@@ -336,7 +385,7 @@ test("Plex account switch clears user A data before user B arrives", async () =>
 	expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
 
 	plexPoll.resolve(jsonResponse({ status: "ok", user: USER_B }));
-	expect(await screen.findByText("Viewer B")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer B" })).toBeTruthy();
 	expect(queryClient.getQueryData(["auth", "me"])).toEqual(USER_B);
 });
 
@@ -364,12 +413,14 @@ test("initial and same-user auth resolutions preserve existing queries", async (
 	vi.stubGlobal("fetch", fetchMock);
 	renderApp("/", queryClient);
 
-	expect(await screen.findByText("Viewer")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer" })).toBeTruthy();
 	expect(queryClient.getQueryData(["before-auth"])).toEqual({ keep: true });
 	queryClient.setQueryData(["same-user"], { keep: true });
 
 	await queryClient.refetchQueries({ queryKey: ["auth", "me"] });
-	expect(await screen.findByText("Viewer refreshed")).toBeTruthy();
+	expect(
+		await screen.findByRole("button", { name: "Viewer refreshed" }),
+	).toBeTruthy();
 	expect(queryClient.getQueryData(["before-auth"])).toEqual({ keep: true });
 	expect(queryClient.getQueryData(["same-user"])).toEqual({ keep: true });
 });
@@ -397,14 +448,14 @@ test("a cancelled auth refresh cannot clear the newer session", async () => {
 		expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/me", undefined),
 	);
 	await setConfirmedSession(queryClient, USER_B);
-	expect(await screen.findByText("Viewer B")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer B" })).toBeTruthy();
 	queryClient.setQueryData(["session-b"], { owner: "B" });
 
 	oldMe.resolve(jsonResponse(USER));
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	expect(queryClient.getQueryData(["auth", "me"])).toEqual(USER_B);
 	expect(queryClient.getQueryData(["session-b"])).toEqual({ owner: "B" });
-	expect(screen.getByText("Viewer B")).toBeTruthy();
+	expect(screen.getByRole("button", { name: "Viewer B" })).toBeTruthy();
 });
 
 test("auth refresh clears user A data before publishing user B", async () => {
@@ -426,7 +477,7 @@ test("auth refresh clears user A data before publishing user B", async () => {
 	});
 	vi.stubGlobal("fetch", fetchMock);
 	renderApp("/", queryClient);
-	expect(await screen.findByText("Viewer")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer" })).toBeTruthy();
 	expect(screen.getByText("Trending Now")).toBeTruthy();
 
 	const refresh = queryClient.refetchQueries({ queryKey: ["auth", "me"] });
@@ -435,7 +486,7 @@ test("auth refresh clears user A data before publishing user B", async () => {
 	);
 	userBMe.resolve(jsonResponse(USER_B));
 	await refresh;
-	expect(await screen.findByText("Viewer B")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer B" })).toBeTruthy();
 	expect(queryClient.getQueryData(["home"])).toBeUndefined();
 	expect(queryClient.getQueryData(["title", "movie", 7])).toBeUndefined();
 	expect(queryClient.getQueryData(["explain", "movie", 7])).toBeUndefined();
@@ -479,8 +530,11 @@ test("a late logout response cannot replace a newer confirmed user", async () =>
 		),
 	);
 	await queryClient.refetchQueries({ queryKey: ["auth", "me"] });
-	await screen.findByRole("button", { name: "Sign in with Plex" });
+	await screen.findByRole("button", { name: "Continue with Plex" });
 
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Continue with Seerr" }),
+	);
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "viewer-b@example.test" },
 	});
@@ -488,14 +542,14 @@ test("a late logout response cannot replace a newer confirmed user", async () =>
 		target: { value: "password" },
 	});
 	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-	expect(await screen.findByText("Viewer B")).toBeTruthy();
+	expect(await screen.findByRole("button", { name: "Viewer B" })).toBeTruthy();
 
 	lateLogout.resolve(jsonResponse(null, 204));
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	expect(queryClient.getQueryData(["auth", "me"])).toEqual(USER_B);
-	expect(screen.getByText("Viewer B")).toBeTruthy();
+	expect(screen.getByRole("button", { name: "Viewer B" })).toBeTruthy();
 	expect(
-		screen.queryByRole("button", { name: "Sign in with Plex" }),
+		screen.queryByRole("button", { name: "Continue with Plex" }),
 	).toBeNull();
 });
 
@@ -534,7 +588,7 @@ test("failed logout preserves the confirmed session and its cache", async () => 
 		owner: "A",
 		watchlisted: true,
 	});
-	expect(screen.getByText("Viewer")).toBeTruthy();
+	expect(screen.getByRole("button", { name: "Viewer" })).toBeTruthy();
 });
 
 test("failed local login preserves the confirmed signed-out state and cache", async () => {
@@ -551,6 +605,9 @@ test("failed local login preserves the confirmed signed-out state and cache", as
 	);
 	renderApp("/", queryClient);
 
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Continue with Seerr" }),
+	);
 	fireEvent.change(screen.getByLabelText("Email"), {
 		target: { value: "viewer-b@example.test" },
 	});

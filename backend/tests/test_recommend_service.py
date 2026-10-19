@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from tests.factories import user_with_links
 
 import tasterr.recommend.service as service_mod
 from tasterr.catalog.availability import Availability, AvailabilityService
@@ -19,11 +20,11 @@ from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import Profile, User, utcnow
+from tasterr.db.models import Profile, utcnow
 from tasterr.recommend import store
 from tasterr.recommend.features import FeatureRecord
 from tasterr.recommend.service import TasteService
-from tasterr.recommend.signals import TitleKey
+from tasterr.recommend.signals import SOURCE_KINDS, SignalKind, TasteSource, TitleKey
 
 
 def _summary(tmdb_id: int, media: MediaType = "movie") -> MediaSummary:
@@ -150,10 +151,80 @@ def _service(
 
 
 async def _user(db: AsyncSession) -> int:
-    user = User(seerr_user_id=1, display_name="member", auth_type="plex")
-    db.add(user)
+    user = await user_with_links(db, seerr_user_id=1, display_name="member", auth_type="plex")
     await db.flush()
     return user.id
+
+
+@pytest.mark.parametrize("source", list(SOURCE_KINDS))
+async def test_source_switch_filters_and_restores_profile(
+    db: AsyncSession, source: TasteSource
+) -> None:
+    user_id = await _user(db)
+    catalog = FakeCatalog()
+    catalog.genres_by_title[("movie", 2)] = ["Comedy"]
+    taste = _service(db, catalog)
+    await store.record_signal(db, user_id, "movie", 1, "watchlist")
+    baseline = await taste.recompute_profile(user_id)
+    await store.record_signal(db, user_id, "movie", 2, next(iter(SOURCE_KINDS[source])))
+    full = await taste.recompute_profile(user_id)
+    assert full != baseline
+    assert await store.set_source_enabled(db, user_id, source, False)
+    assert await store.load_profile(db, user_id) is None
+    assert await taste.profile_vector(user_id) == pytest.approx(baseline)
+    assert len(await store.load_signals(db, user_id)) == 2
+    assert await store.set_source_enabled(db, user_id, source, True)
+    assert await store.load_profile(db, user_id) is None
+    assert await taste.profile_vector(user_id) == pytest.approx(full)
+
+
+@pytest.mark.parametrize("kind", ["watched_plex", "watched_jellyfin"])
+async def test_disabled_watches_still_exclude_watched_titles(
+    db: AsyncSession, kind: SignalKind
+) -> None:
+    user_id = await _user(db)
+    catalog = FakeCatalog()
+    catalog.trending_items = [_summary(2), _summary(3)]
+    await store.record_signal(db, user_id, "movie", 1, "watchlist")
+    await store.record_signal(db, user_id, "movie", 2, kind)
+    source: TasteSource = "plex" if kind == "watched_plex" else "jellyfin"
+    await store.set_source_enabled(db, user_id, source, False)
+    assert [item.id for item in await _service(db, catalog).recommended_for_you(user_id)] == [3]
+
+
+async def test_disabled_sources_never_seed_candidates_or_watch_labels(db: AsyncSession) -> None:
+    alice = await _user(db)
+    bob = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="local")
+    await db.flush()
+    catalog = FakeCatalog()
+    taste = _service(db, catalog)
+    await store.record_signal(db, alice, "movie", 1, "watchlist")
+    await store.record_signal(db, bob.id, "movie", 3, "watchlist")
+    await store.record_signal(db, alice, "movie", 2, "watched_plex")
+    await store.record_signal(db, alice, "movie", 1, "watched_plex")
+    catalog.genres_by_title[("movie", 2)] = ["Comedy"]
+    await store.set_source_enabled(db, alice, "plex", False)
+    catalog.details[("movie", 1)] = _detail(1, [_summary(10)])
+    catalog.details[("movie", 2)] = _detail(2, [_summary(20)])
+    catalog.details[("movie", 3)] = _detail(3, [_summary(30)])
+    result = await taste.more_like(alice)
+    assert result is not None and result[1] is False
+    assert [item.id for item in result[2]] == [10]
+    assert [item.id for item in await taste.recommended_for_you(alice)] == [10]
+    # The off source's Comedy dimension cannot enter the member's blend contribution.
+    assert "genre:comedy" not in await taste.profile_vector(alice)
+    assert {item.id for item in await taste.household_blend([alice, bob.id])} == {10, 30}
+    assert ("movie", 2) not in catalog.detail_calls
+    assert all(call[2] != (35,) for call in catalog.discover_calls)
+
+
+async def test_only_disabled_watch_produces_no_related_rail(db: AsyncSession) -> None:
+    user_id = await _user(db)
+    await store.record_signal(db, user_id, "movie", 2, "watched_plex")
+    await store.set_source_enabled(db, user_id, "plex", False)
+    catalog = FakeCatalog()
+    assert await _service(db, catalog).more_like(user_id) is None
+    assert catalog.detail_calls == []
 
 
 async def test_warm_vectors_skip_facts_fetches(db: AsyncSession) -> None:
@@ -196,8 +267,7 @@ async def test_exclusions_use_current_metadata_before_ranking_and_preserve_my_li
     assert more_like is not None
     assert [item.id for item in more_like[2]] == [2]
     assert [item.id for item in await taste.my_list(user_id)] == [3]
-    second = User(seerr_user_id=2, display_name="member", auth_type="plex")
-    db.add(second)
+    second = await user_with_links(db, seerr_user_id=2, display_name="member", auth_type="plex")
     await db.flush()
     await store.record_signal(db, second.id, "movie", 3, "request")
     assert [item.id for item in await taste.household_blend([user_id, second.id])] == [2]
@@ -271,9 +341,12 @@ async def test_signalless_user_has_an_empty_profile(db: AsyncSession) -> None:
     assert await _service(db, FakeCatalog()).recommended_for_you(user_id) == []
 
 
-async def test_recommendations_exclude_hidden_and_engaged_titles(db: AsyncSession) -> None:
+@pytest.mark.parametrize("kind", ["request", "watched_plex", "watched_jellyfin"])
+async def test_recommendations_exclude_hidden_and_engaged_titles(
+    db: AsyncSession, kind: SignalKind
+) -> None:
     user_id = await _user(db)
-    await store.record_signal(db, user_id, "movie", 1, "request")
+    await store.record_signal(db, user_id, "movie", 1, kind)
     await store.record_signal(db, user_id, "movie", 99, "not_interested")
     catalog = FakeCatalog()
     catalog.details[("movie", 1)] = _detail(1, [_summary(99), _summary(2), _summary(1)])
@@ -387,8 +460,7 @@ async def test_unexpected_picks_without_profile_does_no_catalog_work(db: AsyncSe
 
 async def test_unexpected_picks_are_user_specific(db: AsyncSession) -> None:
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -414,8 +486,7 @@ async def test_household_blend_uses_mean_profile_and_any_member_vetoes(
     db: AsyncSession,
 ) -> None:
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -448,8 +519,7 @@ async def test_household_blend_rejects_the_whole_empty_profile_audience(
     db: AsyncSession,
 ) -> None:
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -470,8 +540,7 @@ async def test_household_blend_caps_the_shared_union_before_vector_work(
 ) -> None:
     monkeypatch.setattr(service_mod, "CANDIDATE_CAP", 5)
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     await store.record_signal(db, alice, "movie", 1, "request")
@@ -507,9 +576,12 @@ async def test_concurrent_household_blends_use_independent_sessions(tmp_path: Pa
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with maker() as prepare:
-            alice = User(seerr_user_id=1, display_name="alice", auth_type="plex")
-            bob = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-            prepare.add_all((alice, bob))
+            alice = await user_with_links(
+                prepare, seerr_user_id=1, display_name="alice", auth_type="plex"
+            )
+            bob = await user_with_links(
+                prepare, seerr_user_id=2, display_name="bob", auth_type="plex"
+            )
             await prepare.flush()
             await store.record_signal(prepare, alice.id, "movie", 1, "request")
             await store.record_signal(prepare, bob.id, "movie", 2, "request")
@@ -581,8 +653,7 @@ async def test_two_users_with_different_taste_get_different_recommendations(
 ) -> None:
     """The M4 milestone bar: two users, two histories, visibly different rails."""
     alice = await _user(db)
-    bob_user = User(seerr_user_id=2, display_name="bob", auth_type="plex")
-    db.add(bob_user)
+    bob_user = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="plex")
     await db.flush()
     bob = bob_user.id
     catalog = FakeCatalog()
@@ -623,9 +694,10 @@ async def test_more_like_ranks_the_sources_related_titles(db: AsyncSession) -> N
     assert [item.id for item in items] == [2]  # source + hidden excluded
 
 
-async def test_more_like_uses_plex_watch_label(db: AsyncSession) -> None:
+@pytest.mark.parametrize("kind", ["watched_plex", "watched_jellyfin"])
+async def test_more_like_uses_watch_label(db: AsyncSession, kind: SignalKind) -> None:
     user_id = await _user(db)
-    await store.record_signal(db, user_id, "movie", 2, "watched_plex")
+    await store.record_signal(db, user_id, "movie", 2, kind)
     catalog = FakeCatalog()
     catalog.details[("movie", 2)] = _detail(2, [_summary(20)])
 

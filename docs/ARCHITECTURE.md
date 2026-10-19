@@ -3,7 +3,7 @@
 Tasterr is one FastAPI process serving both a compiled React SPA and `/api/v1/*`.
 SQLite, in-process caches, and bounded asyncio background work keep deployment to one
 container. Running multiple workers is unsupported because rate limits, caches,
-single-flight seeding, and background task ownership are process-local.
+single-flight history sync, and background task ownership are process-local.
 
 ```mermaid
 flowchart LR
@@ -15,6 +15,7 @@ flowchart LR
     C --> T["TMDB"]
     C --> S["Seerr"]
     C --> P["plex.tv + verified Plex Media Servers"]
+    C --> J["Jellyfin"]
     A --> Q[("SQLite")]
     D --> Q
     U --> Q
@@ -27,8 +28,8 @@ flowchart LR
   typed upstream wire models, and secret-bearing headers/cookies.
 - Only `backend/src/tasterr/api/` shapes browser responses. Routes use Pydantic input
   and explicit response models rather than forwarding upstream JSON or ORM objects.
-- `PublicConfig` is an explicit allowlist projection. TMDB/Seerr keys, the internal
-  Seerr URL, Plex tokens, Seerr cookies, and the deployment secret cannot enter it.
+- `PublicConfig` is an explicit allowlist projection. TMDB/Seerr/Jellyfin keys,
+  internal URLs, Plex tokens, Seerr cookies, and the deployment secret cannot enter it.
 - Catalog, rail, and recommendation domain models do not import deployment settings.
   Boundary tests and import-linter contracts enforce these rules.
 
@@ -47,19 +48,47 @@ and no retry storm.
 
 ## Identity, sessions, and requests
 
-Local credentials are forwarded directly to Seerr and never stored. A Plex login
-token is used for Seerr authentication and then retained only as Fernet ciphertext
+Local credentials are forwarded directly to Seerr and never stored. With
+`PLEX_SERVER_ID`, Plex sign-in checks membership in the plex.tv resources list on
+every sign-in, without probing PMS. Owners, shared users, and Plex Home users
+qualify. Without it, Seerr accepting the token remains the gate. Seerr is optional
+for server-gated Plex sign-in; when configured, auto-link is best-effort: refusal
+does not block, and an outage blocks only a would-be new user to avoid splitting
+existing identities. A Plex login token is retained only as Fernet ciphertext
 for bounded caller-scoped Plex reads and silent Seerr re-authentication. On success,
-Tasterr upserts the Seerr user and mints a fresh opaque browser session.
+Tasterr resolves a local user through proven linked accounts and mints a fresh
+opaque browser session. An existing sign-in link wins, then the authenticated
+Seerr bridge, then a new local user. Admin derives from all configured links at
+sign-in; Seerr admin permissions or ownership of the pinned Plex resource grant
+admin. The Plex owner check reuses the sign-in resources read; offline PMS never
+prevents admission or an owner grant. If no check grants, an outage preserves the
+previous value; other failures and unconfigured providers do not. Display identity
+follows Seerr, then Plex, then Jellyfin; every user is rendered with initials.
+
+Jellyfin sign-in authenticates username/password once and immediately logs out the
+returned token; logout failure is logged generically and does not block sign-in.
+Only the Jellyfin user id and display name are linked, with no credential or avatar.
+The same credentials attempt Seerr's Jellyfin login before normal link resolution;
+refusal does not block sign-in, while an outage blocks only a would-be new user.
+At every sign-in, Jellyfin's user-scoped policy read joins the admin checks:
+`IsAdministrator` grants only while `IsDisabled` is false. Empty passwords require
+the explicit environment override for sign-in and either linking path.
 Only a SHA-256 hash of the browser token is stored. The browser receives the raw
 token once in an HttpOnly, SameSite=Lax cookie, marked Secure when the trusted request
 scheme is HTTPS.
+Sessions expire after 30 days of inactivity and absolutely 90 days after creation.
+Sliding expiry and the refreshed cookie's Max-Age stop at that cap, so sign-in
+admission and admin derivation rerun at least quarterly. The unauthenticated
+`GET /auth/methods` returns only availability booleans for the login screen.
 
-The server stores the member's Seerr session cookie for user-attributed requests.
-Plex tokens are Fernet-encrypted with `TASTERR_SECRET_KEY`; local passwords are never
-retained. A request write sends only the member's Seerr cookie. On Seerr's invalid-
-session response, Plex users get one silent re-authentication attempt; local users
-are prompted to sign in again. The global Seerr API key is limited to server-side
+The server stores the member's Seerr session cookie and Plex token as Fernet
+ciphertext on their linked accounts using `TASTERR_SECRET_KEY`; local passwords
+are never retained. Sessions hold no upstream material. Credentials survive logout
+and are deleted on unlink or account deletion. A request write sends only the
+member's decrypted Seerr cookie. On Seerr's invalid-session response, a Plex link
+permits one silent re-authentication attempt, persisting only a matching Seerr
+identity; otherwise the member can connect Seerr inline and retry once.
+The global Seerr API key is limited to server-side
 reads and is never used to forge a member mutation.
 
 Login buckets key by effective client IP after trusted-proxy processing. Ordinary
@@ -75,12 +104,28 @@ profile, scoring, decay, and diversity logic sits between API and clients so it 
 unit-testable without network mocks. Derived title vectors and user profiles are
 rebuildable SQLite caches; raw signals remain the durable source.
 
-After a first login, bounded background work may seed signals from that user's Seerr
-request history. Per-user single-flight bookkeeping prevents duplicate seeds. A
-failure rolls back/degrades and never prevents ordinary browsing.
+Sign-in, linking, and Home evaluate a bounded incremental Seerr request-history
+sync. Each link has a six-hour attempt throttle and a success watermark with a
+24-hour overlap. Imports skip titles already requested in Tasterr. Per-user
+single-flight bookkeeping prevents duplicate imports; failures never prevent browsing.
+Reset cancels and awaits history tasks under a scheduling guard, clears taste and
+link timestamps, then schedules normal background imports, Seerr before Plex and Jellyfin.
 
-For a Plex-backed session, a separate six-hour, per-user single-flight path validates
-the cloud account, discovers at most four advertised servers, resolves that caller's
+Jellyfin history joins the same per-user scheduling guard and cancellation lifecycle.
+It waits for Seerr sync, reads `/Items?userId=` with header-only API-key auth, and
+maps movie TMDB provider ids and episode series ids to canonical `watched_jellyfin`
+facts. First imports cover 365 days; incremental imports overlap the success
+watermark by 24 hours. Pages and series batches contain at most 100 items, reads
+cap at 500 items per type under a 30-second deadline, and writes commit at most
+100 facts per transaction. Only complete reads advance the watermark; raw items
+and tokens are discarded. Jellyfin watches anchor **Because You Watched** and
+exclude those titles from recommended-for-you. Reset, unlink, account deletion,
+onboarding pending state, and shutdown cover all history tasks.
+
+For any user with a Plex link, whichever method they signed in with, a separate
+six-hour, per-user single-flight path validates
+the cloud account, discovers only the `PLEX_SERVER_ID` resource when set (otherwise
+at most four advertised servers), resolves that caller's
 PMS-local account row independently on each server, and imports bounded canonical
 `watched_plex` title facts. Account lists resolve owner/admin ids; an explicit 403
 uses the validated positive cloud id for Plex's self-only non-admin history path.
@@ -88,7 +133,11 @@ Every history read explicitly filters by that id and rejects a page containing
 another id. Movies map only through a positive TMDB GUID; episodes collapse to their
 show's TMDB GUID. Raw rows, rating keys, account/server identifiers, URLs, and play
 counts are discarded. Only canonical watched signals and two attempt/success
-timestamps are durable.
+timestamps on the owning link are durable. Dormant links retain credentials but
+perform no upstream work until their provider is configured again.
+The pin filters before connection probing and applies to both history and Continue
+Watching. If the pinned resource is absent, no PMS read runs and the history
+success watermark does not advance. Previously imported watched signals remain.
 
 Continue Watching is live presentation data. It validates the same Plex capability,
 merges bounded per-server results by the caller's last-viewed time, resolves browser
@@ -97,12 +146,28 @@ minutes. Progress is never stored. The unexpected-picks provider and caller-incl
 household blend reuse the existing profile/scoring/diversity pipeline. Household
 selection stays in component state; only the final standard rail crosses the API.
 
+The `/account` page manages proven provider links, unlinking, local account
+deletion, and four per-member taste sources (Seerr/Plex/Jellyfin history and
+browsing). `users.taste_excluded_sources` holds the disabled sources; deliberate
+request/watchlist/not-interested signals always count. Disabling cancels imports
+and filters profiles/candidate anchors without deleting history; browsing stops
+recording detail opens. Re-enabling resets link sync times. Clearing a source
+deletes its signals but keeps its watermark and toggle. Watched-title exclusions
+persist while the watched rows exist, even when the source is disabled.
+Profile publication rechecks eligible inputs under SQLite's write lock, so a
+concurrent preference change, clear, or reset cannot publish stale taste.
+
 ## SQLite and process lifecycle
 
 At lifespan startup the process opens one async SQLAlchemy engine, runs Alembic to
 head, creates the session factory, and sweeps expired sessions. The database lives at
-`DATABASE_PATH`, `/data/tasterr.db` in the production image. Lifespan shutdown closes
-the shared HTTP client and disposes the engine.
+`DATABASE_PATH`, `/data/tasterr.db` in the production image. Migration `0007` creates
+links and deletes sessions once while preserving taste;
+`0008` adds Jellyfin signal uniqueness; `0009` adds source preferences. Rollback
+requires the matching backup or explicit downgrade, with account/history deletion
+limits documented in [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-rollback).
+Lifespan shutdown cancels history tasks, closes the shared HTTP client and disposes
+the engine.
 
 SQLite is appropriate for one household and one writer process. The named volume is
 the only durable container state. Backups must stop the writer (or use SQLite's

@@ -1,10 +1,19 @@
 // Thin typed wrapper over fetch. Types come from the generated OpenAPI schema
 // (src/lib/api.gen.ts, regenerated via `just types`) — never hand-written twice.
-import type { components, paths } from "./api.gen";
+import type { components } from "./api.gen";
 
-export type HealthResponse =
-	paths["/api/v1/health"]["get"]["responses"]["200"]["content"]["application/json"];
 export type User = components["schemas"]["UserResponse"];
+export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
+export type JellyfinCredentials = components["schemas"]["JellyfinLoginRequest"];
+export type AccountResponse = components["schemas"]["AccountResponse"];
+export type AccountProvider = components["schemas"]["AccountProvider"];
+export type TasteSourceBody = components["schemas"]["TasteSourceBody"];
+export type TasteSource = TasteSourceBody["source"];
+export type SeerrLinkBody = Pick<
+	components["schemas"]["SeerrLinkBody"],
+	"method"
+> &
+	Partial<Omit<components["schemas"]["SeerrLinkBody"], "method">>;
 export type PinCreateResponse = components["schemas"]["PinCreateResponse"];
 export type PinPollResponse = components["schemas"]["PinPollResponse"];
 export type PublicConfig = components["schemas"]["PublicConfig"];
@@ -18,7 +27,6 @@ export type SeasonSummary = components["schemas"]["SeasonSummary"];
 export type SearchResponse = components["schemas"]["SearchResponse"];
 export type MediaType = MediaSummary["media_type"];
 export type Availability = components["schemas"]["Availability"];
-export type AvailabilityStatus = Availability["status"];
 export type RequestResponse = components["schemas"]["RequestResponse"];
 export type RequestDestination = components["schemas"]["RequestDestination"];
 export type RequestOptions = components["schemas"]["RequestOptions"];
@@ -33,7 +41,6 @@ export type AvailabilityMap = Record<string, Availability>;
 export type SignalKind = components["schemas"]["SignalBody"]["kind"];
 export type SignalResponse = components["schemas"]["SignalResponse"];
 export type ExplainResponse = components["schemas"]["ExplainResponse"];
-export type ResetResponse = components["schemas"]["ResetResponse"];
 export type HouseholdMember = components["schemas"]["HouseholdMember"];
 export type TasteFlags = components["schemas"]["TasteFlags"];
 export type TasteOnboardingSelection =
@@ -104,8 +111,8 @@ function putJson<T>(path: string, body: unknown): Promise<T> {
 	});
 }
 
-export function getHealth(): Promise<HealthResponse> {
-	return request<HealthResponse>("/api/v1/health");
+export function getAuthMethods(): Promise<AuthMethods> {
+	return request<AuthMethods>("/api/v1/auth/methods");
 }
 
 /** null = not signed in — 401 is auth state here, not an error. */
@@ -136,8 +143,42 @@ export function loginLocal(email: string, password: string): Promise<User> {
 	return postJson<User>("/api/v1/auth/local", { email, password });
 }
 
+export function loginJellyfin(body: JellyfinCredentials): Promise<User> {
+	return postJson<User>("/api/v1/auth/jellyfin", body);
+}
+
+export function linkJellyfin(body: JellyfinCredentials): Promise<void> {
+	return postJson<void>("/api/v1/account/links/jellyfin", body);
+}
+
 export function logout(): Promise<void> {
 	return postJson<void>("/api/v1/auth/logout");
+}
+
+export function getAccount(): Promise<AccountResponse> {
+	return request<AccountResponse>("/api/v1/account");
+}
+export function createLinkPlexPin(): Promise<PinCreateResponse> {
+	return postJson<PinCreateResponse>("/api/v1/account/links/plex/pin");
+}
+export function pollLinkPlexPin(
+	pinId: string,
+): Promise<components["schemas"]["LinkPollResponse"]> {
+	return postJson("/api/v1/account/links/plex/pin/poll", { pin_id: pinId });
+}
+export function linkSeerr(body: SeerrLinkBody): Promise<void> {
+	return postJson<void>("/api/v1/account/links/seerr", body);
+}
+export function unlinkAccount(
+	provider: AccountProvider["provider"],
+	deleteHistory: boolean,
+): Promise<void> {
+	return postJson<void>(`/api/v1/account/links/${provider}/unlink`, {
+		delete_history: deleteHistory,
+	});
+}
+export function deleteAccount(confirm: string): Promise<void> {
+	return postJson<void>("/api/v1/account/delete", { confirm });
 }
 
 export function getHome(): Promise<HomeFeed> {
@@ -264,8 +305,16 @@ export function getExplain(
 }
 
 /** Wipe the caller's signals + profile and re-seed from Seerr history. */
-export function resetRecommendations(): Promise<ResetResponse> {
-	return postJson<ResetResponse>("/api/v1/recommendations/reset");
+export function resetRecommendations(): Promise<void> {
+	return postJson<void>("/api/v1/recommendations/reset");
+}
+
+export function setTasteSource(body: TasteSourceBody): Promise<void> {
+	return postJson<void>("/api/v1/account/taste-sources", body);
+}
+
+export function clearTasteSource(source: TasteSource): Promise<void> {
+	return postJson<void>(`/api/v1/account/taste-sources/${source}/clear`);
 }
 
 export function getHouseholdMembers(): Promise<HouseholdMember[]> {

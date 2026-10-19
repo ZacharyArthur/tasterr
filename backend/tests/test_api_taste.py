@@ -49,7 +49,6 @@ async def test_background_seed_resolves_its_own_runtime_snapshot(
         seerr: SeerrClient,
         seeding: set[int],
         user_id: int,
-        seerr_user_id: int,
         *,
         reserved: bool = False,
     ) -> None:
@@ -67,8 +66,9 @@ async def test_background_seed_resolves_its_own_runtime_snapshot(
     app.state.sessionmaker = maker
     seeding: set[int] = set()
     app.state.seeding = seeding
-    seed_tasks: set[asyncio.Task[None]] = set()
+    seed_tasks: dict[int, asyncio.Task[None]] = {}
     app.state.seed_tasks = seed_tasks
+    app.state.plex_history_resets = set()
     scope = cast(
         "Scope",
         {
@@ -87,15 +87,16 @@ async def test_background_seed_resolves_its_own_runtime_snapshot(
     settings = Settings.model_validate(
         {
             "tmdb_api_key": "tmdb-key",
+            "tasterr_secret_key": "test-secret-key",
             "seerr_internal_url": "http://seerr:5055",
             "seerr_api_key": "seerr-key",
         }
     )
 
-    schedule_seed(request, settings, user_id=1, seerr_user_id=7)
+    schedule_seed(request, settings, user_id=1)
     assert seeding == {1}
-    schedule_seed(request, settings, user_id=1, seerr_user_id=7)
-    tasks = list(seed_tasks)
+    schedule_seed(request, settings, user_id=1)
+    tasks = list(seed_tasks.values())
     await asyncio.gather(*tasks)
 
     assert captured == [("GB", (8, 337))]

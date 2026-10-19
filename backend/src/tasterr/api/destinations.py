@@ -6,8 +6,10 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from tasterr.auth.deps import AuthedSession, require_session
+from tasterr.auth.deps import AuthedSession, get_db, require_session
+from tasterr.auth.login import get_link
 from tasterr.clients.errors import UpstreamError
 from tasterr.clients.seerr import MediaType, SeerrClient, SeerrServer, SeerrServerDetail
 from tasterr.recommend.signals import MAX_TMDB_ID
@@ -75,13 +77,17 @@ async def get_destinations(
     tmdb_id: Annotated[int, Path(ge=1, le=MAX_TMDB_ID)],
     client: DestinationsClientDep,
     authed: Annotated[AuthedSession, Depends(require_session)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> RequestOptions:
     # The title id preserves the validated route shape; only type selects service.
     del tmdb_id
     if client is None:
         return RequestOptions()
+    link = await get_link(db, authed.user.id, "seerr")
+    if link is None:
+        return RequestOptions()
     try:
-        user = await client.user(authed.user.seerr_user_id)
+        user = await client.user(int(link.external_id))
         servers = await client.list_servers(media_type)
     except UpstreamError:
         return RequestOptions()

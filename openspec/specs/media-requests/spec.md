@@ -9,8 +9,8 @@ identity, permissions, defaults, quotas, and approval rules preserved.
 ### Requirement: Request a title as the member
 
 `POST /api/v1/request` SHALL proxy `POST {SEERR_INTERNAL_URL}/api/v1/request`
-using the **per-user Seerr session cookie** stored on the member's Tasterr
-session row, so the request is attributed to that member in Seerr and subject
+using the **per-user Seerr session cookie** stored encrypted on the member's Seerr
+link, so the request is attributed to that member in Seerr and subject
 to their own quota and approval rules. The request body SHALL be validated
 (`media_type` constrained to `movie` or `tv`, an integer `tmdb_id` between 1
 and 2,147,483,647 inclusive); a TV request SHALL request the whole series at
@@ -58,7 +58,7 @@ approval and administrator rules SHALL remain authoritative.
 #### Scenario: Request lands attributed to the member
 
 - **WHEN** an authenticated member requests a title
-- **THEN** the backend calls Seerr with that member's session cookie and Seerr
+- **THEN** the backend calls Seerr with the cookie from that member's Seerr link and Seerr
   records the request as that member's
 
 #### Scenario: TV request covers the series
@@ -157,21 +157,38 @@ approval and administrator rules SHALL remain authoritative.
 
 ### Requirement: Invalid-session re-auth ladder
 
-The backend SHALL recover from Seerr's `403` invalid-session rejection with a
-bounded re-auth ladder, re-authenticating **at most once** per request (because
-`403` is also Seerr's genuine permission-denied response). For a **Plex**
-member (an encrypted Plex token is stored on the session), the backend SHALL
-silently re-authenticate by decrypting the stored token, logging into Seerr again,
-persisting the refreshed session cookie, and retrying the request once; a second
+A member without a Seerr link, or whose stored Seerr cookie is absent or cannot be
+decrypted, SHALL receive `re_auth_required` without any Seerr call. Otherwise the
+backend SHALL recover from Seerr's `403` invalid-session rejection with a bounded
+re-auth ladder, re-authenticating **at most once** per request (because `403` is
+also Seerr's genuine permission-denied response). For a member with a **Plex
+link**, the backend SHALL silently re-authenticate by decrypting the link's Plex
+token and logging into Seerr again. When the token cannot be decrypted or Seerr
+refuses the login, the response SHALL be `re_auth_required` so the member can
+reconnect Seerr. Only when Seerr returns the linked Seerr account SHALL the backend persist the fresh cookie on the Seerr link and retry the
+request once with it; when Seerr returns a different account, the cookie SHALL be
+discarded and the response SHALL be `re_auth_required` without retrying. A second
 `403` SHALL be treated as a genuine denial and surfaced as a generic failure. For a
-**local** member (no stored token), the backend SHALL surface a `re_auth_required`
-signal for the SPA to prompt re-login, without retrying.
+member **without a Plex link**, the backend SHALL surface `re_auth_required` for
+the SPA to offer reconnecting Seerr, without retrying.
 
 #### Scenario: Plex member silently re-authenticates and retries
 
-- **WHEN** a Plex member's request gets `403` for a lapsed session
-- **THEN** the backend re-authenticates with the stored Plex token, updates the
-  stored session cookie, and retries the request once
+- **WHEN** a member with a Plex link gets `403` for a lapsed Seerr session
+- **THEN** the backend re-authenticates with the Plex link's token, updates the
+  Seerr link's cookie, and retries the request once
+
+#### Scenario: Re-auth as a different Seerr account never retries
+
+- **WHEN** a member's Seerr link is a local Seerr account and their Plex token
+  logs into a different Seerr account during re-auth
+- **THEN** the fresh cookie is discarded, nothing is persisted or retried, and
+  the response is `re_auth_required`
+
+#### Scenario: Failed silent re-auth asks the member to reconnect
+
+- **WHEN** the Plex token cannot be decrypted or Seerr refuses it during re-auth
+- **THEN** the response is `re_auth_required` and nothing is retried
 
 #### Scenario: Persistent denial after re-auth is generic
 
@@ -181,8 +198,13 @@ signal for the SPA to prompt re-login, without retrying.
 
 #### Scenario: Local member is asked to re-login
 
-- **WHEN** a local member's request gets `403`
+- **WHEN** a member without a Plex link gets `403`
 - **THEN** the response is `re_auth_required` and no silent re-auth is attempted
+
+#### Scenario: Member without a Seerr link is asked to connect
+
+- **WHEN** a member without a Seerr link requests a title while Seerr is configured
+- **THEN** the response is `re_auth_required` and no Seerr call is made
 
 ### Requirement: Seerr redirect fallback is built server-side
 
@@ -285,7 +307,10 @@ discovery SHALL return can_request_partial=false and can_request_specials=false.
 the bounded id preserves route consistency and does not choose dispatch. Discovery SHALL
 require a session and use the global key for server-derived user permissions and
 household service metadata. Destination metadata SHALL be exposed only to members with
-advanced capability, and only for request variants they can request. Each entry SHALL
+advanced capability, and only for request variants they can request. The member's
+permissions SHALL be read for the Seerr account on their Seerr link; a member
+without a Seerr link SHALL get unavailable capabilities and an empty list with no
+Seerr call. Each entry SHALL
 include is_4k, the server id/name, defaults and available profiles/folders. Unconfigured
 or failed discovery SHALL yield unavailable capabilities and an empty list; successful
 details from other servers SHALL survive an individual detail failure.
@@ -334,6 +359,11 @@ details from other servers SHALL survive an individual detail failure.
 
 - **WHEN** TV permissions and destinations succeed but public settings fail
 - **THEN** can_request_partial and can_request_specials are false while ordinary capabilities and destinations remain available
+
+#### Scenario: Member without a Seerr link
+
+- **WHEN** a member without a Seerr link requests destinations for a title
+- **THEN** capabilities are unavailable, the list is empty, and no Seerr call is made
 
 ### Requirement: Explicit and resilient request controls
 
@@ -464,3 +494,21 @@ move focus outside a remaining dialog.
 
 - **WHEN** the original Standard or 4K variant loses permission while the picker is open
 - **THEN** confirmation is blocked and does not silently submit the other variant
+
+### Requirement: Request control offers to connect Seerr
+
+When a request returns `re_auth_required`, the request control SHALL open an
+inline "Connect Seerr" dialog offering the same Seerr link methods as the account
+page. A successful link SHALL retry the original request (same variant,
+destination, and seasons) once. Cancel SHALL close the dialog without requesting.
+The dialog SHALL follow the existing dialog focus and keyboard rules.
+
+#### Scenario: Reconnect then retry
+
+- **WHEN** a member reconnects Seerr from the dialog
+- **THEN** the original request is retried once with the same selection
+
+#### Scenario: Cancel requests nothing
+
+- **WHEN** the member cancels the dialog
+- **THEN** no link or request is made and the control returns to its prior state

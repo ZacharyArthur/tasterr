@@ -12,6 +12,7 @@ import {
 	useRequest,
 	variantRequestable,
 } from "../lib/availability";
+import { ConnectSeerr } from "./ConnectSeerr";
 import { SeasonPicker } from "./SeasonPicker";
 
 export function RequestButton({
@@ -37,6 +38,7 @@ export function RequestButton({
 	const [quality, setQuality] = useState<boolean | null>(null);
 	const [advancedOpen, setAdvancedOpen] = useState(false);
 	const [pickingSeasons, setPickingSeasons] = useState(false);
+	const [reconnected, setReconnected] = useState(false);
 	const closeSeasons = useCallback(() => setPickingSeasons(false), []);
 	const [selection, setSelection] = useState<RequestDestinationOverride | null>(
 		null,
@@ -44,11 +46,15 @@ export function RequestButton({
 	if (!config.data?.seerr_configured) return null;
 
 	const result = request.data;
-	if (result?.status === "re_auth_required")
+	if (result?.status === "re_auth_required" && !reconnected)
 		return (
-			<p role="alert" className="text-sm text-status-warning">
-				Your Seerr session expired — sign in again to request.
-			</p>
+			<ConnectSeerr
+				onCancel={() => request.reset()}
+				onConnected={() => {
+					setReconnected(true);
+					request.mutate(request.variables);
+				}}
+			/>
 		);
 	if (result && result.status !== "ok")
 		return result.seerr_url ? (
@@ -147,6 +153,7 @@ export function RequestButton({
 	}
 	function send(chosen?: number[]) {
 		if (!canSubmit || (chosen && options?.can_request_partial !== true)) return;
+		setReconnected(false);
 		const regular = selectable
 			.map((season) => season.season_number)
 			.filter((number) => number > 0);

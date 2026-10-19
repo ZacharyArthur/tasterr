@@ -1,6 +1,5 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false
-
 import asyncio
 from pathlib import Path
 
@@ -8,12 +7,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import mint_linked_session, user_with_links
 
 from tasterr.auth.ratelimit import TokenBucket
-from tasterr.auth.sessions import mint_session
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import Signal, User
+from tasterr.db.models import Signal
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -34,10 +33,11 @@ def _seed_session(db_path: Path) -> str:
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(seerr_user_id=99, display_name="Seeded", auth_type="local")
-                db.add(user)
+                user = await user_with_links(
+                    db, seerr_user_id=99, display_name="Seeded", auth_type="local"
+                )
                 await db.flush()
-                return await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+                return await mint_linked_session(db, user.id, "connect.sid=s%3Aseed", None)
         finally:
             await engine.dispose()
 
@@ -67,6 +67,31 @@ def _client(app: FastAPI, token: str | None = None) -> TestClient:
 
 def _body(kind: str = "detail_open", retract: bool = False) -> dict[str, object]:
     return {"media_type": "movie", "tmdb_id": 42, "kind": kind, "retract": retract}
+
+
+def test_browsing_off_keeps_validation_and_response_without_storing(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        assert (
+            client.post(
+                "/api/v1/account/taste-sources", json={"source": "browsing", "enabled": False}
+            ).status_code
+            == 204
+        )
+        assert client.post("/api/v1/signals", json=_body()).json() == {"recorded": False}
+        assert client.post("/api/v1/signals", json=_body(retract=True)).status_code == 422
+        for invalid in ({"tmdb_id": 0}, {"media_type": "other"}, {"kind": "request"}):
+            assert client.post("/api/v1/signals", json=_body() | invalid).status_code == 422
+        assert _stored_signals(tmp_path / "tasterr.db") == []
+        assert client.post("/api/v1/signals", json=_body("watchlist")).json() == {"recorded": True}
+        assert (
+            client.post(
+                "/api/v1/account/taste-sources", json={"source": "browsing", "enabled": True}
+            ).status_code
+            == 204
+        )
+        assert client.post("/api/v1/signals", json=_body()).json() == {"recorded": True}
 
 
 def test_unauthenticated_signal_is_rejected(tmp_path: Path) -> None:
@@ -123,7 +148,13 @@ def test_server_recorded_kinds_are_unrepresentable(tmp_path: Path) -> None:
     app = _app(tmp_path)
     token = _seed_session(tmp_path / "tasterr.db")
     with _client(app, token) as client:
-        for kind in ("request", "seed_request_history", "watched_plex", "bogus"):
+        for kind in (
+            "request",
+            "seed_request_history",
+            "watched_plex",
+            "watched_jellyfin",
+            "bogus",
+        ):
             response = client.post("/api/v1/signals", json=_body(kind))
             assert response.status_code == 422, kind
 

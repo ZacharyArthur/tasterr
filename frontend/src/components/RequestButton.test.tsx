@@ -370,13 +370,133 @@ test("server-built fallback and expired session are visible", async () => {
 	).toBe("https://requests.example/movie/42");
 });
 
-test("expired session prompts sign-in", async () => {
+test("expired session opens Connect Seerr and cancel restores the control", async () => {
 	fixture(OPTIONS, { status: "re_auth_required" });
 	renderButton();
 	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
-	expect((await screen.findByRole("alert")).textContent).toContain(
-		"sign in again",
+	expect(
+		await screen.findByRole("dialog", { name: "Connect Seerr" }),
+	).toBeTruthy();
+	fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+	expect(await screen.findByRole("button", { name: "Request" })).toBeTruthy();
+});
+
+test.each([
+	"plex",
+	"jellyfin",
+])("Connect Seerr via %s retries the same quality, destination, and seasons only once", async (method) => {
+	const bodies: unknown[] = [];
+	let linked = 0;
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input);
+			if (url.endsWith("/config")) return response({ seerr_configured: true });
+			if (url.endsWith("/destinations")) return response(BOTH);
+			if (url.endsWith("/account"))
+				return response({
+					providers: [
+						{ provider: "plex", linked: true, available: true },
+						{ provider: "jellyfin", linked: false, available: true },
+					],
+				});
+			if (url.endsWith("/links/seerr")) {
+				linked++;
+				return response(null, 204);
+			}
+			if (url.endsWith("/request")) {
+				bodies.push(JSON.parse(String(init?.body)));
+				return response({
+					status: "re_auth_required",
+					seerr_url: "https://requests.example",
+				});
+			}
+			throw new Error("Unexpected local request");
+		}),
 	);
+	renderTv();
+	await screen.findByRole("button", { name: "Request" });
+	fireEvent.change(screen.getByRole("combobox", { name: "Quality" }), {
+		target: { value: "4k" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Choose destination" }));
+	fireEvent.change(screen.getByRole("combobox", { name: "Server" }), {
+		target: { value: "1" },
+	});
+	fireEvent.click(screen.getByRole("button", { name: "Confirm request" }));
+	fireEvent.click(toggle(/Season 3/));
+	fireEvent.click(screen.getByRole("button", { name: "OK" }));
+	await screen.findByRole("dialog", { name: "Connect Seerr" });
+	fireEvent.click(
+		await screen.findByRole("button", {
+			name:
+				method === "jellyfin"
+					? "Use Jellyfin credentials"
+					: "Use my Plex account",
+		}),
+	);
+	if (method === "jellyfin") {
+		fireEvent.change(screen.getByLabelText("Username"), {
+			target: { value: "viewer" },
+		});
+		fireEvent.change(screen.getByLabelText("Password"), {
+			target: { value: "pw" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Connect Seerr" }));
+	}
+	await screen.findByRole("link", { name: /Request in Seerr/ });
+	expect(linked).toBe(1);
+	expect(bodies).toHaveLength(2);
+	expect(bodies[0]).toEqual({
+		media_type: "tv",
+		tmdb_id: 7,
+		is_4k: true,
+		server_id: 1,
+		profile_id: 7,
+		root_folder: "/4k",
+		seasons: [1, 2],
+	});
+	expect(bodies[1]).toEqual(bodies[0]);
+	expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("cancel during linking prevents a late request retry", async () => {
+	let finish: ((response: Response) => void) | undefined;
+	const pending = new Promise<Response>((resolve) => {
+		finish = resolve;
+	});
+	let requests = 0;
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.endsWith("/config")) return response({ seerr_configured: true });
+			if (url.endsWith("/destinations")) return response(OPTIONS);
+			if (url.endsWith("/account"))
+				return response({
+					providers: [{ provider: "plex", linked: true, available: true }],
+				});
+			if (url.endsWith("/links/seerr")) return pending;
+			if (url.endsWith("/request")) {
+				requests++;
+				return response({ status: "re_auth_required" });
+			}
+			throw new Error("Unexpected local request");
+		}),
+	);
+	renderButton();
+	fireEvent.click(await screen.findByRole("button", { name: "Request" }));
+	fireEvent.click(
+		await screen.findByRole("button", { name: "Use my Plex account" }),
+	);
+	fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+	await screen.findByRole("button", { name: "Request" });
+	await act(async () => {
+		finish?.(response(null, 204));
+		await pending;
+	});
+	expect(requests).toBe(1);
+	expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("discovery is shared across titles of one media type", async () => {

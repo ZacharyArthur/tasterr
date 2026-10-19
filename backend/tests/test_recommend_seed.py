@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from tests.factories import user_with_links
 
 from tasterr.catalog.facts import TitleFacts
 from tasterr.catalog.models import MediaType
@@ -16,7 +17,6 @@ from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.clients.seerr import SeerrClient, SeerrHistoricalRequest
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User
 from tasterr.recommend import store
 from tasterr.recommend.seed import seed_in_background, seed_user
 from tasterr.recommend.service import TasteService
@@ -78,8 +78,7 @@ def _seerr(fake: FakeSeerrHistory) -> SeerrClient:
 
 async def _add_user(engine: AsyncEngine) -> int:
     async with _maker(engine)() as db:
-        user = User(seerr_user_id=7, display_name="member", auth_type="plex")
-        db.add(user)
+        user = await user_with_links(db, seerr_user_id=7, display_name="member", auth_type="plex")
         await db.commit()
         return user.id
 
@@ -147,11 +146,11 @@ async def test_background_seed_skips_a_user_with_signals(engine: AsyncEngine) ->
         await store.record_signal(db, user_id, "movie", 42, "detail_open")
         await db.commit()
 
-    await seed_in_background(maker, _taste, _seerr(fake), set(), user_id, 7)
+    await seed_in_background(maker, _taste, _seerr(fake), set(), user_id)
 
-    assert fake.calls == 0  # returning user — no history read at all
+    assert fake.calls == 1
     async with maker() as db:
-        assert len(await store.load_signals(db, user_id)) == 1
+        assert len(await store.load_signals(db, user_id)) == 3
 
 
 async def test_concurrent_logins_seed_once(engine: AsyncEngine) -> None:
@@ -161,8 +160,8 @@ async def test_concurrent_logins_seed_once(engine: AsyncEngine) -> None:
     seeding: set[int] = set()
 
     await asyncio.gather(
-        seed_in_background(maker, _taste, _seerr(fake), seeding, user_id, 7),
-        seed_in_background(maker, _taste, _seerr(fake), seeding, user_id, 7),
+        seed_in_background(maker, _taste, _seerr(fake), seeding, user_id),
+        seed_in_background(maker, _taste, _seerr(fake), seeding, user_id),
     )
 
     assert fake.calls == 1  # single-flight: the second entry bailed
@@ -176,9 +175,7 @@ async def test_background_seed_swallows_seerr_failure(engine: AsyncEngine) -> No
     maker = _maker(engine)
     seeding: set[int] = set()
 
-    await seed_in_background(
-        maker, _taste, _seerr(FakeSeerrHistory(down=True)), seeding, user_id, 7
-    )
+    await seed_in_background(maker, _taste, _seerr(FakeSeerrHistory(down=True)), seeding, user_id)
 
     async with maker() as db:
         assert await store.has_signals(db, user_id) is False

@@ -95,7 +95,8 @@ The repository SHALL provide a documented deterministic release command that run
 the ordinary quality gate, the real-backend Playwright smoke, and the native
 container/Compose smoke. The release procedure SHALL separately require both locked
 dependency audits, the full relevant security checklist, placeholder-only env
-verification, and the live Seerr plus owner/managed/shared Plex contract suites
+verification, and the live Seerr, owner/managed/shared Plex, and Jellyfin
+contract suites
 because those checks require network access, operator credentials, or human triage.
 A failed required check MUST block tagging unless a specific dependency advisory is
 risk-triaged in the release record. When retained live credentials have become stale or unavailable,
@@ -116,7 +117,7 @@ fresh automated pass.
 - **WHEN** the deterministic command passes without live credentials or registry
   access
 - **THEN** the release procedure still shows dependency audits, security/repository
-  review, and live Seerr/Plex contracts as incomplete pre-tag requirements
+  review, and live Seerr/Plex/Jellyfin contracts as incomplete pre-tag requirements
 
 #### Scenario: V2.3.0 live gate is complete
 

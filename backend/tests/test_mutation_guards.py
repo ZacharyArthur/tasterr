@@ -14,6 +14,33 @@ from tasterr.settings import Settings
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 READ_ONLY_POSTS = {("POST", "/api/v1/availability")}
 EXPECTED_GUARDS = {
+    ("POST", "/api/v1/account/taste-sources"): {"require_same_origin", "mutation_rate_limit"},
+    ("POST", "/api/v1/account/taste-sources/{source}/clear"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+    },
+    ("POST", "/api/v1/account/links/jellyfin"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+        "login_rate_limit",
+    },
+    ("POST", "/api/v1/auth/jellyfin"): {"require_same_origin", "login_rate_limit"},
+    ("POST", "/api/v1/account/links/plex/pin"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+        "login_rate_limit",
+    },
+    ("POST", "/api/v1/account/links/plex/pin/poll"): {"require_same_origin", "mutation_rate_limit"},
+    ("POST", "/api/v1/account/links/seerr"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+        "login_rate_limit",
+    },
+    ("POST", "/api/v1/account/links/{provider}/unlink"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+    },
+    ("POST", "/api/v1/account/delete"): {"require_same_origin", "mutation_rate_limit"},
     ("POST", "/api/v1/auth/plex/pin"): {"require_same_origin", "login_rate_limit"},
     ("POST", "/api/v1/auth/plex/pin/poll"): {"require_same_origin"},
     ("POST", "/api/v1/auth/local"): {"require_same_origin", "login_rate_limit"},
@@ -43,6 +70,7 @@ AUTHENTICATED_MUTATIONS = {
         ("POST", "/api/v1/auth/plex/pin"),
         ("POST", "/api/v1/auth/plex/pin/poll"),
         ("POST", "/api/v1/auth/local"),
+        ("POST", "/api/v1/auth/jellyfin"),
     }
 }
 
@@ -103,7 +131,19 @@ def test_every_state_changing_route_has_its_designated_guards() -> None:
 
 def test_every_response_bearing_api_route_has_an_explicit_model() -> None:
     missing = {key for key, route in _api_routes().items() if route.response_model is None}
-    assert missing == {("POST", "/api/v1/auth/logout")}  # intentional 204 response
+    assert missing == {
+        ("POST", path)
+        for path in (
+            "/api/v1/auth/logout",
+            "/api/v1/recommendations/reset",
+            "/api/v1/account/links/seerr",
+            "/api/v1/account/links/jellyfin",
+            "/api/v1/account/links/{provider}/unlink",
+            "/api/v1/account/delete",
+            "/api/v1/account/taste-sources",
+            "/api/v1/account/taste-sources/{source}/clear",
+        )
+    }  # intentional 204 responses
 
 
 def test_read_only_post_and_pin_poll_are_explicitly_exempt() -> None:

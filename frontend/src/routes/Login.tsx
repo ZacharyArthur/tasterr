@@ -1,202 +1,42 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type FormEvent, useState } from "react";
+import { JellyfinCredentialsForm } from "../components/JellyfinCredentialsForm";
+import { PlexConnect } from "../components/PlexConnect";
 import {
-	type FormEvent,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
-import { ApiError, createPlexPin, loginLocal, pollPlexPin } from "../lib/api";
-import { setConfirmedSession } from "../lib/auth";
+	ApiError,
+	createPlexPin,
+	getAuthMethods,
+	loginJellyfin,
+	loginLocal,
+	pollPlexPin,
+} from "../lib/api";
+import {
+	captureSession,
+	isSessionCurrent,
+	setConfirmedSession,
+} from "../lib/auth";
 
-interface PendingPin {
-	pinId: string;
-	authUrl: string;
-}
-
-const PLEX_POPUP_WIDTH = 600;
-const PLEX_POPUP_HEIGHT = 700;
-
-function plexPopupFeatures() {
-	const left = Math.round(
-		window.screenX + (window.outerWidth - PLEX_POPUP_WIDTH) / 2,
-	);
-	const top = Math.round(
-		window.screenY + (window.outerHeight - PLEX_POPUP_HEIGHT) / 2,
-	);
-	return `width=${PLEX_POPUP_WIDTH},height=${PLEX_POPUP_HEIGHT},left=${left},top=${top}`;
-}
-
-async function copyText(value: string): Promise<boolean> {
-	if (navigator.clipboard !== undefined) {
-		try {
-			await navigator.clipboard.writeText(value);
-			return true;
-		} catch {
-			// Fall back for denied clipboard permissions.
-		}
-	}
-
-	const activeElement =
-		document.activeElement instanceof HTMLElement
-			? document.activeElement
-			: null;
-	const textarea = document.createElement("textarea");
-	textarea.value = value;
-	textarea.readOnly = true;
-	textarea.tabIndex = -1;
-	textarea.setAttribute("aria-hidden", "true");
-	textarea.style.position = "fixed";
-	textarea.style.top = "0";
-	textarea.style.left = "0";
-	textarea.style.opacity = "0";
-	document.body.append(textarea);
-	try {
-		textarea.focus();
-		textarea.select();
-		return document.execCommand("copy");
-	} catch {
-		return false;
-	} finally {
-		textarea.remove();
-		try {
-			activeElement?.focus();
-		} catch {
-			// Focus restoration is best effort.
-		}
-	}
-}
+const pillClassName =
+	"relative flex min-h-12 w-full items-center justify-center gap-3 rounded-full border border-app-border bg-app-surface px-12 py-3 font-medium text-app-text transition-colors hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60";
 
 export function Login() {
 	const queryClient = useQueryClient();
-	const [pin, setPin] = useState<PendingPin | null>(null);
-	const [plexError, setPlexError] = useState<string | null>(null);
-	const [popupFailed, setPopupFailed] = useState(false);
-	const [copyStatus, setCopyStatus] = useState<{
-		result: "copied" | "failed";
-		attempt: number;
-	} | null>(null);
+	const methods = useQuery({
+		queryKey: ["auth", "methods"],
+		queryFn: getAuthMethods,
+	});
+	const [seerrExpanded, setSeerrExpanded] = useState(false);
+	const [jellyfinExpanded, setJellyfinExpanded] = useState(false);
+	const jellyfinLogin = useMutation({
+		mutationFn: loginJellyfin,
+		onMutate: () => captureSession(queryClient),
+		onSuccess: (user, _body, epoch) => {
+			if (isSessionCurrent(queryClient, epoch))
+				return setConfirmedSession(queryClient, user);
+		},
+	});
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
-	const approvalWindow = useRef<Window | null>(null);
-	const copyAttempt = useRef(0);
-	const closeApprovalWindow = useCallback(() => {
-		const approval = approvalWindow.current;
-		approvalWindow.current = null;
-		try {
-			if (approval !== null && !approval.closed) approval.close();
-		} catch {
-			// Browser opener policies may sever a cross-origin WindowProxy.
-		}
-	}, []);
-
-	function navigateApprovalWindow(authUrl: string) {
-		const approval = approvalWindow.current;
-		try {
-			if (approval === null) return;
-			if (approval.closed) {
-				setPopupFailed(true);
-				return;
-			}
-			approval.location.replace(authUrl);
-		} catch {
-			approvalWindow.current = null;
-			setPopupFailed(true);
-		}
-	}
-
-	function openApprovalWindow() {
-		closeApprovalWindow();
-		setPopupFailed(false);
-		setCopyStatus(null);
-		const approval = window.open("", "_blank", plexPopupFeatures());
-		if (approval === null) {
-			setPopupFailed(true);
-			return;
-		}
-		approvalWindow.current = approval;
-		try {
-			approval.opener = null;
-		} catch {
-			closeApprovalWindow();
-			setPopupFailed(true);
-			return;
-		}
-		try {
-			approval.focus();
-		} catch {
-			// Focus is progressive enhancement; polling remains authoritative.
-		}
-	}
-
-	async function copyApprovalUrl(authUrl: string, source: HTMLButtonElement) {
-		const result = (await copyText(authUrl)) ? "copied" : "failed";
-		if (source.isConnected) {
-			copyAttempt.current += 1;
-			setCopyStatus({ result, attempt: copyAttempt.current });
-		}
-	}
-
-	const startPlex = useMutation({
-		mutationFn: createPlexPin,
-		onSuccess: (created) => {
-			setPlexError(null);
-			setPin({ pinId: created.pin_id, authUrl: created.auth_url });
-			navigateApprovalWindow(created.auth_url);
-		},
-		onError: () => {
-			closeApprovalWindow();
-			setCopyStatus(null);
-			setPlexError("Could not reach Plex — try again.");
-		},
-	});
-
-	const poll = useQuery({
-		queryKey: ["auth", "plex-pin", pin?.pinId],
-		queryFn: () => pollPlexPin(pin?.pinId ?? ""),
-		enabled: pin !== null,
-		retry: false,
-		refetchInterval: (query) =>
-			query.state.data?.status === "ok" || query.state.error ? false : 2000,
-	});
-
-	const pollData = poll.data;
-	const pollError = poll.error;
-
-	useEffect(() => {
-		if (pollData?.status === "ok") {
-			if (pollData.user == null) {
-				closeApprovalWindow();
-				setCopyStatus(null);
-				setPlexError("Plex sign-in failed — try again.");
-				setPin(null);
-				return;
-			}
-			closeApprovalWindow();
-			try {
-				window.focus();
-			} catch {
-				// Browsers may reject programmatic focus after cross-origin navigation.
-			}
-			void setConfirmedSession(queryClient, pollData.user);
-		}
-	}, [pollData, queryClient, closeApprovalWindow]);
-
-	useEffect(() => {
-		if (pollError !== null) {
-			closeApprovalWindow();
-			setCopyStatus(null);
-			setPlexError(
-				pollError instanceof ApiError && pollError.status === 404
-					? "Plex sign-in expired — try again."
-					: "Plex sign-in failed — try again.",
-			);
-			setPin(null);
-		}
-	}, [pollError, closeApprovalWindow]);
-
-	useEffect(() => closeApprovalWindow, [closeApprovalWindow]);
-
 	const localLogin = useMutation({
 		mutationFn: (credentials: { email: string; password: string }) =>
 			loginLocal(credentials.email, credentials.password),
@@ -209,7 +49,8 @@ export function Login() {
 	}
 
 	const localError =
-		localLogin.error instanceof ApiError && localLogin.error.status === 401
+		localLogin.error instanceof ApiError &&
+		(localLogin.error.status === 401 || localLogin.error.status === 409)
 			? localLogin.error.message
 			: localLogin.isError
 				? "Sign-in failed — try again."
@@ -223,100 +64,161 @@ export function Login() {
 		>
 			<h1 className="text-4xl font-bold tracking-tight">Tasterr</h1>
 			<div className="flex w-full max-w-sm flex-col gap-6">
-				<div className="flex flex-col gap-2" aria-live="polite">
+				{methods.data?.plex && (
+					<PlexConnect
+						createPin={createPlexPin}
+						pollPin={pollPlexPin}
+						label="Continue with Plex"
+						buttonClassName={pillClassName}
+						icon={
+							<svg
+								aria-hidden="true"
+								className="absolute left-5 size-6"
+								viewBox="0 0 24 24"
+							>
+								<path fill="#EBAF00" d="M4 0h8l8 12-8 12H4l8-12z" />
+							</svg>
+						}
+						requireUser
+						onApproved={(data) => {
+							if (data.user) void setConfirmedSession(queryClient, data.user);
+						}}
+					/>
+				)}
+				{methods.data?.jellyfin && (
+					<div className="flex flex-col gap-3">
+						<button
+							type="button"
+							className={pillClassName}
+							aria-expanded={jellyfinExpanded}
+							aria-controls="jellyfin-login"
+							onClick={() => setJellyfinExpanded(!jellyfinExpanded)}
+						>
+							<svg
+								aria-hidden="true"
+								className="absolute left-5 size-6"
+								viewBox="0 0 24 24"
+							>
+								<path
+									fill="#AA5CC3"
+									d="M12 2c-2 0-11 16-10 18s19 2 20 0S14 2 12 2zm0 4 7 12H5z"
+								/>
+								<path fill="#00A4DC" d="m12 9 5 9H7z" />
+							</svg>
+							Continue with Jellyfin
+						</button>
+						{jellyfinExpanded && (
+							<div id="jellyfin-login">
+								<JellyfinCredentialsForm
+									onSubmit={(body) => jellyfinLogin.mutate(body)}
+									pending={jellyfinLogin.isPending}
+									submitLabel="Sign in"
+								/>
+								{jellyfinLogin.isError && (
+									<p role="alert" className="text-sm text-status-error">
+										{jellyfinLogin.error instanceof ApiError &&
+										(jellyfinLogin.error.status === 401 ||
+											jellyfinLogin.error.status === 409)
+											? jellyfinLogin.error.message
+											: "Sign-in failed — try again."}
+									</p>
+								)}
+							</div>
+						)}
+					</div>
+				)}
+				{methods.data?.seerr && (
 					<button
 						type="button"
-						onClick={() => {
-							openApprovalWindow();
-							startPlex.mutate();
-						}}
-						disabled={startPlex.isPending || pin !== null}
-						className="min-h-11 rounded bg-app-accent px-4 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text disabled:opacity-60"
+						className={pillClassName}
+						aria-expanded={seerrExpanded}
+						aria-controls="seerr-login"
+						onClick={() => setSeerrExpanded(!seerrExpanded)}
 					>
-						{pin !== null ? "Waiting for Plex approval…" : "Sign in with Plex"}
+						<svg
+							aria-hidden="true"
+							className="absolute left-5 size-6"
+							viewBox="0 0 96 96"
+							fill="none"
+						>
+							<circle cx="52" cy="52" r="28" fill="#131928" />
+							<path
+								fillRule="evenodd"
+								clipRule="evenodd"
+								d="M48 96C74.5097 96 96 74.5097 96 48C96 21.4903 74.5097 0 48 0C21.4903 0 0 21.4903 0 48C0 74.5097 21.4903 96 48 96ZM80.0001 52C80.0001 67.464 67.4641 80 52.0001 80C36.5361 80 24.0001 67.464 24.0001 52C24.0001 49.1303 24.4318 46.3615 25.2338 43.7548C27.4288 48.6165 32.3194 52 38.0001 52C45.7321 52 52.0001 45.732 52.0001 38C52.0001 32.3192 48.6166 27.4287 43.755 25.2337C46.3616 24.4317 49.1304 24 52.0001 24C67.4641 24 80.0001 36.536 80.0001 52Z"
+								fill="url(#seerr-mark-gradient)"
+							/>
+							<defs>
+								<linearGradient
+									id="seerr-mark-gradient"
+									x1="48"
+									y1="0"
+									x2="117.5"
+									y2="69.5"
+									gradientUnits="userSpaceOnUse"
+								>
+									<stop stopColor="#C395FC" />
+									<stop offset="1" stopColor="#4F65F5" />
+								</linearGradient>
+							</defs>
+						</svg>
+						Continue with Seerr
 					</button>
-					{pin !== null && (
-						<p
-							className={`text-sm ${popupFailed ? "text-status-error" : "text-app-subtle"}`}
-						>
-							{popupFailed
-								? "The Plex window isn't available — "
-								: "Approve the sign-in with Plex, then come back here. "}
-							<a
-								href={pin.authUrl}
-								target="_blank"
-								rel="noopener noreferrer"
-								className="underline"
-							>
-								{popupFailed ? "open it here" : "Open the approval page"}
-							</a>
-							.{" "}
-							<button
-								type="button"
-								onClick={(event) =>
-									void copyApprovalUrl(pin.authUrl, event.currentTarget)
-								}
-								className="underline"
-							>
-								Copy approval URL
-							</button>
-						</p>
-					)}
-					{copyStatus !== null && (
-						<p
-							key={copyStatus.attempt}
-							className={`text-sm ${copyStatus.result === "failed" ? "text-status-error" : "text-app-subtle"}`}
-						>
-							{copyStatus.result === "copied"
-								? "Approval URL copied."
-								: "Could not copy the approval URL. Use the approval link instead."}
-						</p>
-					)}
-					{plexError !== null && (
-						<p className="text-sm text-status-error">{plexError}</p>
-					)}
-				</div>
-
-				<div className="flex items-center gap-3 text-xs uppercase text-app-muted-text">
-					<span className="h-px flex-1 bg-app-border" />
-					or
-					<span className="h-px flex-1 bg-app-border" />
-				</div>
-
-				<form onSubmit={submitLocal} className="flex flex-col gap-3">
-					<label className="flex flex-col gap-1 text-sm text-app-subtle">
-						Email
-						<input
-							type="email"
-							required
-							autoComplete="email"
-							value={email}
-							onChange={(event) => setEmail(event.target.value)}
-							className="min-h-11 rounded border border-app-border bg-app-surface px-3 py-2 text-app-text focus-visible:outline-2 focus-visible:outline-app-accent"
-						/>
-					</label>
-					<label className="flex flex-col gap-1 text-sm text-app-subtle">
-						Password
-						<input
-							type="password"
-							required
-							autoComplete="current-password"
-							value={password}
-							onChange={(event) => setPassword(event.target.value)}
-							className="min-h-11 rounded border border-app-border bg-app-surface px-3 py-2 text-app-text focus-visible:outline-2 focus-visible:outline-app-accent"
-						/>
-					</label>
-					<button
-						type="submit"
-						disabled={localLogin.isPending}
-						className="min-h-11 rounded bg-app-accent px-4 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text disabled:opacity-60"
+				)}
+				{methods.isPending && (
+					<output className="text-sm text-app-subtle">
+						Loading sign-in methods…
+					</output>
+				)}
+				{(methods.isError ||
+					(methods.data &&
+						!methods.data.plex &&
+						!methods.data.jellyfin &&
+						!methods.data.seerr)) && (
+					<p role="alert" className="text-sm text-status-error">
+						Sign-in is currently unavailable.
+					</p>
+				)}
+				{methods.data?.seerr && seerrExpanded && (
+					<form
+						id="seerr-login"
+						onSubmit={submitLocal}
+						className="flex flex-col gap-3"
 					>
-						Sign in
-					</button>
-					{localError !== null && (
-						<p className="text-sm text-status-error">{localError}</p>
-					)}
-				</form>
+						<label className="flex flex-col gap-1 text-sm text-app-subtle">
+							Email
+							<input
+								type="email"
+								required
+								autoComplete="email"
+								value={email}
+								onChange={(event) => setEmail(event.target.value)}
+								className="min-h-11 rounded border border-app-border bg-app-surface px-3 py-2 text-app-text focus-visible:outline-2 focus-visible:outline-app-accent"
+							/>
+						</label>
+						<label className="flex flex-col gap-1 text-sm text-app-subtle">
+							Password
+							<input
+								type="password"
+								required
+								autoComplete="current-password"
+								value={password}
+								onChange={(event) => setPassword(event.target.value)}
+								className="min-h-11 rounded border border-app-border bg-app-surface px-3 py-2 text-app-text focus-visible:outline-2 focus-visible:outline-app-accent"
+							/>
+						</label>
+						<button
+							type="submit"
+							disabled={localLogin.isPending}
+							className="min-h-11 rounded bg-app-accent px-4 py-2 font-medium text-white transition-colors hover:brightness-110 focus-visible:outline-2 focus-visible:outline-app-text disabled:opacity-60"
+						>
+							Sign in
+						</button>
+						{localError !== null && (
+							<p className="text-sm text-status-error">{localError}</p>
+						)}
+					</form>
+				)}
 			</div>
 		</main>
 	);

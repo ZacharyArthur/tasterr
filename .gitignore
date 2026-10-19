@@ -28,7 +28,11 @@ test-results/
 .env
 *.db
 *.sqlite*
+/.local/live-jellyfin/
 
 # OS
 Thumbs.db
 .DS_Store
+
+# Local feature backlog (not committed)
+TODO-FEATURES.md

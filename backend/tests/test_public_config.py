@@ -61,8 +61,11 @@ CLIENT_SAFE_FIELDS = {
 
 def _sentineled_settings() -> Settings:
     values: dict[str, object] = {
+        "plex_server_id": f"{SENTINEL}-plex-server-id",
         "tasterr_hide_library_items": True,
         "tasterr_excluded_service_ids": [8],
+        "jellyfin_allow_empty_password": True,
+        "jellyfin_internal_url": "http://jellyfin-sentinel:8096",
     }
     for name, field in Settings.model_fields.items():
         if name in CLIENT_SAFE_FIELDS or name in values:
@@ -135,6 +138,10 @@ def test_v2_private_fields_are_absent_from_browser_contracts() -> None:
         {
             "plex_token",
             "plex_token_enc",
+            "credential_enc",
+            "external_id",
+            "sync_attempted_at",
+            "sync_synced_at",
             "access_token",
             "account_id",
             "server_url",

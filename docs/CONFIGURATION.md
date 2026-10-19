@@ -9,18 +9,52 @@ the container, so that deployment path requires the configured file. A service
 manager, container UI, or orchestrator may instead inject the same application
 variable names directly. Host shell variables do not enter a Compose container by
 themselves: when omitting `env_file`, declare each name under the service's
-`environment` section as shown in the README. Never commit a real environment file
-or place secret values directly in a Compose file.
+`environment` section as shown in [compose.example.yaml](../compose.example.yaml).
+For exported-host setups, replace the mapping with bare-name list entries such as
+`- PLEX_SERVER_ID`; an unset optional name is omitted instead of becoming an empty
+string. When using `${NAME}` mappings, uncomment only optional values that are set.
+Never commit a real environment file or place secret values directly in a Compose file.
+
+The published-image example is saved as `compose.yaml` beside a copy of
+[`.env.example`](../.env.example). Compose reads that `.env` for substitution in
+the Compose file; it does not automatically inject its contents into containers.
+`env_file` performs injection, while `environment` overrides its entries. Inline
+non-secret values and `${VAR}` substitutions can be combined; `${VAR:-default}`
+supplies an optional default and `${VAR:?message}` rejects a missing requirement.
+For example, `STATIC_DIR: "/app/static"` is an inline non-secret value. Keep
+`TASTERR_PORT` as substitution and set it in `.env`: an inline environment value
+does not supply the separate port mapping's substitution.
+Both source-build and published Compose use the resolved `TASTERR_PORT` for the
+container listener and mapped target, defaulting to 8000. `TASTERR_HTTP_PORT`
+independently controls host publication, defaulting to `127.0.0.1:8000`.
+Use `$$` for a literal dollar sign inline, and single-quote literal dollars in
+`.env`. Shell values override substitution values. With an alternate file, pass
+`--env-file` as well as setting `TASTERR_ENV_FILE`; keep relative paths beside the
+Compose file. See [Docker's substitution reference](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/).
+Never share rendered Compose configuration: it includes secrets.
+
+The example pins `2.3.1`; the linked-account, direct Plex/Jellyfin sign-in, and
+taste-source features in the current source are unreleased. Use a release
+containing them once available; no version bump is implied by this reference.
+The pinned release requires Seerr and ignores `PLEX_SERVER_ID` and `JELLYFIN_*`;
+in particular, setting `PLEX_SERVER_ID` on `2.3.1` does not restrict sign-in.
+Existing deployments should replace their Compose file in place and preserve the
+project name and data volume; moving to a new directory/project can select a new,
+empty volume. Keep the existing `.env` rather than replacing it with placeholders.
 
 ## Application environment variables
 
 | Variable | Required | Default | Purpose |
 |---|---:|---|---|
 | `TMDB_API_KEY` | For browsing | unset | TMDB v3 key used server-side for catalog reads. |
+| `PLEX_SERVER_ID` | For Plex sign-in without Seerr | unset | Plex server machine identifier (1–64 letters, digits, or hyphens). Gates Plex sign-in/linking by server membership and pins history and Continue Watching. Find it in Plex Web → Settings → General or `/identity`. Never sent to browsers. |
 | `SEERR_INTERNAL_URL` | For Seerr integration | unset | Server-only HTTP(S) base URL used for identity, availability, history, and requests. |
+| `JELLYFIN_INTERNAL_URL` | For Jellyfin integration | unset | Server-only HTTP(S) base URL with a host and no embedded credentials, query, or fragment. Invalid values leave Jellyfin unconfigured. |
+| `JELLYFIN_API_KEY` | For Jellyfin integration | unset | Secret server-admin API key used only for user-scoped reads. Create one in Jellyfin Dashboard → Advanced → API Keys. |
+| `JELLYFIN_ALLOW_EMPTY_PASSWORD` | No | `false` | Explicitly allow passwordless Jellyfin accounts for sign-in and linking. |
 | `SEERR_EXTERNAL_URL` | No | unset | Browser-visible HTTP(S) base URL for fallback “Request in Seerr” links. Embedded credentials are rejected. |
 | `SEERR_API_KEY` | For Seerr reads | unset | Server-only Seerr API key. User-attributed request writes use the member's Seerr session instead. |
-| `TASTERR_SECRET_KEY` | For sign-in/requests | unset | Random secret used to encrypt stored Plex tokens. Keep it stable across upgrades. |
+| `TASTERR_SECRET_KEY` | For sign-in/requests | unset | Random secret used to encrypt linked Plex tokens and Seerr cookies. Keep it stable across upgrades. |
 | `DATABASE_PATH` | No | `data/tasterr.db` | SQLite path. The image sets `/data/tasterr.db` on its named volume. |
 | `STATIC_DIR` | No | `static` | Compiled SPA directory. The image sets `/app/static`. |
 | `TASTERR_HOST` | No | `0.0.0.0` | Uvicorn bind address. |
@@ -30,16 +64,26 @@ or place secret values directly in a Compose file.
 | `TASTERR_HIDE_LIBRARY_ITEMS` | No | unset | Override household library hiding with `true` or `false`; locks the admin control. |
 | `TASTERR_EXCLUDED_SERVICE_IDS` | No | unset | Override subscription-service exclusions with a JSON array of up to eight unique positive TMDB provider IDs, e.g. `[8]`; `[]` explicitly clears exclusions and locks the control. |
 
-Empty or missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
+Missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
+An explicitly empty or malformed `PLEX_SERVER_ID` fails boot; omit it to use the
+Seerr gate. Seerr is optional with direct Plex or Jellyfin sign-in and `TASTERR_SECRET_KEY`.
 The proxy allowlist accepts literal IP addresses and CIDRs only; empty entries,
 hostnames, URLs, malformed networks, and wildcard trust fail boot.
+
+Jellyfin needs both its URL and API key plus `TASTERR_SECRET_KEY`; partial configuration
+leaves it off. Create the API key in **Jellyfin Dashboard → Advanced → API Keys**.
+Exposing Tasterr exposes Jellyfin password sign-in: Jellyfin sees Tasterr's address,
+so its local-network access rules do not apply. Repeated wrong passwords can lock
+an account; attempts are bounded only by Tasterr's login bucket (10/min per client
+IP). Empty passwords are refused before any upstream call unless
+`JELLYFIN_ALLOW_EMPTY_PASSWORD=true`, including Jellyfin and Seerr-via-Jellyfin links.
 
 ## Compose-only variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `TASTERR_MEDIA_NETWORK` | unset | Existing external Docker network used only with `docker-compose.seerr-network.yml` when Seerr runs on this same Docker host in another Compose project. |
-| `TASTERR_IMAGE` | `tasterr:latest` | Local or GHCR image name/tag used by Compose. |
+| `TASTERR_IMAGE` | `ghcr.io/zacharyarthur/tasterr:2.3.1` in the published example; `tasterr:latest` in source Compose | Optional image tag/digest override. |
 | `TASTERR_HTTP_PORT` | `127.0.0.1:8000` | Host-side port or bind expression. Set `8000` or a specific LAN IP and port only for intentional direct LAN access. |
 | `TASTERR_ENV_FILE` | `.env` | Environment file loaded by the bundled Compose service. With an alternate file, pass the same file to Compose via `--env-file`. This is a Compose concern, not an application requirement. |
 
@@ -56,9 +100,9 @@ docker run --rm python:3.13-slim python -c "import secrets; print(secrets.token_
 ```
 
 Store the result only in `.env` or your secret manager. Rotating it makes previously
-stored Plex tokens unreadable, so affected users must sign in again before silent
-Seerr re-authentication can work. Obtain the TMDB and Seerr API keys from their
-respective settings pages; do not place either in browser code, Compose build args,
+stored Plex tokens and Seerr cookies unreadable, so affected members must sign in
+or reconnect the affected accounts. Obtain TMDB, Seerr, and Jellyfin API keys from
+their respective settings pages; do not place them in browser code, Compose build args,
 or image layers.
 
 Choose `SEERR_INTERNAL_URL` according to where Seerr runs:
@@ -84,8 +128,11 @@ For the default host-only or host-proxy path, start with
 LAN, first set `TASTERR_HTTP_PORT=8000` (or a specific LAN bind) and restrict the host
 firewall to the intended network. Boot upgrades SQLite to the current
 Alembic revision, expires stale sessions, and then reports health at
-`/api/v1/health`. Sign in with an existing Seerr account. Seerr's admin permission is
-re-derived on each login and controls access to Tasterr's Settings screen.
+`/api/v1/health`. Sign in with an admitted Plex, Seerr, or enabled Jellyfin account.
+Admin grants from Seerr permissions, Jellyfin policy, and pinned Plex ownership are
+re-derived at each sign-in and control access to Tasterr's Settings screen. Sessions
+slide for 30 days but expire absolutely 90 days after creation, requiring sign-in
+and fresh admission/admin checks.
 
 ## Runtime household settings
 
@@ -131,14 +178,57 @@ and are evaluated in the new region.
 
 The rail list includes independent switches for **Continue Watching**, **Picks You
 Wouldn't Usually Watch**, and **Something for Everyone Tonight**. All three default
-enabled. Plex-backed sessions reuse their encrypted sign-in token, while local-login
-sessions perform no live Plex read. `TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
+enabled. Any user with a Plex link reuses its encrypted account token, including
+after local sign-in. Users without a Plex link perform no live Plex read.
+`TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
 bounded server-side discovery and is never exposed to the browser.
+
+## Member accounts and taste sources
+
+Every member can open **Account** (`/account`) from the avatar menu. Link Plex via
+PIN, Jellyfin via username/password, or Seerr via Plex, local credentials, or
+Jellyfin credentials. Prove links before switching sign-in methods: there is no
+email matching or account merge. Explicitly unlinking Seerr prevents automatic
+reconnection until manually linked again. Unlink requires another usable sign-in
+method; imported history is retained unless its deletion is selected. Deleting a
+Tasterr account removes its local data and sessions, leaving upstream accounts alone.
+Display names follow Seerr → Plex → Jellyfin priority; avatars render as initials.
+
+All four taste sources start on: Seerr request history, Plex watch history,
+Jellyfin watch history, and browsing activity. Turning a source off cancels its
+import, stops collection, and excludes retained signals from the profile and rail
+anchors. Turning it back on restores influence and resets that link's sync times
+for a full bounded re-import. Requests made in Tasterr, My List/onboarding picks,
+and Not interested always count. Continue Watching is independent of taste toggles.
+
+**Clear imported history** deletes only that source's signals, preserving its
+toggle and watermark. The 24-hour sync overlap can re-import recent activity; a
+source with no completed sync can import its full window again. Retained watched
+titles remain excluded from Recommended for You even with their source off;
+clearing their signals removes that exclusion. Recommendation reset deletes all
+taste signals, including My List and Not interested, clears sync times, and
+schedules enabled sources in the background. Source preferences and the onboarding
+completion flag are preserved.
 
 ## Plex-aware operation
 
+`PLEX_SERVER_ID` pins history and Continue Watching to one machine identifier.
+Find it in Plex Web → Settings → General or the server's `/identity` response.
+Every Plex sign-in and link checks membership in the plex.tv resources list;
+owners, shared users, and Plex Home users qualify without a PMS probe. Setting it
+removes Plex sign-in for members who cannot see that server, even if Seerr
+admitted them before. Without it, Seerr must accept the Plex token.
+
+Pinning applies going forward: `watched_plex` rows already imported from other
+servers stay until cleared or reset. A pinned server missing from resources yields
+no media reads and does not advance the history success watermark.
+
+Removing Seerr removes the bridge between sign-in methods. Before unsetting its
+values, members who use Seerr email/password should link Plex (or Jellyfin when
+available) from `/account`, or their next sign-in creates a new, empty Tasterr account.
+
 Plex history sync is best-effort and never blocks sign-in or Home. Tasterr evaluates
-one bounded import per Plex-backed user at most every six hours. Continue Watching is
+one bounded import per user with a Plex link at most every six hours. Continue Watching is
 live, caller-scoped presentation data cached for five minutes; raw history, progress,
 server URLs, account ids, rating keys, and resource tokens are not stored. Plex
 failure removes the affected rail/import only. TMDB or Seerr degradation keeps its
@@ -155,9 +245,9 @@ Tasterr deliberately does not fall back to title/year guessing.
 
 If an inaccessible shared server remains in Plex resource discovery, remove that
 server's library access in Plex under **Settings > Manage Library Access** (unshare
-the server for the affected account). Tasterr has no server allow/deny list and will
-not persist one; usable sibling servers continue to work while the dead share is
-present. Plex's current access-removal flow is documented in
+the server for the affected account). With `PLEX_SERVER_ID`, only the pinned server
+is read. Without pinning, usable sibling servers continue to work while the dead
+share is present. Plex's current access-removal flow is documented in
 [Managing Library Access](https://support.plex.tv/articles/201105738-creating-and-managing-server-shares/).
 
 ## HTTPS and trusted proxies
@@ -194,19 +284,26 @@ same headers as defense-in-depth but must not weaken them.
 
 - TMDB unset or unavailable: health still responds, but catalog browsing reports a
   generic unavailable state until TMDB recovers or is configured.
-- Seerr unset: TMDB browsing remains available; availability is Unknown and request
-  controls are disabled.
+- Seerr unset: TMDB browsing remains available to existing sessions; availability
+  is Unknown and request controls are disabled. Plex sign-in remains available with
+  `PLEX_SERVER_ID` and the secret key set; Jellyfin sign-in also remains available
+  when its URL, API key, and secret are set. Otherwise no new sign-in is available.
 - Seerr temporarily down: browsing and learned recommendations continue; badges
   degrade to Unknown and request attempts fail generically or offer the validated
   external Seerr link.
-- A local user's Seerr session expires: a request asks them to sign in again. A Plex
-  user's request performs one silent re-authentication attempt with the encrypted
-  stored token.
+  With a pinned server, Seerr refusing the Plex token never blocks sign-in; a
+  Seerr outage blocks only a would-be new user, preserving the existing-user bridge.
+  Jellyfin sign-in follows the same Seerr auto-link rule.
+- A Seerr cookie expires: a member with a Plex link gets one silent re-authentication
+  attempt with its encrypted token. Otherwise the request opens **Connect Seerr**;
+  successful linking retries the original selection once.
 - Plex token invalid, plex.tv down, or every advertised server unreachable: ordinary
   Home rails remain available; Continue Watching is omitted and history retries only
   after the attempt throttle.
 - One Plex server unreachable: successful siblings still contribute; the history
   success watermark waits for a later all-server bounded pass.
+- Jellyfin down: existing sessions keep browsing; history retries after its six-hour
+  attempt throttle. Jellyfin sign-in/linking returns a generic upstream error.
 - Plex media without a canonical TMDB GUID: only that item is omitted; repair its
   library metadata as described above.
 
@@ -214,12 +311,13 @@ same headers as defense-in-depth but must not weaken them.
 
 The default volume is normally named `tasterr_tasterr-data`; confirm with
 `docker volume ls` if a Compose project name was supplied. Stop the only writer before
-copying the database. The following streams the database without exposing it in a
-temporary helper volume:
+copying the database. Select the image ID used by the existing service before
+stopping it; this works for both published releases and local source builds. The
+following streams the database without exposing it in a temporary helper volume:
 
 ```console
 VOLUME=tasterr_tasterr-data
-IMAGE=tasterr:latest
+IMAGE="$(docker compose images -q tasterr)"
 docker compose stop tasterr
 docker run --rm --entrypoint python -v "$VOLUME:/data:ro" "$IMAGE" -c "import sys; sys.stdout.buffer.write(open('/data/tasterr.db','rb').read())" > tasterr.db.backup
 docker compose start tasterr
@@ -244,6 +342,33 @@ Keep backups encrypted and access-controlled: they contain identities, taste
 signals, session material, and household viewing behavior.
 
 ## Upgrade and rollback
+
+Migration `0009` adds per-user taste-source preferences, with every source on by
+default. To roll back across it, stop the writer and back up/validate the database,
+then use the current image's Alembic downgrade to `0008` before starting the
+previous image. The downgrade removes the switched-off source settings and
+invalidates affected profiles so they rebuild from all retained signals; no
+history is deleted. The previous image resumes imports for every configured
+linked provider. An image-only rollback across `0009` is unsupported.
+
+Migration `0008` extends the unique signal index for `watched_jellyfin`. To roll back
+across it, stop the writer and back up/validate the database first, then use the
+current image's Alembic downgrade to `0007` before starting the previous image.
+This deletes Jellyfin links and imported signals, invalidates affected profiles,
+and deletes Jellyfin-only users together with their signals, profiles, and sessions.
+Retained users' other data stays. An image-only rollback across `0008` is unsupported.
+
+Migration `0007` makes identities local and moves external accounts into
+`linked_accounts`. It signs everyone out once; sign in again after upgrading.
+Taste signals, profiles, watchlists, and onboarding state are preserved. Credentials
+are stored encrypted on links after signing in, survive logout, and are removed by
+unlink or account deletion.
+
+An image-only rollback across `0007` is unsupported. Stop the writer and restore
+the matching pre-upgrade backup, or use the current image to downgrade to `0006`
+before starting the previous image. The downgrade deletes users without a Seerr
+link and all their local data, restores Seerr identities for retained users,
+and deletes every session. Back up and validate the database first.
 
 Before upgrading, take and validate a backup, record the current immutable image
 digest, then set `TASTERR_IMAGE` to the new stable tag or digest. Run
@@ -278,14 +403,16 @@ request destination selection worked after valid root folders were configured in
 Seerr. This was manual verification; the automated live suite was not rerun on
 3.5.0. The earlier automated Seerr 3.3.0 baseline remains historical evidence.
 
-Live Plex/Seerr contracts are opt-in and excluded from `just check` and CI. Put the
+Live Plex/Seerr/Jellyfin contracts are opt-in and excluded from `just check` and CI. Put the
 `TASTERR_LIVE_*` values named at the top of `backend/tests/live/` in a temporary file
 outside the repository, restrict that file to the current user, load it only into
 the devcontainer shell, and run `just test-live`. Owner, managed, and shared Plex
 tokens are supplied as `TASTERR_LIVE_PLEX_OWNER_TOKEN`,
 `TASTERR_LIVE_PLEX_MANAGED_TOKEN`, and `TASTERR_LIVE_PLEX_SHARED_TOKEN`. All three
-are required for the five-test Plex suite; if any is unavailable, the complete suite
-skips and the release record must state that generically.
+are required for the original Plex suite; if any is unavailable, those cases skip
+and the release record must state that generically. The pinned-membership cases
+also require `PLEX_SERVER_ID` and independently check each available managed/shared
+token sees that server with `owned: false`, without probing PMS.
 
 ```console
 chmod 600 /tmp/tasterr-live.env
@@ -296,7 +423,18 @@ Never put live values in `.env.example`, the repository, command output, test
 fixtures, or evidence. Record only versions and generic exercised/skipped/pass/fail
 results. Every v2.3 release candidate must pass these live contracts and the full
 release gate before tagging, or record the narrow release-owner exception in
-[RELEASING.md section 5](RELEASING.md#5-run-live-seerr-and-plex-contracts).
+[RELEASING.md section 5](RELEASING.md#5-run-live-seerr-plex-and-jellyfin-contracts).
+
+Jellyfin contracts require `TASTERR_LIVE_JELLYFIN_URL`,
+`TASTERR_LIVE_JELLYFIN_API_KEY`, and explicit permission via
+`TASTERR_LIVE_JELLYFIN_DISPOSABLE_USERS=true`. They create and delete disposable
+users, including an empty-password account and one deliberately locked out.
+`TASTERR_LIVE_JELLYFIN_USER_ID` names a user with played movies/episodes for read
+contracts. Seerr's Jellyfin login case uses `TASTERR_LIVE_JELLYFIN_USERNAME` and
+`TASTERR_LIVE_JELLYFIN_PASSWORD`. Test disabled media-server logins on a disposable
+Seerr configuration with `TASTERR_LIVE_JELLYFIN_LOGIN_DISABLED=true` or
+`TASTERR_LIVE_PLEX_LOGIN_DISABLED=true`. Record tested versions and status codes
+only, verify account cleanup, and remove the temporary secret file afterward.
 
 The destination persistence contract additionally accepts
 `TASTERR_LIVE_REQUEST_4K_TMDB_ID`, a disposable movie whose 4K variant is not

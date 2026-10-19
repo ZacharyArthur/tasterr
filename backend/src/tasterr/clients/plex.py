@@ -54,6 +54,8 @@ class PlexCloudAccount(BaseModel):
 
     id: PositiveInt
     username: StrictStr
+    title: StrictStr | None = None
+    thumb: StrictStr | None = None
 
 
 class PlexConnection(BaseModel):
@@ -64,12 +66,15 @@ class PlexConnection(BaseModel):
     relay: StrictBool = False
 
 
-class PlexResource(BaseModel):
+class PlexResourceAccess(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     client_identifier: StrictStr = Field(alias="clientIdentifier", min_length=1)
-    access_token: SecretStr = Field(alias="accessToken")
     owned: StrictBool = False
+
+
+class PlexResource(PlexResourceAccess):
+    access_token: SecretStr = Field(alias="accessToken")
     provides: StrictStr = ""
     connections: list[PlexConnection] = []
 
@@ -222,6 +227,34 @@ class PlexAuthClient:
             "X-Plex-Client-Identifier": self._client_identifier,
         }
 
+    async def account(self, token: str) -> PlexCloudAccount:
+        return await PlexMediaClient(self._http, self._client_identifier).account(token)
+
+    async def resources(self, token: str) -> list[PlexResourceAccess]:
+        try:
+            response = await self._http.get(
+                RESOURCES_URL,
+                params={"includeHttps": "1", "includeRelay": "1", "includeIPv6": "1"},
+                headers={**self._headers(), "X-Plex-Token": token},
+                timeout=PLEX_TIMEOUT_SECONDS,
+                follow_redirects=False,
+            )
+        except httpx.HTTPError:
+            raise UpstreamUnavailable("plex.tv request failed") from None
+        if response.status_code in (502, 503, 504):
+            raise UpstreamUnavailable("plex.tv unavailable")
+        if response.status_code != 200:
+            raise UpstreamRejected(response.status_code)
+        try:
+            payload: object = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("expected resources list")
+            return [
+                PlexResourceAccess.model_validate(item) for item in cast("list[object]", payload)
+            ]
+        except ValueError:
+            raise UpstreamRejected(200) from None
+
     async def create_pin(self) -> PlexPin:
         try:
             response = await self._http.post(
@@ -275,6 +308,7 @@ class PlexMediaClient:
         client_identifier: str,
         *,
         max_connection_probes: int = DEFAULT_MAX_CONNECTION_PROBES,
+        server_id: str | None = None,
     ) -> None:
         if (
             type(max_connection_probes) is not int
@@ -287,6 +321,7 @@ class PlexMediaClient:
         self._http = http
         self._client_identifier = client_identifier
         self._max_connection_probes = max_connection_probes
+        self._server_id = server_id
 
     def _headers(self, token: str | None = None) -> dict[str, str]:
         headers = {
@@ -323,7 +358,9 @@ class PlexMediaClient:
                 resource = PlexResource.model_validate(item)
             except ValidationError:
                 continue
-            if "server" in resource.provides.split(","):
+            if "server" in resource.provides.split(",") and (
+                self._server_id is None or resource.client_identifier == self._server_id
+            ):
                 resources.append(resource)
         resources.sort(key=lambda item: (not item.owned, item.client_identifier))
 
@@ -340,7 +377,8 @@ class PlexMediaClient:
         servers = [server for server in validated if server is not None]
         return PlexServerDiscovery(
             servers=tuple(servers),
-            complete=len(servers) == min(len(resources), MAX_SERVERS),
+            complete=len(servers) == min(len(resources), MAX_SERVERS)
+            and (self._server_id is None or bool(resources)),
         )
 
     async def _pms_account_rows(self, server: PlexServer) -> list[object]:

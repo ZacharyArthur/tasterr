@@ -49,3 +49,9 @@ def test_release_documents_name_the_current_stable_tag() -> None:
     assert re.search(r"(?m)^- Release date: \d{4}-\d{2}-\d{2}$", evidence)
     assert "pending GitHub Release" not in evidence
     assert f"`{VERSION}`, `{VERSION.rsplit('.', 1)[0]}`, `2`, and `latest`" in releasing
+
+
+def test_published_compose_pin_matches_current_release() -> None:
+    example = (ROOT / "compose.example.yaml").read_text(encoding="utf-8")
+
+    assert f"image: ${{TASTERR_IMAGE:-ghcr.io/zacharyarthur/tasterr:{VERSION}}}" in example

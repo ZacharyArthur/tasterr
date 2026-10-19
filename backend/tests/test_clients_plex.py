@@ -177,12 +177,22 @@ async def test_media_account_uses_header_only_token() -> None:
         assert request.url == "https://plex.tv/api/v2/user"
         assert request.headers["x-plex-token"] == "account-token"
         assert "account-token" not in str(request.url)
-        return httpx.Response(200, json={"id": 42, "username": "member", "ignored": True})
+        return httpx.Response(
+            200,
+            json={
+                "id": 42,
+                "username": "member",
+                "title": "Display name",
+                "thumb": "avatar",
+                "ignored": True,
+            },
+        )
 
     account = await _media_client(handler).account("account-token")
 
     assert account.id == 42
     assert account.username == "member"
+    assert account.title == "Display name" and account.thumb == "avatar"
 
 
 @pytest.mark.parametrize("account_id", [True, "42"])
@@ -254,6 +264,28 @@ async def test_server_selection_is_capped_at_four() -> None:
 
     assert len(servers) == 4
     assert identities == 4
+
+
+async def test_discovery_probes_only_pinned_server_among_many() -> None:
+    resources = [
+        _resource(f"machine-{index}", f"https://machine-{index}.plex.direct:32400")
+        for index in range(8)
+    ]
+    probes: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "plex.tv":
+            return httpx.Response(200, json=resources)
+        probes.append(request.url.host or "")
+        return _identity("machine-7")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        discovery = await PlexMediaClient(http, CLIENT_ID, server_id="machine-7").discover_servers(
+            "account-token"
+        )
+    assert [server.machine_identifier for server in discovery.servers] == ["machine-7"]
+    assert discovery.complete
+    assert probes == ["machine-7.plex.direct"]
 
 
 async def test_connection_attempts_are_capped_at_six() -> None:

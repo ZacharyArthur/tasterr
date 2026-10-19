@@ -93,6 +93,7 @@ def test_hidden_and_engaged_exclusion_sets() -> None:
         (("movie", 4), "seed_request_history"),
         (("movie", 5), "watched_plex"),
         (("movie", 6), "detail_open"),
+        (("movie", 7), "watched_jellyfin"),
     ]
 
     assert hidden_titles(signals) == {("movie", 1)}
@@ -101,6 +102,7 @@ def test_hidden_and_engaged_exclusion_sets() -> None:
         ("movie", 3),
         ("movie", 4),
         ("movie", 5),
+        ("movie", 7),
     }
 
 

@@ -1,9 +1,12 @@
 """App factory and lifespan: migrate on boot, serve the API and the SPA."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import cast
+from weakref import WeakValueDictionary
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -11,6 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from tasterr.api.account import router as account_router
 from tasterr.api.admin import router as admin_router
 from tasterr.api.auth import router as auth_router
 from tasterr.api.availability import router as availability_router
@@ -75,6 +79,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await sweep_expired(db)
             yield
         finally:
+            tasks = list(
+                cast("dict[int, asyncio.Task[None]]", started_app.state.seed_tasks).values()
+            )
+            tasks += list(
+                cast("dict[int, asyncio.Task[None]]", started_app.state.plex_history_tasks).values()
+            )
+            tasks += list(
+                cast(
+                    "dict[int, asyncio.Task[None]]", started_app.state.jellyfin_history_tasks
+                ).values()
+            )
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             await http.aclose()
             await engine.dispose()
 
@@ -91,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(meta_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(account_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(home_router, prefix="/api/v1")
     app.include_router(title_router, prefix="/api/v1")
@@ -111,13 +130,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # A separate bounded cache for short-TTL Seerr availability reads, so they
     # never evict the longer-lived TMDB entries (and vice versa).
     app.state.seerr_cache = Cache()
-    # Cold-start seed bookkeeping (M4): per-user single-flight + strong refs
-    # so fire-and-forget seed tasks aren't garbage-collected mid-import.
+    # Seerr history sync uses per-user single-flight and strong task references
+    # so background imports aren't garbage-collected mid-flight.
     app.state.seeding = set()
-    app.state.seed_tasks = set()
+    app.state.seed_tasks = {}
+    app.state.history_locks = WeakValueDictionary()
     # Per-user Plex history tasks are both the single-flight claims and the
     # strong references reset uses to cancel/await an in-flight import.
     app.state.plex_history_tasks = {}
+    app.state.jellyfin_history_tasks = {}
     app.state.plex_history_resets = set()
     # Catalog failures map to generic browser errors (no upstream detail leaks).
     # UpstreamRejected (TMDB 4xx) that an endpoint doesn't handle itself (title/
@@ -192,15 +213,23 @@ class SessionCookieSlide:
 
         async def send_with_refresh(message: Message) -> None:
             if message["type"] == "http.response.start":
-                token = cast("str | None", scope.get("state", {}).get("session_cookie_refresh"))
-                if token is not None:
+                refresh = cast(
+                    "tuple[str, datetime] | None",
+                    scope.get("state", {}).get("session_cookie_refresh"),
+                )
+                if refresh is not None:
+                    token, expires_at = refresh
                     message.setdefault("headers", [])
                     headers = MutableHeaders(scope=message)
                     prefix = f"{COOKIE_NAME}="
                     if not any(v.startswith(prefix) for v in headers.getlist("set-cookie")):
                         headers.append(
                             "set-cookie",
-                            session_cookie_header(token, secure=scope.get("scheme") == "https"),
+                            session_cookie_header(
+                                token,
+                                secure=scope.get("scheme") == "https",
+                                expires_at=expires_at,
+                            ),
                         )
             await send(message)
 

@@ -1,36 +1,57 @@
 # taste-onboarding Specification
 
 ## Purpose
-TBD - created by archiving change add-plex-play-and-taste-onboarding. Update Purpose after archive.
+Offer an optional inline taste picker after history sync, recording deliberate selections as watchlist signals while preserving uninterrupted browsing.
+
 ## Requirements
+
 ### Requirement: Onboarding eligibility follows cold-start outcome
 
-`GET /api/v1/taste-onboarding` SHALL return `pending` while the authenticated
-user's cold-start seed is reserved or running, `show` after it is no longer
-running when the user has no signals and has never handled the picker, and `done`
-when the user has any signal or has previously completed/dismissed the picker.
-The endpoint SHALL use only the session user's server-side state and SHALL make no
-outbound request.
+`GET /api/v1/taste-onboarding` SHALL return, checked in this order: `done` when
+the user has any signal of a kind that counts toward their profile (not from a
+source they switched off) or has previously completed/dismissed the picker;
+otherwise `pending` while any of the user's history syncs (Seerr request history
+or a watch-history sync) is reserved or running; otherwise `show`. A user with
+signals that count is therefore never `pending`, even while a routine sync runs. The endpoint SHALL use only the session user's server-side
+state and SHALL make no outbound request.
 
 #### Scenario: Seed is still running
 
-- **WHEN** a signal-less user's cold-start seed is reserved or running
+- **WHEN** a signal-less user's Seerr or watch-history sync is reserved or running
 - **THEN** onboarding state is `pending`
 
 #### Scenario: Seed produced no signals
 
-- **WHEN** the seed is no longer running and the unseen user has no signals
+- **WHEN** no history sync is running and the unseen user has no signals
 - **THEN** onboarding state is `show`
 
 #### Scenario: Seed produced signals
 
-- **WHEN** the user has one or more stored signals
+- **WHEN** the user has one or more stored signals of kinds that count
 - **THEN** onboarding state is `done`
+
+#### Scenario: Only switched-off signals still offers the picker
+
+- **WHEN** an unseen user's only signals come from a source they switched off
+  and no sync is running
+- **THEN** onboarding state is `show`
+
+#### Scenario: Established user stays done during a routine sync
+
+- **WHEN** a user with signals has a history sync running
+- **THEN** onboarding state is `done`, not `pending`
 
 #### Scenario: Unauthenticated eligibility read
 
 - **WHEN** a client without a valid session requests onboarding state
 - **THEN** the response is `401`
+
+#### Scenario: Plex-only user waits for their history
+
+- **WHEN** a signal-less, unseen user without a Seerr link has a Plex history
+  sync running
+- **THEN** onboarding state is `pending`, and `show` once it finishes without
+  importing anything
 
 ### Requirement: Taste picker is optional and non-blocking
 

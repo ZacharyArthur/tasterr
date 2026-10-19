@@ -4,10 +4,11 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import user_with_links
 
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User, UserSession, utcnow
+from tasterr.db.models import UserSession, utcnow
 
 
 async def test_engine_creates_file_on_first_connect(tmp_path: Path) -> None:
@@ -46,8 +47,6 @@ def _session_row(user_id: int) -> UserSession:
     return UserSession(
         token_hash=f"hash-{user_id}",
         user_id=user_id,
-        seerr_cookie="connect.sid=s%3Ax",
-        plex_token_enc=None,
         created_at=now,
         expires_at=now,
         last_seen_at=now,
@@ -74,14 +73,14 @@ async def test_deleting_a_user_cascades_to_sessions(tmp_path: Path) -> None:
         await upgrade_to_head(engine)
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
-            user = User(
+            user = await user_with_links(
+                db,
                 seerr_user_id=1,
                 display_name="Alice",
                 avatar_url=None,
                 auth_type="plex",
                 is_admin=False,
             )
-            db.add(user)
             await db.flush()
             db.add(_session_row(user_id=user.id))
             await db.commit()

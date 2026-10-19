@@ -1,9 +1,14 @@
 # Tasterr
 
 Self-hosted, Netflix-style discovery front-end for a household media stack (TMDB
-catalog + Seerr identity/requests) with **per-user learned taste profiles**.
+catalog + optional Plex, Seerr, and Jellyfin linked accounts) with
+**per-user learned taste profiles**.
 Solo-maintained. Optimizes for, in order: **best practice, KISS, maintainable code**.
 When a feature and simplicity conflict, simplicity wins or the feature waits.
+
+Members manage linked accounts and taste sources at `/account`; avatars render as
+initials. `docs/CONFIGURATION.md` is the reference for provider admission, source
+controls, session limits, upgrades, and destructive downgrade limits.
 
 ## Stack
 
@@ -25,7 +30,7 @@ docs/                  founding blueprint (PRD, SPEC - frozen), SECURITY.md (liv
 
 Invariants (enforced by boundary tests + PublicConfig regression test, not prose):
 
-1. **Secrets never reach the client** — TMDB/Seerr keys, Seerr internal URL, Plex
+1. **Secrets never reach the client** — TMDB/Seerr/Jellyfin keys, internal URLs, Plex
    tokens, Seerr cookies are server-side only. Client gets `PublicConfig` only.
 2. **Only `clients/` does outbound HTTP**; only `api/` shapes browser responses.
 3. **Seerr down degrades** (badges "Unknown", requests disabled) — never blocks browsing.
@@ -57,8 +62,8 @@ in the container, full stop.
 just check     # ruff + pyright + pytest + frontend typecheck/test/build
 ```
 
-Run it **inside the devcontainer** (see above); CI runs the exact same command on
-PRs. Never claim work is done until it passes.
+Run it **inside the devcontainer** (see above). The PR workflow also runs
+`just e2e` and `just container-smoke`. Never claim work is done until the gate passes.
 
 ## Development workflow (OpenSpec)
 

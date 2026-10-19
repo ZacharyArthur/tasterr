@@ -222,7 +222,7 @@ test("Skip dismisses with an empty selection", async () => {
 	expect(screen.queryByText("Pick a few titles you like")).toBeNull();
 });
 
-test("pending state polls until cold-start seeding finishes", async () => {
+test("pending state polls until request-history sync finishes", async () => {
 	let reads = 0;
 	vi.stubGlobal(
 		"fetch",

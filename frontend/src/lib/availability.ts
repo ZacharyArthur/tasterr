@@ -70,16 +70,6 @@ export function useAvailabilityFor(item: {
 	return map[availabilityKey(item.media_type, item.id)];
 }
 
-/** A title can be requested only when Seerr confirmed it is not yet in the library.
- * Unknown (Seerr unreachable) is not actionable; available/pending/etc. are not. */
-export function isRequestable(
-	availability: Availability | null | undefined,
-): boolean {
-	return (
-		availability?.known === true && availability.status === "not_requested"
-	);
-}
-
 /** Shared within the current session: destinations depend on type, not title. */
 export function useDestinations(type: MediaType, id: number, enabled = true) {
 	return useQuery({

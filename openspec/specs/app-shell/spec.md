@@ -1,8 +1,10 @@
 # app-shell Specification
 
 ## Purpose
-TBD - created by archiving change m0-scaffold. Update Purpose after archive.
+Provide a responsive, accessible household discovery shell with authenticated navigation, title overlays, and account controls.
+
 ## Requirements
+
 ### Requirement: App factory and lifespan
 The backend SHALL expose an app factory producing the FastAPI application, with a
 lifespan that runs database migrations before serving traffic.
@@ -40,7 +42,8 @@ any non-`/api` path, while unknown `/api/v1/*` paths return a JSON 404.
 The SPA SHALL resolve auth state from `GET /api/v1/auth/me` on load.
 Unauthenticated visitors see the login screen; authenticated users see the routed
 application shell — a navigation bar (current user, logout control, search entry
-point, and an admin-only Settings entry) hosting the browse routes — rendered
+point, an Account entry for every user, and an admin-only Settings entry) hosting
+the browse routes — rendered
 through the OpenAPI-generated typed client via TanStack Query. The `/settings`
 route SHALL render only after the admin settings request succeeds; hiding its link
 SHALL NOT replace the backend admin gate.
@@ -62,6 +65,10 @@ SHALL NOT replace the backend admin gate.
 - **WHEN** a non-admin directly navigates to `/settings`
 - **THEN** no settings form/data renders and the backend settings request remains
   forbidden with 403
+
+#### Scenario: Every user sees the Account entry
+- **WHEN** any authenticated user opens the avatar menu
+- **THEN** it offers an Account entry that opens `/account`
 
 ### Requirement: Household appearance is constrained and applied shell-wide
 
@@ -104,4 +111,3 @@ appropriate status or alert region rather than color alone.
 #### Scenario: Async outcome is announced
 - **WHEN** a shell mutation succeeds or fails
 - **THEN** visible status/error text is exposed to assistive technology
-

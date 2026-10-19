@@ -1,9 +1,43 @@
-"""ORM models (SPEC §5). Session rows hold hashed tokens and encrypted Plex tokens only."""
+"""Local identities, linked accounts, sessions, and taste storage."""
 
+import logging
 from datetime import UTC, datetime
+from typing import Literal, get_args
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
+from sqlalchemy.engine import Dialect
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
+from sqlalchemy.types import TypeDecorator
+
+from tasterr.recommend.signals import TasteSource
+
+_SOURCES = TypeAdapter(list[TasteSource])
+logger = logging.getLogger("tasterr.db")
+
+
+class TasteSources(TypeDecorator[list[TasteSource]]):
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value: object, dialect: Dialect) -> str:
+        return _SOURCES.dump_json(_SOURCES.validate_python(value)).decode()
+
+    def process_result_value(self, value: object, dialect: Dialect) -> list[TasteSource]:
+        try:
+            if isinstance(value, str):
+                return _SOURCES.validate_json(value)
+        except ValidationError:
+            pass
+        logger.warning("taste sources: unreadable preferences")
+        return []
+
+
+Provider = Literal["plex", "jellyfin", "seerr"]
+SIGNAL_UNIQUE_INDEX_WHERE = text(
+    "kind IN ('watchlist', 'not_interested', 'seed_request_history', "
+    "'watched_plex', 'watched_jellyfin')"
+)
 
 
 def utcnow() -> datetime:
@@ -17,18 +51,44 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = ({"sqlite_autoincrement": True},)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    seerr_user_id: Mapped[int] = mapped_column(unique=True)
     display_name: Mapped[str]
     avatar_url: Mapped[str | None]
-    auth_type: Mapped[str] = mapped_column(String(8))  # 'plex' | 'local'
     is_admin: Mapped[bool] = mapped_column(default=False)
     taste_onboarding_seen: Mapped[bool] = mapped_column(default=False, server_default=text("0"))
-    plex_history_attempted_at: Mapped[datetime | None] = mapped_column(DateTime())
-    plex_history_synced_at: Mapped[datetime | None] = mapped_column(DateTime())
+    seerr_unlinked_at: Mapped[datetime | None] = mapped_column(DateTime())
+    taste_excluded_sources: Mapped[list[TasteSource]] = mapped_column(
+        TasteSources(), default=list, server_default=text("'[]'")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     last_login_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+
+class LinkedAccount(Base):
+    __tablename__ = "linked_accounts"
+    __table_args__ = (
+        UniqueConstraint("provider", "external_id", name="uq_linked_accounts_external"),
+        UniqueConstraint("user_id", "provider", name="uq_linked_accounts_user_provider"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[Provider] = mapped_column(String(16))
+    external_id: Mapped[str] = mapped_column(String(64))
+    display_name: Mapped[str]
+    avatar_url: Mapped[str | None]
+    credential_enc: Mapped[str | None]
+    sync_attempted_at: Mapped[datetime | None] = mapped_column(DateTime())
+    sync_synced_at: Mapped[datetime | None] = mapped_column(DateTime())
+    linked_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    @validates("provider")
+    def validate_provider(self, _key: str, value: Provider) -> Provider:
+        if value not in get_args(Provider):
+            raise ValueError("Unknown account provider")
+        return value
 
 
 class UserSession(Base):
@@ -37,8 +97,6 @@ class UserSession(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    seerr_cookie: Mapped[str]
-    plex_token_enc: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(), index=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
@@ -48,8 +106,8 @@ class Signal(Base):
     """Append-only per-user interaction event (SPEC §5). `weight` is stored
     per row so history keeps the weight it earned if constants are retuned.
     The partial unique index makes the at-most-one-row-per-title kinds
-    (toggles + seed) a database guarantee, so concurrent writers — a
-    background login-seed racing a reset, or two tabs toggling — cannot
+    (toggles + imported history) a database guarantee, so concurrent writers — a
+    background history sync racing a reset, or two tabs toggling — cannot
     duplicate a title's influence."""
 
     __tablename__ = "signals"
@@ -62,9 +120,7 @@ class Signal(Base):
             "tmdb_id",
             "kind",
             unique=True,
-            sqlite_where=text(
-                "kind IN ('watchlist', 'not_interested', 'seed_request_history', 'watched_plex')"
-            ),
+            sqlite_where=SIGNAL_UNIQUE_INDEX_WHERE,
         ),
     )
 
@@ -73,7 +129,7 @@ class Signal(Base):
     tmdb_id: Mapped[int]
     media_type: Mapped[str] = mapped_column(String(8))  # 'movie' | 'tv'
     # 'request' | 'watchlist' | 'detail_open' | 'not_interested' |
-    # 'seed_request_history' | 'watched_plex'
+    # 'seed_request_history' | 'watched_plex' | 'watched_jellyfin'
     kind: Mapped[str] = mapped_column(String(24))
     weight: Mapped[float]
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)

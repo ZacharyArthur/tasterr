@@ -11,19 +11,20 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 - **Exposure:** LAN today, internet via Cloudflare tunnel tomorrow. Write every endpoint as
   if it's already internet-facing.
-- **What we protect:** TMDB/Seerr API keys, the Seerr internal URL, per-user Plex tokens and
+- **What we protect:** TMDB/Seerr/Jellyfin API keys, internal URLs, per-user Plex tokens and
   Seerr session cookies, Tasterr session tokens, and household viewing behavior (privacy).
 - **Adversaries:** internet scanners hitting exposed endpoints; a malicious or compromised
   browser inside the household; XSS smuggled through third-party metadata (TMDB text is
   untrusted input); supply-chain compromise of a dependency.
 - **Explicitly not defended:** an attacker with shell/file access to the host — they own the
-  SQLite file and the env. (Encryption-at-rest for Plex tokens raises the bar, not a wall.)
+  SQLite file and the env. (Encryption-at-rest for linked credentials raises the bar, not a wall.)
 
 ## Non-negotiables (mechanically enforced)
 
 1. Secrets never reach the client — `PublicConfig` regression test.
 2. Only `clients/` performs outbound HTTP — import-linter contract.
-3. Session tokens stored **hashed**; Plex tokens **encrypted** at rest.
+3. Session tokens stored **hashed**; Plex tokens and Seerr cookies **encrypted**
+   at rest on linked accounts, never on sessions.
 4. Lockfiles committed; `just audit` before releases.
 5. Forwarded client/scheme headers are accepted only from an explicit literal-IP/CIDR
    proxy allowlist; wildcard trust is rejected.
@@ -44,10 +45,34 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 ### Auth & session code
 
-- [ ] Credentials are forwarded to Seerr, never stored, never logged.
+- [ ] Credentials are forwarded to Seerr or Jellyfin, never stored, never logged.
+- [ ] Jellyfin sign-in and linking authenticate once and immediately log out the
+      returned token; logout failure never blocks admission. Store only the user
+      id, with no Jellyfin credential or avatar. Empty passwords require the
+      explicit environment override, including Seerr-via-Jellyfin linking.
+- [ ] Exposing Tasterr exposes Jellyfin password sign-in from Tasterr's address:
+      Jellyfin local-network rules do not apply; lockout is bounded only by the
+      login bucket. Admin requires `IsAdministrator` and not `IsDisabled`.
 - [ ] Token comparisons are constant-time (compare hashes, `secrets.compare_digest`).
 - [ ] Fresh session token on every login (no fixation); logout deletes the row.
+- [ ] Sessions expire after 30 days of inactivity and at 90 days from creation;
+      sliding expiry and cookie Max-Age never extend past the absolute cap.
+- [ ] With `PLEX_SERVER_ID`, every Plex sign-in and link checks membership in
+      plex.tv resources only, without PMS probing. The pinned resource's `owned`
+      flag grants admin at sign-in; outages preserve previous admin only when no
+      configured link grants it. Unconfigured providers neither grant nor error.
+- [ ] `/auth/methods` is explicitly unauthenticated, returns only method booleans,
+      and performs no upstream call. `PLEX_SERVER_ID` stays out of `PublicConfig`.
+- [ ] Links come only from successful authentication in the same request, never
+      identity/email matching or administrator assignment. PIN link handles are
+      bound to their creating session and cannot complete sign-in.
+- [ ] Upstream credentials survive logout on their owning link; unlink and account
+      deletion delete them. Seerr cookies and Plex tokens use Fernet encryption.
+- [ ] Sign-in commits identity resolution before upstream admin/display reads;
+      no upstream call runs while a write transaction is open.
 - [ ] Cookie flags: `HttpOnly`, `SameSite=Lax`, `Secure` behind HTTPS.
+- [ ] Account deletion invalidates server-side sessions without a cookie header
+      or sliding refresh, so a delayed response preserves a newer sign-in.
 - [ ] Auth endpoints rate-limited tightly; failures are generic (no user enumeration).
 - [ ] Forwarded IP/scheme is used only after direct proxy-peer allowlist validation;
       trusted and untrusted peer behavior is covered by regression tests.
@@ -63,8 +88,10 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 #### Advertised Plex Media Server connections
 
-- [ ] Select at most four Plex Media Server resources, owned-first then by advertised
-      machine id; attempt at most the configured 3–12 connections per resource
+- [ ] With `PLEX_SERVER_ID`, select only that resource before probing for media
+      reads; admission and owner checks never probe PMS. Otherwise select at most
+      four Plex Media Server resources, owned-first then by advertised machine id.
+      Attempt at most the configured 3–12 connections per resource
       (default six). Reserve one available candidate per local HTTPS, remote-direct,
       and relay category before filling remaining slots, then preserve category and
       stable URI priority for deterministic winner selection.
@@ -86,6 +113,20 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       closed. Explicitly filter history and reject the whole server page if any
       row lacks or differs from that account id.
 
+#### Jellyfin
+
+- [ ] URL is validated HTTP(S) with a host, no embedded credentials, query, or
+      fragment. URL and API key stay out of browser contracts and logs.
+- [ ] API key and temporary access token use only the `Authorization: MediaBrowser`
+      header, never URL parameters; every call has a timeout and refuses redirects.
+- [ ] The API key authenticates only reads scoped to an explicit Jellyfin user id;
+      authentication/logout use no API key. Played items use `/Items?userId=`.
+- [ ] Episode TMDB ids are never treated as series ids. Pages and series batches
+      cap at 100, history at 500 rows per type, network/mapping at 30 seconds,
+      and write transactions at 100 canonical facts. No raw item data is retained.
+- [ ] Unconfigured Jellyfin blocks new links and Seerr's Jellyfin method with 503;
+      dormant links perform no reads, and unlinking remains available.
+
 ### Frontend
 
 - [ ] No `dangerouslySetInnerHTML`; render TMDB/Seerr text as text, always.
@@ -99,13 +140,30 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       MIME-sniffing, referrer, and permissions policy; HSTS appears only on trusted
       effective HTTPS.
 
+- [ ] Display names render as text and all avatars render as initials; internal
+      provider avatar URLs never become browser image sources.
+- [ ] `/account` taste controls remain caller-scoped; disabling cancels collection,
+      clearing requires confirmation, and household endpoints expose no source settings.
+
 ### Database & migrations
 
 - [ ] SQLAlchemy expressions only — no string-built SQL, ever.
 - [ ] New columns holding tokens/secrets: encrypted (Fernet) and justified in design.md.
 - [ ] Migrations never copy secret material into new plaintext columns or logs.
+- [ ] SQLite rebuilds disable foreign keys before the migration transaction,
+      check foreign keys afterward, and re-enable enforcement. User ids are never
+      reused. Account deletion cascades through sessions, links, signals, and profiles.
+- [ ] Unlink, deletion, and reset cancel and await affected history work while
+      holding the per-user scheduling guard through commit.
 - [ ] Backup/restore instructions stop the writer or use SQLite's backup API, run an
       integrity check, preserve runtime ownership, and treat backups as sensitive.
+
+Migration `0007` forces one re-sign-in and stores no old session credentials on
+new links. Revisions `0008`–`0009` add Jellyfin signals and taste-source preferences.
+An image-only rollback across these revisions is unsupported; `0008` downgrade
+deletes Jellyfin history/links and Jellyfin-only users, while `0007` downgrade
+deletes users without Seerr links and every session. Follow the stopped-writer,
+validated-backup procedure in [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-rollback).
 
 ### Dependencies & build
 
@@ -151,11 +209,14 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Security review pass over the full diff since the last tag.
 - [ ] Live contract tests against the home Seerr instance pass and the tested Seerr
       version is recorded, or the narrow release-owner exception in
-      [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-and-plex-contracts) is recorded.
+      [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-plex-and-jellyfin-contracts) is recorded.
 - [ ] Opt-in Plex contracts pass for every available owner/managed/shared role with
       standard TLS, machine identity, per-row history identity, account-scoped
       Continue Watching, and TMDB GUID mapping with redacted evidence, or the same
       narrow release-owner exception is recorded.
+- [ ] Opt-in Jellyfin contracts pass, including disposable-account cleanup,
+      empty password, lockout, deleted-user 404, shared DeviceId/token logout,
+      user policy, played items, and series ids. Record the tested Jellyfin version.
 - [ ] `.env.example` contains placeholders only — no real values, no real hostnames.
 
 - [ ] `just release-check` passes in the devcontainer (ordinary gate + browser +

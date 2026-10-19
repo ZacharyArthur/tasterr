@@ -1,6 +1,5 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false
-
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
@@ -9,15 +8,14 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import mint_linked_session, user_with_links
 
 from tasterr.api.availability import get_availability
-from tasterr.auth.sessions import mint_session
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
 from tasterr.clients.seerr import SeerrClient
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -44,16 +42,16 @@ def _seed_session(db_path: Path) -> str:
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(
+                user = await user_with_links(
+                    db,
                     seerr_user_id=99,
                     display_name="Seeded",
                     avatar_url=None,
                     auth_type="local",
                     is_admin=False,
                 )
-                db.add(user)
                 await db.flush()
-                return await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+                return await mint_linked_session(db, user.id, "connect.sid=s%3Aseed", None)
         finally:
             await engine.dispose()
 

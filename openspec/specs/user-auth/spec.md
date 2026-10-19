@@ -1,7 +1,7 @@
 # user-auth Specification
 
 ## Purpose
-TBD - created by archiving change m1-auth. Update Purpose after archive.
+Authenticate members through configured Plex, Seerr, or Jellyfin providers, resolve proven linked identities, and protect access with bounded opaque sessions and explicit admission checks.
 
 ## Requirements
 
@@ -11,12 +11,24 @@ PIN at plex.tv (product `Tasterr`, a stable client identifier) and returns an
 opaque poll handle plus the plex.tv approval URL. The handle is polled with a
 same-origin-protected `POST /api/v1/auth/plex/pin/poll` carrying
 `{pin_id: <handle>}` in the body; it reports pending until the PIN is claimed.
-Once claimed, the backend SHALL exchange the Plex auth token at Seerr
-`/api/v1/auth/plex`, upsert the user, mint a Tasterr session, set the session
-cookie, and return the user. The Plex auth token MUST never be returned to the
-browser, and no `GET` endpoint SHALL mint a session — the poll is a POST guarded
-by the same-origin check so a cross-site page cannot trigger a session-swapping
-completion by top-level navigation.
+Plex sign-in SHALL be available when `PLEX_SERVER_ID` is set or Seerr is
+configured. Once claimed, the backend SHALL validate the Plex token against the
+plex.tv account endpoint and admit the account: when `PLEX_SERVER_ID` is set, only
+if the account's plex.tv resources include that server (owner, shared, and Plex
+Home users alike), checked on every sign-in; otherwise only if Seerr
+`/api/v1/auth/plex` accepts the token. When Seerr is configured the backend SHALL
+also attempt the Seerr exchange for auto-linking; with `PLEX_SERVER_ID` set, a
+Seerr refusal SHALL NOT block sign-in, and a Seerr outage SHALL block only a
+sign-in that would create a new user (see `account-linking`). An admitted account SHALL be
+resolved to a Tasterr user through linked accounts (see `account-linking`), and
+the backend SHALL mint a Tasterr session, set the session cookie, and return the
+user. A refused account SHALL get a generic 401 with no user, link, or session
+created; a server-access check that cannot complete SHALL fail closed with a
+generic upstream error. The
+Plex auth token MUST never be returned to the browser, and no `GET` endpoint
+SHALL mint a session — the poll is a POST guarded by the same-origin check so a
+cross-site page cannot trigger a session-swapping completion by top-level
+navigation.
 
 #### Scenario: Poll while PIN is unclaimed
 - **WHEN** the SPA posts the handle to `/auth/plex/pin/poll` before the user
@@ -26,8 +38,35 @@ completion by top-level navigation.
 #### Scenario: Poll after PIN is claimed
 - **WHEN** the SPA posts the handle to `/auth/plex/pin/poll` after the user
   approves the PIN at plex.tv
-- **THEN** the backend logs the user into Seerr, mints a session, sets the
-  session cookie, and responds `{status: "ok"}` with the user
+- **THEN** the backend admits the account, resolves their Tasterr user
+  through linked accounts, mints a session, sets the session cookie, and
+  responds `{status: "ok"}` with the user
+
+#### Scenario: Seerr refuses the Plex account
+- **WHEN** `PLEX_SERVER_ID` is unset and Seerr rejects a claimed PIN's Plex account
+- **THEN** the response is a generic 401 and no user, linked account, or session
+  is created
+
+#### Scenario: Account without server access is refused
+- **WHEN** `PLEX_SERVER_ID` is set and a claimed PIN's account cannot see that
+  server
+- **THEN** the response is a generic 401 and no user, linked account, or session
+  is created, even if Seerr would accept the account
+
+#### Scenario: Existing link does not bypass the server gate
+- **WHEN** a Plex account already linked to a user loses access to the
+  configured server and signs in
+- **THEN** sign-in is refused with a generic 401
+
+#### Scenario: Seerr outage does not block a server-gated sign-in
+- **WHEN** `PLEX_SERVER_ID` is set, the account can see that server, and Seerr
+  refuses the token, or is down while the Plex account is already linked
+- **THEN** sign-in succeeds without a Seerr auto-link
+
+#### Scenario: Seerr outage blocks a first sign-in
+- **WHEN** `PLEX_SERVER_ID` is set, Seerr is configured but down, and the Plex
+  account is linked to no user
+- **THEN** sign-in fails with the generic upstream error and no user is created
 
 #### Scenario: Poll handle is opaque and single-use
 - **WHEN** a login has completed for a handle, the handle has expired, or the
@@ -48,9 +87,10 @@ completion by top-level navigation.
 ### Requirement: Local Seerr login
 `POST /api/v1/auth/local` SHALL forward the submitted email and password verbatim
 to Seerr `/api/v1/auth/local`. Credentials MUST never be stored and never logged.
-On Seerr success the same user upsert and session minting as the Plex flow apply;
-on Seerr rejection the response is a generic 401 that does not reveal whether the
-account exists.
+On Seerr success the user SHALL be resolved through linked accounts with the
+Seerr account as the sign-in account, and a session minted as in the Plex flow;
+on Seerr rejection the response is a generic 401 that does not reveal whether
+the account exists.
 
 #### Scenario: Valid local credentials
 - **WHEN** a user submits credentials Seerr accepts
@@ -62,25 +102,13 @@ account exists.
 - **THEN** the response is 401 with a generic message, identical for wrong
   password and unknown account
 
-### Requirement: User records mirror Seerr identity
-Users SHALL be upserted at login keyed by their Seerr user id, storing display
-name, avatar URL, and auth type (`plex` | `local`). `is_admin` SHALL be derived
-from the Seerr permissions bitmask (ADMIN bit 2) at every login — never cached
-across logins — and `last_login_at` updated.
-
-#### Scenario: First login creates the user
-- **WHEN** a Seerr user logs in for the first time
-- **THEN** a user row is created with their Seerr id, display name, and admin flag
-
-#### Scenario: Later login refreshes identity
-- **WHEN** a user whose Seerr display name or admin status changed logs in again
-- **THEN** the existing row is updated in place — no duplicate user is created
-
 ### Requirement: Tasterr session lifecycle
 Sessions SHALL use a 256-bit random token delivered as an HttpOnly, `SameSite=Lax`
 cookie, marked `Secure` when the request is HTTPS (respecting proxy forwarding
 headers). Only the token's SHA-256 hash is stored. Sessions expire 30 days after
-last activity (sliding). Every login mints a fresh token; validation of an
+last activity (sliding) and SHALL never outlive 90 days from creation, whatever
+the activity, so every member signs in again at least every 90 days and the
+sign-in gate and admin derivation re-run. Every login mints a fresh token; validation of an
 expired or unknown token fails with 401 and expired rows are deleted.
 
 #### Scenario: Token is stored hashed only
@@ -100,25 +128,41 @@ expired or unknown token fails with 401 and expired rows are deleted.
 - **WHEN** a user logs in while already holding a session cookie
 - **THEN** a brand-new token is minted (no session fixation)
 
+#### Scenario: Absolute lifetime forces a fresh sign-in
+- **WHEN** a session has been active continuously for 90 days since creation
+- **THEN** the next request fails 401, the row is deleted, and the member must
+  sign in again, re-running the server-access check and admin derivation
+
 ### Requirement: Upstream session material is protected at rest
 
-The Seerr session cookie obtained at login SHALL be stored only on the server-side
-session row and never sent to the browser. The Plex auth token (Plex logins only)
-SHALL be stored encrypted with Fernet keyed from `TASTERR_SECRET_KEY` and MAY be
-decrypted only for silent Seerr re-authentication or the authenticated caller's
-bounded Plex account/resource/PMS reads and history task. Local logins SHALL store
-no Plex token. Plex resource access tokens discovered for PMS communication SHALL
-be call-local and SHALL NOT be persisted.
+Upstream credentials SHALL be stored only on the owning user's linked-account
+row, never on Tasterr session rows, and never sent to the browser. The Seerr
+session cookie (Seerr link) and the Plex account token (Plex link) SHALL each be
+stored encrypted with Fernet keyed from `TASTERR_SECRET_KEY`. The Seerr cookie
+MAY be decrypted only to create the member's own Seerr requests. The Plex token
+MAY be decrypted only for silent Seerr re-authentication, Seerr linking with the
+`plex` method, admin and display identity checks, or the owning user's bounded Plex account/resource/PMS reads and
+history task. Credentials SHALL survive logout and session expiry and SHALL be
+deleted when their link is unlinked or the user is deleted. Plex resource access
+tokens discovered for PMS communication SHALL be call-local and SHALL NOT be
+persisted.
 
 #### Scenario: No plaintext Plex token at rest
 
-- **WHEN** a Plex login completes and the session row is inspected
-- **THEN** the Plex token column holds only Fernet ciphertext
+- **WHEN** a Plex sign-in completes and the linked-account rows are inspected
+- **THEN** the Plex token and Seerr cookie columns hold only Fernet ciphertext,
+  and the session row holds neither
 
 #### Scenario: Local session has no Plex token
 
-- **WHEN** local Seerr login completes
-- **THEN** its session has no Plex token and no live Plex media capability
+- **WHEN** Seerr local sign-in completes for a user without a Plex link
+- **THEN** no Plex token is stored on any row and the user has no live Plex media
+  capability
+
+#### Scenario: Credentials outlive the session but not the link
+
+- **WHEN** a member logs out and later unlinks Plex
+- **THEN** the Plex token remains after logout and is deleted by the unlink
 
 #### Scenario: Resource access token is transient
 
@@ -128,8 +172,8 @@ be call-local and SHALL NOT be persisted.
 
 #### Scenario: Upstream credentials never reach the client
 
-- **WHEN** any auth, home, household, recommendation, or Plex-degraded endpoint
-  responds
+- **WHEN** any auth, account, home, household, recommendation, or Plex-degraded
+  endpoint responds
 - **THEN** the body and headers contain no Seerr cookie, Plex account/resource
   token, server connection, or raw upstream body
 
@@ -170,7 +214,7 @@ dependencies rather than re-implementing checks.
 
 ### Requirement: Login endpoints are hardened
 Mutating auth endpoints SHALL enforce a same-origin check (`Sec-Fetch-Site` /
-`Origin`). The login-start endpoints (`/auth/plex/pin`, `/auth/local`) SHALL be
+`Origin`). The login-start endpoints (`/auth/plex/pin`, `/auth/local`, `/auth/jellyfin`) SHALL be
 tightly rate-limited in-process. The Plex PIN poll (`POST /auth/plex/pin/poll`)
 SHALL enforce the same-origin check and SHALL be exempt from the tight login
 rate limit — it polls every ~2s by design behind an unguessable, expiring,
@@ -186,21 +230,6 @@ logs.
 - **WHEN** login attempts exceed the configured tight limit
 - **THEN** further attempts receive 429 until the window relaxes
 
-### Requirement: Auth degrades when Seerr is unavailable or unconfigured
-When Seerr settings or `TASTERR_SECRET_KEY` are unset, login endpoints SHALL
-return 503 with a generic "authentication unavailable" error. When Seerr is
-unreachable or errors, login fails with a generic upstream-unavailable error that
-carries no upstream body or internal URL. The rest of the app (health, SPA
-serving) keeps working.
-
-#### Scenario: Auth not configured
-- **WHEN** login is attempted while Seerr or the secret key is unconfigured
-- **THEN** the response is 503 with a generic message and no configuration detail
-
-#### Scenario: Seerr down during login
-- **WHEN** Seerr times out or returns a server error during login
-- **THEN** the client receives a generic error, and `/api/v1/health` still responds
-
 ### Requirement: Outbound auth calls are bounded and typed
 All plex.tv and Seerr calls SHALL live in `clients/`, carry explicit timeouts,
 parse responses into typed models (unknown fields dropped), and never forward
@@ -213,8 +242,13 @@ browser headers upstream or upstream headers/bodies downstream.
 
 ### Requirement: SPA login experience
 
-The login screen SHALL offer both paths: "Sign in with Plex" and a local
-email/password form. Plex sign-in SHALL attempt to open a script-created popup
+The login screen SHALL offer exactly the sign-in methods `GET /api/v1/auth/methods`
+reports as available, as a full-width stack of rounded pill buttons in the style
+of common single-sign-on buttons, each with its service's mark as inline SVG and a
+"Continue with …" label: "Continue with Plex", "Continue with Jellyfin", and
+"Continue with Seerr", in that order. A method
+that needs credentials SHALL expand its email/password (or, for Jellyfin, username/password) form in place when
+activated. Plex sign-in SHALL attempt to open a script-created popup
 context directly from the user's activation, sever that context's access to its
 opener before navigating to the backend-provided Plex approval URL, and retain
 only an in-memory handle for best-effort cleanup. The SPA SHALL poll until
@@ -231,7 +265,7 @@ On success the SPA SHALL switch to the authenticated state without a full reload
 a logout control SHALL end the session and return to the login screen. Failures
 SHALL surface as generic, human-readable messages. On each confirmed session
 transition — successful local login, successful Plex PIN completion, successful
-logout, or `auth/me` resolving to a different user — the SPA SHALL invalidate
+Jellyfin login, successful logout, or `auth/me` resolving to a different user — the SPA SHALL invalidate
 prior-session mutation callbacks, cancel in-flight TanStack Query requests before
 removing cached query data, and publish the confirmed user or signed-out state
 only after that boundary completes. Failed login or logout attempts SHALL preserve
@@ -273,6 +307,18 @@ the current confirmed auth state and query cache.
 
 - **WHEN** a copy operation completes after its pending PIN has expired or ended
 - **THEN** feedback from that obsolete approval flow does not reappear
+
+#### Scenario: Only configured methods are offered
+
+- **WHEN** the login screen loads on a deployment with `PLEX_SERVER_ID` set and
+  Seerr unconfigured
+- **THEN** only "Continue with Plex" is shown
+
+#### Scenario: Credential form expands in place
+
+- **WHEN** the user activates "Continue with Seerr"
+- **THEN** its email/password form expands below the button without leaving the
+  screen
 
 #### Scenario: Local login from the SPA
 
@@ -316,6 +362,7 @@ the current confirmed auth state and query cache.
 ### Requirement: Live Seerr contract tests
 A pytest-marked live suite (excluded from `just check` and CI) SHALL validate the
 Seerr auth contract against a real instance: Plex token login, local login,
+Jellyfin login, the status returned when a media-server login is disabled,
 user/permissions shape, and the invalid-session 403 behavior — recording the
 Seerr version tested.
 
@@ -344,3 +391,46 @@ or influence cookie security.
 #### Scenario: Untrusted forwarding headers are ignored
 - **WHEN** a non-allowlisted peer supplies forwarded client IP or scheme headers
 - **THEN** auth uses the socket peer and direct request scheme instead
+
+### Requirement: Sign-in methods are advertised without secrets
+
+`GET /api/v1/auth/methods` SHALL be unauthenticated by explicit decision (the
+login screen needs it before a session exists) and SHALL return only booleans for
+each sign-in method: `plex` (true when `PLEX_SERVER_ID` is set or Seerr is
+configured), `jellyfin` (true when the Jellyfin URL and API key are set), and
+`seerr` (true when Seerr is configured), each also requiring
+`TASTERR_SECRET_KEY`. It SHALL NOT return URLs, server ids, keys, or any other
+configuration, and SHALL perform no upstream call.
+
+#### Scenario: Methods reflect configuration
+
+- **WHEN** only `PLEX_SERVER_ID` and the secret key are configured
+- **THEN** the response is `plex: true, jellyfin: false, seerr: false`
+
+#### Scenario: Methods carry no configuration detail
+
+- **WHEN** every integration is configured and the response is inspected
+- **THEN** it contains only method booleans and no URL, id, or secret
+
+### Requirement: Auth degrades when no sign-in method is available
+
+When `TASTERR_SECRET_KEY` is unset or no sign-in method is available, sign-in
+endpoints SHALL return 503 with a generic "authentication unavailable" error, and
+an endpoint for an unavailable method SHALL do the same. When an upstream needed
+for a sign-in has an outage (transport error, timeout, or HTTP 502, 503, or 504,
+as defined in `account-linking`), that sign-in SHALL fail with a generic
+upstream-unavailable error that carries no upstream body or internal URL. Seerr
+SHALL NOT be required for Plex sign-in when `PLEX_SERVER_ID` is set. The rest of
+the app (health, SPA serving) keeps working.
+
+#### Scenario: Auth not configured
+- **WHEN** sign-in is attempted with no secret key or no available method
+- **THEN** the response is 503 with a generic message and no configuration detail
+
+#### Scenario: Plex sign-in works without Seerr
+- **WHEN** `PLEX_SERVER_ID` and the secret key are set and Seerr is unconfigured
+- **THEN** Plex sign-in is available and Seerr local sign-in returns 503
+
+#### Scenario: Upstream down during sign-in
+- **WHEN** plex.tv or Seerr has an outage during a sign-in that needs it
+- **THEN** the client receives a generic error, and `/api/v1/health` still responds

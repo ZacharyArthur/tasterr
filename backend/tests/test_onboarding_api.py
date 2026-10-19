@@ -1,5 +1,4 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-
 import asyncio
 from collections.abc import Generator
 from pathlib import Path
@@ -9,10 +8,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import mint_linked_session, user_with_links
 
 import tasterr.api.onboarding as onboarding_api
 from tasterr.auth.ratelimit import TokenBucket
-from tasterr.auth.sessions import mint_session
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import Signal, User
@@ -34,10 +33,11 @@ def _seed_session(db_path: Path) -> tuple[str, int]:
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(seerr_user_id=99, display_name="Member", auth_type="local")
-                db.add(user)
+                user = await user_with_links(
+                    db, seerr_user_id=99, display_name="Member", auth_type="local"
+                )
                 await db.flush()
-                token = await mint_session(db, user.id, "connect.sid=seed", None)
+                token = await mint_linked_session(db, user.id, "connect.sid=seed", None)
                 return token, user.id
         finally:
             await engine.dispose()
@@ -86,6 +86,16 @@ def test_empty_user_waits_for_seed_then_sees_picker(
     assert client.get("/api/v1/taste-onboarding").json() == {"state": "pending"}
 
     app.state.seeding.discard(user_id)
+    assert client.get("/api/v1/taste-onboarding").json() == {"state": "show"}
+
+
+def test_plex_history_is_pending_until_finished(
+    authed_client: tuple[TestClient, FastAPI, Path, int],
+) -> None:
+    client, app, _db_path, user_id = authed_client
+    app.state.plex_history_tasks[user_id] = object()
+    assert client.get("/api/v1/taste-onboarding").json() == {"state": "pending"}
+    app.state.plex_history_tasks.clear()
     assert client.get("/api/v1/taste-onboarding").json() == {"state": "show"}
 
 
@@ -144,7 +154,7 @@ def test_skip_is_durable_across_taste_reset(
     assert _stored_state(db_path) == (True, set())
 
     reset = client.post("/api/v1/recommendations/reset")
-    assert reset.status_code == 200
+    assert reset.status_code == 204
     assert client.get("/api/v1/taste-onboarding").json() == {"state": "done"}
 
 

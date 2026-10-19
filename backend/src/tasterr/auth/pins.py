@@ -20,6 +20,7 @@ MAX_PENDING = 128
 class _Pending:
     plex_pin_id: int
     created: float
+    session_hash: str | None = None
 
 
 class PinStore:
@@ -27,33 +28,35 @@ class PinStore:
         self._clock = clock
         self._pending: dict[str, _Pending] = {}
 
-    def create(self, plex_pin_id: int) -> str:
+    def create(self, plex_pin_id: int, *, session_hash: str | None = None) -> str:
         now = self._clock()
         self._prune(now)
         if len(self._pending) >= MAX_PENDING:
             oldest = min(self._pending, key=lambda handle: self._pending[handle].created)
             del self._pending[oldest]
         handle = secrets.token_urlsafe(32)
-        self._pending[handle] = _Pending(plex_pin_id=plex_pin_id, created=now)
+        self._pending[handle] = _Pending(
+            plex_pin_id=plex_pin_id, created=now, session_hash=session_hash
+        )
         return handle
 
-    def get(self, handle: str) -> int | None:
+    def get(self, handle: str, *, session_hash: str | None = None) -> int | None:
         """Look up without consuming — polling repeats until the PIN is claimed."""
         pending = self._pending.get(handle)
-        if pending is None:
+        if pending is None or pending.session_hash != session_hash:
             return None
         if self._clock() - pending.created >= TTL_SECONDS:
             del self._pending[handle]
             return None
         return pending.plex_pin_id
 
-    def pop(self, handle: str) -> int | None:
+    def pop(self, handle: str, *, session_hash: str | None = None) -> int | None:
         """Atomically take the handle — the single-use step once the PIN is
         claimed. Being synchronous, it cannot interleave with another request's
         pop between awaits, so overlapping polls yield exactly one winner."""
-        pending = self._pending.pop(handle, None)
-        if pending is None:
+        if self.get(handle, session_hash=session_hash) is None:
             return None
+        pending = self._pending.pop(handle)
         if self._clock() - pending.created >= TTL_SECONDS:
             return None
         return pending.plex_pin_id

@@ -1,71 +1,78 @@
-<!-- braid:map sha=bde1f59 date=2026-10-12 -->
+<!-- braid:map sha=55a2039 date=2026-10-19 -->
 # Repo map
 
-Self-hosted, Netflix-style discovery SPA for a household media stack: TMDB catalog +
-Seerr identity/requests + optional Plex history, with a learned taste profile per user.
+One-process household discovery SPA: TMDB catalog, optional Plex/Seerr/Jellyfin
+linked accounts, and a learned taste profile per local member.
 
-Commands and conventions: see `CONTRIBUTING.md`. Behavior: `openspec/specs/`. Rationale:
-`docs/ARCHITECTURE.md`, `docs/SECURITY.md` (PRD/SPEC are frozen).
+Commands and conventions: `CONTRIBUTING.md`. Behavior: `openspec/specs/`.
+Rationale: `docs/ARCHITECTURE.md`, `docs/SECURITY.md`; PRD/SPEC are frozen.
 
 ## Entry points
-- `backend/src/tasterr/__main__.py`: `python -m tasterr` → uvicorn with `create_app` factory (Docker CMD).
-- `backend/src/tasterr/main.py`: `create_app` — lifespan (migrate, sweep sessions, shared httpx), routers under `/api/v1`, app.state singletons, middleware.
-- `frontend/src/main.tsx` → `App.tsx`: `useMe()` gates Login vs. Shell (Home/Search/Settings routes + DetailModal).
-- `backend/scripts/dump_openapi.py`: schema dump for `just types` → `frontend/src/lib/api.gen.ts`.
-- `backend/scripts/e2e_server.py` + `frontend/e2e/`: hermetic Playwright journey (`just e2e`).
-- `.github/workflows/gate.yml` (runs `just check` on PRs), `image.yml` (GHCR), `codeql.yml`.
+- `backend/src/tasterr/__main__.py`: uvicorn with the `create_app` factory (image CMD).
+- `backend/src/tasterr/main.py`: migrate, sweep sessions, shared clients/caches, routers and SPA, cancel background tasks on shutdown.
+- `frontend/src/main.tsx` → `App.tsx`: session gates Login or Shell with Home/Search/Account/Settings and title overlays.
+- `backend/scripts/dump_openapi.py`: offline schema for generated `frontend/src/lib/api.gen.ts`.
+- `backend/scripts/e2e_server.py` + `frontend/e2e/`: hermetic real-backend browser journeys.
+- `.github/workflows/gate.yml`: check, e2e, container-smoke; `image.yml`: GHCR; `codeql.yml`: analysis.
+- `compose.example.yaml`: published image reference; `docker-compose.yml`: source build/smoke; `docker-compose.seerr-network.yml`: optional same-host external network.
 
 ## Modules
 | Path | Job | Key files |
 |---|---|---|
-| `backend/src/tasterr/api/` | FastAPI routers + DI wiring; the only layer shaping browser responses | `auth.py`, `home.py`, `request.py`, `taste.py`, `admin.py` |
-| `backend/src/tasterr/auth/` | sessions, cookies, CSRF/admin deps, Plex PIN store, rate limits, Fernet | `deps.py`, `sessions.py`, `login.py`, `ratelimit.py` |
-| `backend/src/tasterr/clients/` | the only outbound HTTP: TMDB, Seerr, Plex; typed upstream errors | `tmdb.py`, `seerr.py`, `plex.py`, `errors.py` |
-| `backend/src/tasterr/catalog/` | TMDB wire → secret-free domain models; availability; Plex→TMDB mapping | `service.py`, `normalize.py`, `models.py`, `availability.py`, `plex.py` |
-| `backend/src/tasterr/rails/` | rail providers and home/infinite-scroll composition | `registry.py`, `composer.py` |
-| `backend/src/tasterr/recommend/` | taste engine: pure math (features/profile/scorer/explain) + orchestration + store | `service.py`, `store.py`, `scorer.py`, `seed.py` |
-| `backend/src/tasterr/db/` | async SQLite engine, ORM, Alembic migrations, runtime-settings row | `models.py`, `migrate.py`, `alembic/versions/` |
-| `backend/src/tasterr/` (root) | env settings + `PublicConfig`, runtime settings schema, TTL cache | `settings.py`, `runtime_settings.py`, `cache.py` |
-| `backend/tests/` | pytest; boundary, docs, release-version and contract tests; `live/` excluded from gate | `test_boundaries.py`, `test_public_config.py` |
-| `frontend/src/routes/` | pages: Home, Login, Search, Settings (admin) | `Home.tsx`, `Settings.tsx` |
-| `frontend/src/components/` | UI: Rail, MediaCard, Hero, DetailModal, RequestButton, pickers | `DetailModal.tsx`, `RequestButton.tsx` |
-| `frontend/src/lib/` | fetch wrapper + TanStack Query hooks; generated API types | `api.ts`, `api.gen.ts`, `auth.ts`, `browse.ts`, `taste.ts` |
-| `openspec/` | living specs + change proposals (4 in-flight, unbranched) | `specs/`, `changes/`, `config.yaml` |
+| `backend/src/tasterr/api/` | Browser contracts and DI wiring | `auth.py`, `account.py`, `home.py`, `request.py`, `taste.py` |
+| `backend/src/tasterr/auth/` | Proven links, admission/admin, sessions, cookies, CSRF, PIN handles, encryption | `login.py`, `jellyfin.py`, `sessions.py`, `deps.py`, `pins.py` |
+| `backend/src/tasterr/clients/` | Only outbound HTTP; typed TMDB/Seerr/Plex/Jellyfin adapters | `tmdb.py`, `seerr.py`, `plex.py`, `jellyfin.py`, `errors.py` |
+| `backend/src/tasterr/catalog/` | Normalize catalog, availability, Plex-to-TMDB media mapping | `service.py`, `models.py`, `availability.py`, `plex.py` |
+| `backend/src/tasterr/rails/` | Providers, Home and additional-rail composition | `registry.py`, `composer.py` |
+| `backend/src/tasterr/recommend/` | Pure taste math, eligible signals, profiles, history mapping and orchestration | `service.py`, `store.py`, `signals.py`, `seed.py`, `jellyfin_history.py` |
+| `backend/src/tasterr/db/` | ORM, async SQLite, migration and cancellation-safe I/O | `models.py`, `migrate.py`, `io.py`, `alembic/versions/` |
+| `backend/src/tasterr/` | Deployment/public settings, runtime preferences, bounded TTL cache | `settings.py`, `runtime_settings.py`, `cache.py` |
+| `backend/tests/` | Boundary, API, math, migration, docs, release and Compose contracts | `factories.py`, `test_boundaries.py`, `test_public_config.py`, `live/` |
+| `frontend/src/routes/` | Member and admin pages | `Home.tsx`, `Login.tsx`, `Account.tsx`, `Search.tsx`, `Settings.tsx` |
+| `frontend/src/components/` | Browse UI and provider connection flows | `DetailModal.tsx`, `RequestButton.tsx`, `PlexConnect.tsx`, `ConnectSeerr.tsx`, `JellyfinCredentialsForm.tsx` |
+| `frontend/src/lib/` | Fetch contracts, session epochs and TanStack Query hooks | `api.ts`, `api.gen.ts`, `auth.ts`, `browse.ts`, `taste.ts` |
+| `openspec/` | Living behavior and archived changes; four account changes are archived | `specs/`, `changes/archive/2026-10-18-*/`, `config.yaml` |
 
 ## Key flows
-### Plex sign-in
-1. `api/auth.py:create_plex_pin` → `clients/plex.py` creates PIN; `auth/pins.py:PinStore` hands the SPA an opaque poll handle.
-2. `api/auth.py:poll_plex_pin` → `clients/plex.py` polls PIN → `clients/seerr.py:login_plex` exchanges the Plex token for Seerr identity.
-3. `auth/login.py:complete_login` upserts `User`, mints a hashed session (`auth/sessions.py`), stores the Plex token Fernet-encrypted on the session row.
-4. `api/taste.py:schedule_seed` (Seerr request history → seed signals) and `schedule_plex_history` fire background tasks.
-5. Local login (`local_login`) is the same pipeline via `login_local`, with no Plex token.
+### Sign-in and linked identity
+1. `api/auth.py`: methods booleans drive login; Plex uses opaque PIN polling, Seerr/Jellyfin use credentials.
+2. Plex admission uses `PLEX_SERVER_ID` resources membership or Seerr acceptance. Jellyfin authenticates then logs out its temporary token.
+3. `auth/login.py:resolve_user`: existing provider link → authenticated Seerr bridge → new local user; auto-link respects explicit Seerr unlink.
+4. `auth/login.py:complete_login`: derive admin from configured links, display priority Seerr/Plex/Jellyfin, mint hashed browser session; `api/auth.py` then schedules enabled history.
+5. `api/account.py`: prove links, prevent unlinking the last usable method, cancel sync before unlink/delete; credentials live encrypted on links.
 
-### Home feed
-1. `api/home.py:get_home` (require_session) builds `CatalogService` (`api/catalog.py`), `TasteService`, and an optional `PlexCatalogService` from the decrypted session token.
-2. `rails/composer.py:build_home` picks providers from `rails/registry.py`, fetches concurrently with per-provider failure isolation, dedupes, builds hero.
-3. Personalized rails go through `recommend/service.py:TasteService` → `scorer.py:rank` over cached feature vectors.
-4. `get_home` commits lazily materialized vectors/profiles; a commit failure is logged, feed still ships.
+### Home and history
+1. `api/home.py`: resolve session, create catalog/taste services and optional Plex capability from the link, evaluate history triggers.
+2. `api/taste.py:schedule_history`: per-user guard checks links/configuration/source preferences; six-hour attempt throttle, Seerr before Plex/Jellyfin.
+3. `recommend/seed.py`: incremental Seerr history; media readers map canonical TMDB facts with bounded windows and success watermarks.
+4. `rails/composer.py`: independent provider failures, discovery filters, dedupe and hero; personalized providers use `TasteService` ranking.
+5. Plex Continue Watching is five-minute cached presentation data; raw history/progress is never durable. Jellyfin has history only.
 
-### Taste signal
-1. SPA `lib/taste.ts` → `POST /signals` (`api/signals.py:post_signal`, same-origin + mutation rate limit).
-2. `recommend/store.py:record_signal`/`retract_signal` → commit → `api/taste.py:refresh_profile` recomputes via `recommend/profile.py`.
+### Taste controls and publication
+1. `api/signals.py`: validated caller-scoped signals; browsing off makes detail opens a no-op; deliberate signals always count.
+2. `api/account.py`: off cancels collection and invalidates profile; on resets link sync times; clear deletes one source without rewinding its watermark.
+3. `recommend/store.py`: filter excluded kinds for profile/candidate eligibility; publish only after rechecking inputs under SQLite's write lock.
+4. `api/recommendations.py`: reset cancels imports, clears taste/sync state, schedules enabled sources; returns 204 and preserves onboarding/source preferences.
 
-### Request
-1. `api/request.py:create_request` checks Seerr permissions/policy/status, validates destination overrides.
-2. `_request_with_reauth` submits as the user, re-authing via the Plex token if the Seerr cookie expired; invalidates `seerr_cache`, records a request signal.
+### Requests
+1. `api/request.py`: check Seerr permission/policy/status and validate destinations.
+2. Use linked encrypted Seerr cookie; one silent Plex re-auth updates only the original matching link.
+3. Missing/lapsed link yields `re_auth_required`; `ConnectSeerr` reconnects and retries once. Successful requests record a deliberate signal.
 
 ## Gotchas
-- Devcontainer only. `frontend/node_modules` and `backend/.venv` exist on the host as *empty* mountpoints for named volumes; never install into them.
-- Layer rules are enforced by import-linter (`backend/pyproject.toml`) and `tests/test_boundaries.py`: no `httpx` outside `clients/`, nothing imports `api/`, `catalog/rails/recommend` never import `settings`.
-- `api.gen.ts` is generated and checked for drift by `just check-types-fresh`; change the backend models and run `just types`, never hand-edit.
-- `tests/test_docs.py` asserts every `Settings` field / compose var is documented (`.env.example`, `docs/CONFIGURATION.md`); adding a setting breaks the gate until docs are updated.
-- `tests/test_release_version.py` pins one version across `pyproject.toml`, `uv.lock`, `package.json`; bump all together on release.
-- `Tasterr.build_middleware_stack` wraps SecurityHeaders + SessionCookieSlide *outside* Starlette's error middleware on purpose (500s still slide the cookie). `SpaFallback` serves the SPA for any non-`/api` path.
-- OpenAPI/docs endpoints are disabled at runtime (`openapi_url=None`); schema exists only via `dump_openapi.py`.
-- `require_same_origin` passes requests with no `Sec-Fetch-Site`/`Origin` (non-browser clients) by design.
-- Seerr failures must degrade (availability "Unknown", requests disabled), never break browsing; TMDB failures map to generic 502/503 in `main.py`.
-- All caches, rate limits, PIN store and background tasks live on `app.state` in one process; there is no Redis and no multi-worker support.
-- Plex history and household groups are never persisted raw; only derived signals/profiles land in SQLite.
+- Devcontainer only; dependency trees use named volumes, never host installs. No multi-worker deployment: caches/limits/PINs/tasks are process-local.
+- Upstream credentials belong to links, survive logout, and disappear on unlink/delete; sessions hold local identity and hashed tokens.
+- Sessions slide for 30 days, capped at 90 days. Admission/admin checks rerun at sign-in, not continuously.
+- Migration 0007 signs everyone out once; 0008 adds Jellyfin uniqueness; 0009 adds source preferences. Downgrades have destructive limits; read CONFIGURATION first.
+- Four sources default on; retained watched titles stay excluded from Recommended for You even with their source off. Clear can re-import the 24-hour overlap.
+- Internal provider URLs and keys never reach browsers; avatars render as initials. Jellyfin stores no user token; its server key is for scoped reads.
+- Boundaries: no httpx outside clients, nothing imports api, catalog/rails/recommend never import deployment settings. Tests and import-linter enforce this.
+- `api.gen.ts` is generated; change response models then regenerate. Production OpenAPI/docs routes are disabled.
+- Docs tests guard settings/Compose variable coverage; release tests guard package versions. Published tag homes are listed in RELEASING.
+- `Tasterr.build_middleware_stack` wraps security headers and sliding cookies outside error middleware; account deletion suppresses cookie updates.
+- `require_same_origin` allows absent Origin/Sec-Fetch-Site for non-browser clients; cross-site browser mutations fail.
+- Seerr unconfigured/down yields Unknown/disabled requests; Plex/Jellyfin failures omit imports/rails; TMDB errors become generic unavailable responses.
+- The published example stays at 2.3.1 until release preparation; current source account features are unreleased.
 
 ## Diagram
 ```mermaid
@@ -86,5 +93,5 @@ flowchart LR
   auth --> db
   clients --> cache
   catalog --> cache
-  clients -->|httpx| ext[(TMDB / Seerr / Plex)]
+  clients -->|httpx| ext[(TMDB / Seerr / Plex / Jellyfin)]
 ```

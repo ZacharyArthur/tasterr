@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Keep the fixed-port probes independent of the caller's listener setting.
+export TASTERR_PORT=8000
+
 # This smoke owns a unique Compose project, image tag, default network, env file,
 # and named volume. It never reads the deployment .env.
 suffix="${GITHUB_RUN_ID:-local}-$$-$(date +%s)"
@@ -102,6 +105,15 @@ docker exec "$container" python -c \
     "import sqlite3; db = sqlite3.connect('/data/tasterr.db'); row = db.execute('SELECT marker FROM container_smoke').fetchone(); db.close(); assert row == ('persisted',)"
 
 echo "container smoke: health, private logs, headers, SPA, non-root uid, and volume persistence passed"
+
+# Recreate on the same volume with no Seerr configuration.
+sed -i '/^SEERR_/d' "$env_file"
+printf '%s\n' 'PLEX_SERVER_ID=container-smoke-server' >>"$env_file"
+compose up --detach --no-build --force-recreate tasterr
+wait_healthy
+docker exec "$container" python -c \
+    "import json, urllib.request; body = json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/auth/methods', timeout=3)); assert body == {'plex': True, 'jellyfin': False, 'seerr': False}"
+echo "container smoke: Plex-only sign-in methods passed"
 
 # Successful runs also prove the cleanup routine removed every owned resource.
 cleanup

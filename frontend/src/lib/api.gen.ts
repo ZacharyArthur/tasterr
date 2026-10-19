@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auth Methods */
+        get: operations["auth_methods_api_v1_auth_methods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/plex/pin": {
         parameters: {
             query?: never;
@@ -89,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/jellyfin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Jellyfin Login */
+        post: operations["jellyfin_login_api_v1_auth_jellyfin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -117,6 +151,159 @@ export interface paths {
         put?: never;
         /** Logout */
         post: operations["logout_api_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/taste-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Taste Source */
+        post: operations["set_taste_source_api_v1_account_taste_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/taste-sources/{source}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear Taste Source */
+        post: operations["clear_taste_source_api_v1_account_taste_sources__source__clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Account Summary */
+        get: operations["account_summary_api_v1_account_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/plex/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Link Pin */
+        post: operations["create_link_pin_api_v1_account_links_plex_pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/plex/pin/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll Link Pin */
+        post: operations["poll_link_pin_api_v1_account_links_plex_pin_poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/seerr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link Seerr */
+        post: operations["link_seerr_api_v1_account_links_seerr_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/jellyfin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link Jellyfin */
+        post: operations["link_jellyfin_api_v1_account_links_jellyfin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/{provider}/unlink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unlink Account */
+        post: operations["unlink_account_api_v1_account_links__provider__unlink_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete Account */
+        post: operations["delete_account_api_v1_account_delete_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -423,12 +610,51 @@ export interface components {
          * @enum {string}
          */
         Accent: "crimson" | "azure" | "violet" | "emerald" | "amber";
+        /** AccountProvider */
+        AccountProvider: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "plex" | "jellyfin" | "seerr";
+            /** Available */
+            available: boolean;
+            /** Linked */
+            linked: boolean;
+            /** Display Name */
+            display_name?: string | null;
+            /** Linked At */
+            linked_at?: string | null;
+            /**
+             * Can Unlink
+             * @default false
+             */
+            can_unlink: boolean;
+        };
+        /** AccountResponse */
+        AccountResponse: {
+            /** Providers */
+            providers: components["schemas"]["AccountProvider"][];
+            /** Taste Sources */
+            taste_sources: {
+                [key: string]: boolean;
+            };
+        };
         /** Appearance */
         Appearance: {
             /** @default dark */
             theme: components["schemas"]["Theme"];
             /** @default crimson */
             accent: components["schemas"]["Accent"];
+        };
+        /** AuthMethodsResponse */
+        AuthMethodsResponse: {
+            /** Plex */
+            plex: boolean;
+            /** Jellyfin */
+            jellyfin: boolean;
+            /** Seerr */
+            seerr: boolean;
         };
         /**
          * Availability
@@ -491,6 +717,11 @@ export interface components {
             ok: boolean;
             /** Detail */
             detail: string;
+        };
+        /** DeleteAccountBody */
+        DeleteAccountBody: {
+            /** Confirm */
+            confirm: string;
         };
         /** DestinationProfile */
         DestinationProfile: {
@@ -584,6 +815,21 @@ export interface components {
             avatar_url: string | null;
             /** Has Taste Signals */
             has_taste_signals: boolean;
+        };
+        /** JellyfinLoginRequest */
+        JellyfinLoginRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+        };
+        /** LinkPollResponse */
+        LinkPollResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "ok";
         };
         /** LocalLoginRequest */
         LocalLoginRequest: {
@@ -913,15 +1159,6 @@ export interface components {
             /** Seerr Url */
             seerr_url?: string | null;
         };
-        /**
-         * ResetResponse
-         * @description `seeded_signals` is how many request-history signals the re-seed
-         *     imported — 0 when the user has no history or Seerr was unreachable.
-         */
-        ResetResponse: {
-            /** Seeded Signals */
-            seeded_signals: number;
-        };
         /** RuntimeSettings */
         RuntimeSettings: {
             /**
@@ -969,6 +1206,29 @@ export interface components {
             episode_count: number;
             /** Air Date */
             air_date: string | null;
+        };
+        /** SeerrLinkBody */
+        SeerrLinkBody: {
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "plex" | "jellyfin" | "local";
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Email
+             * @default
+             */
+            email: string;
+            /**
+             * Password
+             * @default
+             */
+            password: string;
         };
         /** ServiceOption */
         ServiceOption: {
@@ -1076,11 +1336,29 @@ export interface components {
             /** Recorded Signals */
             recorded_signals: number;
         };
+        /** TasteSourceBody */
+        TasteSourceBody: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "seerr" | "plex" | "jellyfin" | "browsing";
+            /** Enabled */
+            enabled: boolean;
+        };
         /**
          * Theme
          * @enum {string}
          */
         Theme: "dark" | "light";
+        /** UnlinkBody */
+        UnlinkBody: {
+            /**
+             * Delete History
+             * @default false
+             */
+            delete_history: boolean;
+        };
         /** UserResponse */
         UserResponse: {
             /** Id */
@@ -1190,6 +1468,26 @@ export interface operations {
             };
         };
     };
+    auth_methods_api_v1_auth_methods_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMethodsResponse"];
+                };
+            };
+        };
+    };
     create_plex_pin_api_v1_auth_plex_pin_post: {
         parameters: {
             query?: never;
@@ -1276,6 +1574,39 @@ export interface operations {
             };
         };
     };
+    jellyfin_login_api_v1_auth_jellyfin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JellyfinLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_me_api_v1_auth_me_get: {
         parameters: {
             query?: never;
@@ -1311,6 +1642,265 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    set_taste_source_api_v1_account_taste_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TasteSourceBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_taste_source_api_v1_account_taste_sources__source__clear_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source: "seerr" | "plex" | "jellyfin" | "browsing";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    account_summary_api_v1_account_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+        };
+    };
+    create_link_pin_api_v1_account_links_plex_pin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinCreateResponse"];
+                };
+            };
+        };
+    };
+    poll_link_pin_api_v1_account_links_plex_pin_poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PinPollRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPollResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_seerr_api_v1_account_links_seerr_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeerrLinkBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_jellyfin_api_v1_account_links_jellyfin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JellyfinLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_account_api_v1_account_links__provider__unlink_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: "plex" | "jellyfin" | "seerr";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnlinkBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_account_api_v1_account_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -1846,13 +2436,11 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["ResetResponse"];
-                };
+                content?: never;
             };
         };
     };

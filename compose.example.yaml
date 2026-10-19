@@ -1,0 +1,117 @@
+# New deployment: save as compose.yaml in an empty directory, copy .env.example
+# beside it as .env, replace placeholders, and configure Seerr for pinned 2.3.1.
+# Existing deployments: replace compose.yaml in place; keep the project name,
+# data volume, and existing .env. Run docker compose up -d from that directory.
+# Full reference: docs/CONFIGURATION.md. This example pins the current release;
+# linked accounts, direct Plex/Jellyfin sign-in and taste sources are unreleased.
+# Select a release containing those features when it becomes available.
+#
+# Two ways to supply application environment (they can be combined):
+# A) Inline environment: values are useful for NON-SECRETS, for example uncomment
+#    the STATIC_DIR entry below: STATIC_DIR: "/app/static"
+#    A literal $ in an inline value must be written $$.
+# B) .env substitution: Compose reads .env beside compose.yaml for substitution
+#    inside this file only. ${VAR} substitutes a value, ${VAR:-default} supplies
+#    an optional default, and ${VAR:?message} rejects a missing/empty requirement.
+#    Shell variables override substitution values; --env-file selects another file.
+#    env_file is different: it passes that file's variables into the container.
+#    environment entries override env_file, even when empty. Optional settings
+#    below are commented so unset values stay absent; enable them in .env instead.
+#    Host variables are not passed into a Compose service automatically.
+# Keep secrets (TMDB_API_KEY, TASTERR_SECRET_KEY, SEERR_API_KEY, JELLYFIN_API_KEY)
+# in .env, never as inline literals. Single-quote .env values containing literal $.
+# Do not commit .env or share docker compose config output: it contains secrets.
+# With another env file, set TASTERR_ENV_FILE and pass the same --env-file path.
+services:
+  tasterr:
+    # Optional TASTERR_IMAGE: published tag/digest; default is pinned below.
+    image: ${TASTERR_IMAGE:-ghcr.io/zacharyarthur/tasterr:2.3.1}
+    restart: unless-stopped
+    # Optional TASTERR_ENV_FILE: file injected into container; default .env.
+    env_file: ${TASTERR_ENV_FILE:-.env}
+    environment:
+      # Required core (app defaults unset; example requires both before startup).
+      # TMDB_API_KEY: secret v3 catalog key, required for browsing; server-only.
+      TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in .env}
+      # TASTERR_SECRET_KEY: random stable secret, required for sign-in/requests;
+      # encrypts linked Plex tokens AND Seerr cookies. Rotation requires re-linking.
+      TASTERR_SECRET_KEY: ${TASTERR_SECRET_KEY:?set TASTERR_SECRET_KEY in .env}
+
+      # Sign-in providers: 2.3.1 requires Seerr. Direct Plex/Jellyfin sign-in below
+      # requires a release after 2.3.1; those settings are ignored by 2.3.1.
+      # Plex: optional PLEX_SERVER_ID, default unset; required without Seerr.
+      # Requires a release after 2.3.1; ignored by 2.3.1 (no membership restriction).
+      # Machine identifier (1-64 letters/digits/hyphens), server-only. Gates every
+      # Plex sign-in/link and pins history/Continue Watching. Members without that
+      # server lose Plex access even if Seerr previously admitted them. Omit this
+      # variable entirely for Seerr-gated Plex; an empty value fails validation.
+      # PLEX_SERVER_ID: ${PLEX_SERVER_ID}
+
+      # Seerr: required by 2.3.1; optional with direct Plex/Jellyfin in later releases.
+      # Requires INTERNAL_URL + API_KEY together.
+      # SEERR_INTERNAL_URL: default unset; HTTP(S) URL reachable by the container,
+      # used for sign-in, availability, history and requests. Never browser-visible.
+      # SEERR_INTERNAL_URL: ${SEERR_INTERNAL_URL}
+      # SEERR_API_KEY: default unset; secret for reads only, required with URL.
+      # Member request writes use the encrypted linked Seerr cookie instead.
+      # SEERR_API_KEY: ${SEERR_API_KEY}
+      # SEERR_EXTERNAL_URL: optional, default unset; browser-visible HTTP(S) URL
+      # for fallback request links. Embedded credentials are rejected.
+      # SEERR_EXTERNAL_URL: ${SEERR_EXTERNAL_URL}
+
+      # Jellyfin: optional integration; requires INTERNAL_URL + API_KEY together.
+      # All JELLYFIN_* settings require a release after 2.3.1; ignored by 2.3.1.
+      # JELLYFIN_INTERNAL_URL: default unset; container-reachable HTTP(S), server-
+      # only. No embedded credentials/query/fragment; invalid URL disables it.
+      # JELLYFIN_INTERNAL_URL: ${JELLYFIN_INTERNAL_URL}
+      # JELLYFIN_API_KEY: default unset; secret with server-admin access, used only
+      # for user-scoped reads. Password sign-in tokens are logged out/discarded.
+      # JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
+      # JELLYFIN_ALLOW_EMPTY_PASSWORD: optional, default false; enabling admits
+      # passwordless accounts for sign-in and linking. Exposing Tasterr exposes
+      # Jellyfin password sign-in from Tasterr's address (local-network rules do
+      # not apply); repeated wrong passwords can lock accounts (10/min/client IP).
+      # JELLYFIN_ALLOW_EMPTY_PASSWORD: ${JELLYFIN_ALLOW_EMPTY_PASSWORD:-false}
+
+      # Networking and proxy (all optional).
+      # TASTERR_HOST: bind address, default 0.0.0.0 inside the container.
+      # TASTERR_HOST: ${TASTERR_HOST:-0.0.0.0}
+      # TASTERR_PORT: container listener/healthcheck, default 8000; also controls
+      # the mapping's target port below. Keep this as substitution and change it
+      # in .env: an inline value cannot supply the port mapping's substitution.
+      TASTERR_PORT: ${TASTERR_PORT:-8000}
+      # TASTERR_FORWARDED_ALLOW_IPS: default 127.0.0.1; literal direct proxy-peer
+      # IPs/CIDRs only. Never *. Trust only your proxy, which must replace
+      # X-Forwarded-For/Proto. Use TLS for internet access; restrict direct access.
+      # TASTERR_FORWARDED_ALLOW_IPS: ${TASTERR_FORWARDED_ALLOW_IPS:-127.0.0.1}
+
+      # Optional storage and discovery.
+      # DATABASE_PATH: app default data/tasterr.db; image /data/tasterr.db.
+      # Keep it on the named volume or changes will not survive recreation.
+      # DATABASE_PATH: /data/tasterr.db
+      # STATIC_DIR: app default static; image /app/static (built SPA).
+      # STATIC_DIR: "/app/static"
+      # TASTERR_PLEX_MAX_CONNECTION_PROBES: default 6, range 3-12; bounded probes
+      # per advertised server (up to four without pinning). Server-side only.
+      # TASTERR_PLEX_MAX_CONNECTION_PROBES: ${TASTERR_PLEX_MAX_CONNECTION_PROBES:-6}
+      # TASTERR_HIDE_LIBRARY_ITEMS: default unset (admin preference); explicit
+      # true/false overrides and locks the admin control. Omit to leave editable.
+      # TASTERR_HIDE_LIBRARY_ITEMS: ${TASTERR_HIDE_LIBRARY_ITEMS}
+      # TASTERR_EXCLUDED_SERVICE_IDS: default unset (admin preference); JSON array
+      # of up to eight unique positive TMDB IDs. [] clears/locks; empty is invalid.
+      # TASTERR_EXCLUDED_SERVICE_IDS: ${TASTERR_EXCLUDED_SERVICE_IDS}
+    ports:
+      # Optional TASTERR_HTTP_PORT: default 127.0.0.1:8000 (host loopback).
+      # Set 8000 or a specific LAN IP:port only for intentional direct LAN access.
+      - "${TASTERR_HTTP_PORT:-127.0.0.1:8000}:${TASTERR_PORT:-8000}"
+    volumes:
+      - tasterr-data:/data
+
+# Optional TASTERR_MEDIA_NETWORK: default unset; required ONLY with the existing
+# docker-compose.seerr-network.yml override for Seerr on this same Docker host.
+# Download that override beside compose.yaml if needed, then use:
+# docker compose -f compose.yaml -f docker-compose.seerr-network.yml up -d
+# The override uses ${TASTERR_MEDIA_NETWORK:?set TASTERR_MEDIA_NETWORK}.
+# A routable LAN URL needs no shared network. Docker networks do not span hosts.
+volumes:
+  tasterr-data:

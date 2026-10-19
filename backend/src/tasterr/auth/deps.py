@@ -39,7 +39,7 @@ async def require_session(
         # here: FastAPI drops dependency-set headers on error responses (an
         # admin gate's 403 must still refresh), and login/logout responses
         # that set the cookie themselves must win without duplicate headers.
-        request.state.session_cookie_refresh = token
+        request.state.session_cookie_refresh = (token, resolved.session.expires_at)
     return AuthedSession(user=resolved.user, session=resolved.session)
 
 

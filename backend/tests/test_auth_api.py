@@ -2,8 +2,9 @@
 # only the unknown-type rules rather than sprinkling casts.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false
-
 import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,15 +16,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from tests.factories import mint_linked_session, user_with_links
 
 from tasterr.api.auth import AuthContext, get_auth_context
 from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket
-from tasterr.auth.sessions import mint_session
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.http import create_http_client
-from tasterr.clients.plex import PlexAuthClient, PlexPin
-from tasterr.clients.seerr import SeerrAuthClient, SeerrLogin, SeerrUser
+from tasterr.clients.plex import PlexAuthClient, PlexCloudAccount, PlexPin, PlexResourceAccess
+from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrLogin, SeerrUser
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import User, UserSession, utcnow
@@ -43,6 +44,9 @@ class FakePlex:
         self.token: str | None = None
         self.expired = False
         self.delay = 0.0  # lets race tests widen the poll window
+        self.resource_list = [PlexResourceAccess(clientIdentifier="pinned", owned=False)]
+        self.resource_error: Exception | None = None
+        self.resource_calls = 0
 
     async def create_pin(self) -> PlexPin:
         return self.pin
@@ -57,6 +61,15 @@ class FakePlex:
 
     def auth_url(self, code: str) -> str:
         return f"https://app.plex.tv/auth#?clientID=test&code={code}"
+
+    async def account(self, token: str) -> PlexCloudAccount:
+        return PlexCloudAccount(id=8, username="plex-viewer")
+
+    async def resources(self, token: str) -> list[PlexResourceAccess]:
+        self.resource_calls += 1
+        if self.resource_error is not None:
+            raise self.resource_error
+        return self.resource_list
 
 
 class FakeSeerr:
@@ -97,28 +110,61 @@ class Harness:
     pins: PinStore = field(default_factory=PinStore)
 
 
-def _harness(tmp_path: Path, *, configured: bool = True, with_secret: bool = True) -> Harness:
+def _harness(
+    tmp_path: Path,
+    *,
+    configured: bool = True,
+    with_secret: bool = True,
+    server_id: str | None = None,
+) -> Harness:
     overrides: dict[str, object] = {
         "database_path": tmp_path / "tasterr.db",
         "static_dir": tmp_path / "static",
+        "plex_server_id": server_id,
     }
     if configured:
         overrides |= {
             "seerr_internal_url": "http://seerr:5055",
             "seerr_api_key": "seerr-api-key",
         }
-        if with_secret:
-            overrides |= {"tasterr_secret_key": SECRET}
+    if with_secret:
+        overrides |= {"tasterr_secret_key": SECRET}
     harness = Harness(
         app=create_app(Settings.model_validate(overrides)), db_path=tmp_path / "tasterr.db"
     )
-    if configured and with_secret:
+    original_lifespan = harness.app.router.lifespan_context
+
+    async def block_plex_reads(request: httpx.Request) -> None:
+        if request.url.host == "plex.tv":
+            raise httpx.ConnectError("Plex reads are unavailable in this local fixture")
+
+    @asynccontextmanager
+    async def isolated_lifespan(app: FastAPI) -> AsyncGenerator[None]:
+        async with original_lifespan(app):
+            app.state.http.event_hooks["request"].append(block_plex_reads)
+            yield
+
+    harness.app.router.lifespan_context = isolated_lifespan
+    if (configured or server_id is not None) and with_secret:
         # Real get_auth_context still guards the unconfigured case (tested below).
         harness.app.dependency_overrides[get_auth_context] = lambda: AuthContext(
             secret_key=SECRET,
             plex=cast(PlexAuthClient, harness.plex),
-            seerr=cast(SeerrAuthClient, harness.seerr),
+            seerr=cast(SeerrAuthClient, harness.seerr) if configured else None,
             pins=harness.pins,
+            seerr_read=SeerrClient(
+                httpx.AsyncClient(
+                    transport=httpx.MockTransport(
+                        lambda _: httpx.Response(
+                            200, json=harness.seerr.user.model_dump(by_alias=True)
+                        )
+                    )
+                ),
+                "http://seerr",
+                "key",
+            )
+            if configured
+            else None,
         )
     return harness
 
@@ -247,7 +293,7 @@ def test_plex_token_is_encrypted_at_rest(tmp_path: Path) -> None:
 
     raw = harness.db_path.read_bytes()
     assert PLEX_TOKEN.encode() not in raw  # Fernet ciphertext only
-    assert SEERR_COOKIE.encode() in raw  # stored verbatim per SPEC §5, server-side only
+    assert SEERR_COOKIE.encode() not in raw
 
 
 async def test_concurrent_claimed_polls_mint_exactly_one_session(tmp_path: Path) -> None:
@@ -459,8 +505,9 @@ def test_local_login_refreshes_full_identity_before_minting(
                 json={"id": 7, "email": "a@b.c"},
                 headers={"set-cookie": f"{SEERR_COOKIE}; Path=/; HttpOnly"},
             )
-        assert request.url.path == "/api/v1/auth/me"
-        assert request.headers["cookie"] == SEERR_COOKIE
+        assert request.url.path in ("/api/v1/auth/me", "/api/v1/user/7")
+        if request.url.path == "/api/v1/auth/me":
+            assert request.headers["cookie"] == SEERR_COOKIE
         return httpx.Response(200, json=profile)
 
     monkeypatch.setattr(
@@ -486,8 +533,8 @@ def test_local_login_refreshes_full_identity_before_minting(
 
         profile = {"id": 7, "displayName": "Incomplete"}
         failed = client.post("/api/v1/auth/local", json=credentials)
-        assert failed.status_code == 502
-        assert failed.json() == {"detail": "Sign-in service unavailable"}
+        assert failed.status_code == 401
+        assert failed.json() == {"detail": "Invalid email or password"}
         assert "set-cookie" not in failed.headers
         assert _session_count(harness.db_path) == 2
         assert client.get("/api/v1/auth/me").json() == second.json()
@@ -496,9 +543,9 @@ def test_local_login_refreshes_full_identity_before_minting(
     assert [record.getMessage() for record in records] == [
         "auth: local login succeeded",
         "auth: local login succeeded",
-        "auth: local login unavailable",
+        "auth: local login rejected",
     ]
-    assert records[-1].levelname == "WARNING"
+    assert records[-1].levelname == "INFO"
     assert records[-1].exc_info is None
     assert records[-1].args == ()
     assert credentials["password"] not in caplog.text
@@ -718,16 +765,16 @@ def _seed_session_token(db_path: Path, *, stale: bool = False) -> str:
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(
+                user = await user_with_links(
+                    db,
                     seerr_user_id=99,
                     display_name="Seeded",
                     avatar_url=None,
                     auth_type="local",
                     is_admin=False,
                 )
-                db.add(user)
                 await db.flush()
-                token = await mint_session(db, user.id, "connect.sid=s%3Aseed", None)
+                token = await mint_linked_session(db, user.id, "connect.sid=s%3Aseed", None)
                 if stale:
                     row = (await db.execute(select(UserSession))).scalar_one()
                     row.last_seen_at = utcnow() - timedelta(hours=2)
@@ -766,20 +813,36 @@ def test_me_and_logout_still_work_while_auth_unconfigured(tmp_path: Path) -> Non
         assert client.post("/api/v1/auth/logout").status_code == 204
 
 
-def test_seerr_down_is_generic_502_and_health_still_up(tmp_path: Path) -> None:
+@pytest.mark.parametrize("method", ["local", "plex"])
+def test_seerr_down_is_generic_502_and_creates_no_user(tmp_path: Path, method: str) -> None:
     harness = _harness(tmp_path)
     harness.seerr.down = True
     with TestClient(harness.app) as client:
-        response = client.post(
-            "/api/v1/auth/local",
-            json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
-        )
+        if method == "local":
+            response = client.post(
+                "/api/v1/auth/local",
+                json={"email": "a@b.c", "password": "hunter2-password-sentinel"},
+            )
+        else:
+            harness.plex.token = PLEX_TOKEN
+            response = _poll_pin(client, _start_pin_login(client))
         health = client.get("/api/v1/health")
 
     assert response.status_code == 502
     assert response.json() == {"detail": "Sign-in service unavailable"}
     assert "seerr" not in response.text.lower() or "Sign-in" in response.text
     assert health.status_code == 200
+
+    async def verify() -> None:
+        engine = create_engine(harness.db_path)
+        try:
+            async with async_sessionmaker(engine)() as db:
+                assert (await db.scalars(select(User))).all() == []
+                assert (await db.scalars(select(UserSession))).all() == []
+        finally:
+            await engine.dispose()
+
+    asyncio.run(verify())
 
 
 # --- Session-gated /config (4.7) ---
@@ -862,20 +925,25 @@ def test_session_cookie_secure_follows_scheme(tmp_path: Path) -> None:
     assert "secure" in secure.headers["set-cookie"].lower()
 
 
-# --- Cold-start seed hook (M4) ---
+# --- Incremental request-history sync scheduling ---
 
 
-def test_logins_schedule_the_cold_start_seed(
+def test_logins_schedule_the_request_history_sync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both login paths hand the user off to the seed scheduler after the
+    """Plex and local Seerr login hand the user off to the history scheduler after the
     response is assembled — the login itself never waits on (or fails with)
     the import, which is unit-tested in test_recommend_seed.py."""
-    scheduled: list[tuple[int, int]] = []
+    scheduled: list[int] = []
     plex_scheduled: list[tuple[int, bool]] = []
 
-    def recorder(request: object, settings: object, user_id: int, seerr_user_id: int) -> None:
-        scheduled.append((user_id, seerr_user_id))
+    def recorder(
+        request: object,
+        settings: object,
+        user_id: int,
+        attempted_at: object = None,
+    ) -> None:
+        scheduled.append(user_id)
 
     def plex_recorder(
         request: object,
@@ -887,8 +955,8 @@ def test_logins_schedule_the_cold_start_seed(
         assert attempted_at is None
         plex_scheduled.append((user_id, plex_token_enc is not None))
 
-    monkeypatch.setattr("tasterr.api.auth.schedule_seed", recorder)
-    monkeypatch.setattr("tasterr.api.auth.schedule_plex_history", plex_recorder)
+    monkeypatch.setattr("tasterr.api.taste.schedule_seed", recorder)
+    monkeypatch.setattr("tasterr.api.taste.schedule_plex_history", plex_recorder)
     harness = _harness(tmp_path)
     with TestClient(harness.app) as client:
         local = client.post(
@@ -901,5 +969,22 @@ def test_logins_schedule_the_cold_start_seed(
 
     assert local.status_code == 200
     assert plex.status_code == 200
-    assert scheduled == [(1, 7), (1, 7)]  # same Seerr user -> same Tasterr user row
+    assert scheduled == [1, 1]  # same Seerr user -> same Tasterr user row
     assert plex_scheduled == [(1, True)]
+
+
+def test_plex_account_read_failure_is_generic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail(_self: FakePlex, _token: str) -> PlexCloudAccount:
+        raise UpstreamUnavailable("private-upstream-sentinel")
+
+    monkeypatch.setattr(FakePlex, "account", fail)
+    harness = _harness(tmp_path)
+    with TestClient(harness.app) as client:
+        harness.plex.token = PLEX_TOKEN
+        response = _poll_pin(client, _start_pin_login(client))
+        assert response.status_code == 502
+        assert response.json() == {"detail": "Sign-in service unavailable"}
+    assert _session_count(harness.db_path) == 0

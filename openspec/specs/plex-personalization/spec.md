@@ -6,37 +6,12 @@ and bounded background history synchronization for personalized experiences.
 
 ## Requirements
 
-### Requirement: Plex media reads use only the caller's protected session material
-
-For a Plex-backed authenticated session, the system SHALL decrypt that session's
-stored Plex account token only inside the server-side request/task that needs it.
-It SHALL validate the token against the Plex account endpoint, discover accessible
-Plex Media Server resources through plex.tv, and use each resource's access token
-only as an `X-Plex-Token` request header. A local-login session or a session without
-a valid Plex token SHALL have no live Plex media capability. No Plex account token,
-resource access token, account id, server URL, machine id, rating key, or raw Plex
-payload SHALL be returned to the browser or written to logs.
-
-#### Scenario: Plex-backed caller gains read capability
-
-- **WHEN** an authenticated Plex-backed caller has a valid encrypted token
-- **THEN** the backend can discover and read that caller's accessible Plex servers
-  without serializing any credential or connection metadata
-
-#### Scenario: Local login has no live Plex capability
-
-- **WHEN** an authenticated local-login session requests Home
-- **THEN** no Plex account, resources, history, or Continue Watching call is made
-
-#### Scenario: Credentials stay out of URLs and output
-
-- **WHEN** any Plex read succeeds or fails
-- **THEN** account/resource tokens appear only in outbound headers and are absent
-  from URLs, cache keys, logs, errors, API bodies, and generated browser contracts
-
 ### Requirement: Advertised Plex server connections are verified before use
 
-Resource discovery SHALL request HTTPS and relay connection data, retain at most
+Resource discovery SHALL request HTTPS and relay connection data. When
+`PLEX_SERVER_ID` is set it SHALL retain only the resource whose client identifier
+equals it for both history and Continue Watching; otherwise it SHALL
+retain at most
 four Plex Media Server resources in deterministic owned-first, machine-identifier
 order. For each resource, the backend SHALL retain only connections that pass the
 existing URL validation, partition them into local, remote-direct, and relay
@@ -115,6 +90,18 @@ response SHALL be used.
 - **WHEN** resource discovery returns more than four accessible PMS devices
 - **THEN** the same first four owned-first, machine-id-sorted resources are used for the same response on every run
 
+#### Scenario: Configured server pins discovery
+
+- **WHEN** `PLEX_SERVER_ID` is set and the account can see that server and others
+- **THEN** only the configured server is probed and read; the others are ignored
+
+#### Scenario: Configured server absent from resources
+
+- **WHEN** `PLEX_SERVER_ID` is set and the account's resources do not include it
+- **THEN** no PMS read runs, history and Continue Watching degrade to nothing, and
+  the history success watermark does not advance, so the first full import still
+  runs once the server becomes visible
+
 #### Scenario: Failed account validation stops sibling discovery
 
 - **WHEN** account validation fails while resource discovery is still running
@@ -162,11 +149,13 @@ used.
 
 ### Requirement: Plex watch history synchronizes in bounded background work
 
-A successful Plex login and a Plex-backed Home read SHALL evaluate the same
-per-user single-flight trigger: schedule only when
-`plex_history_attempted_at` is absent or older than six hours. Plex SHALL use
-single-flight state separate from the Seerr seed state and SHALL only read the
-latter to wait for that user's cold-start seed to settle. After task creation, the
+A successful Plex sign-in, a new Plex link, and a Home read by any user with a
+Plex link SHALL evaluate the same per-user single-flight trigger: schedule only
+when the Plex link's `sync_attempted_at` is absent or older than six hours. The
+task SHALL use the token stored on the Plex link, whichever method the user signed
+in with. Plex SHALL use single-flight state separate from the Seerr sync state and
+SHALL only read the latter to wait for that user's Seerr sync to settle. After
+task creation, the
 task SHALL use its own DB session to commit the attempt timestamp before any
 network work; failed task creation or failed timestamp commit SHALL clear the
 single-flight claim without leaving an attempt timestamp. The task SHALL NOT delay
@@ -176,7 +165,7 @@ concurrency eight, and a 30-second network/mapping deadline.
 
 Each sync SHALL capture a cutoff. A first sync SHALL request from no earlier than
 365 days before that cutoff; a later sync SHALL start 24 hours before
-`plex_history_synced_at`. For each PMS, the identity validated by `/api/v2/user`
+the Plex link's `sync_synced_at`. For each PMS, the identity validated by `/api/v2/user`
 SHALL resolve to exactly one positive server-local `/accounts` row: first by exact
 numeric `id` or `key`, or, when no numeric match exists, by one case-insensitive
 exact `Account.name` match to the validated username. Unrelated malformed or
@@ -205,9 +194,15 @@ SHALL be retained.
 
 #### Scenario: First sync is bounded and non-blocking
 
-- **WHEN** a Plex-backed user logs in without sync timestamps
-- **THEN** login completes normally while one background task imports at most the
-  bounded 365-day history window
+- **WHEN** a user whose Plex link has no sync timestamps signs in
+- **THEN** sign-in completes normally while one background task imports at most
+  the bounded 365-day history window
+
+#### Scenario: Sync does not depend on the sign-in method
+
+- **WHEN** a user with a Plex link signed in with Seerr local credentials loads Home
+- **THEN** the Plex history trigger is evaluated with the token stored on the
+  Plex link
 
 #### Scenario: Failed scheduling leaves no six-hour dark window
 
@@ -274,21 +269,19 @@ SHALL be retained.
 
 #### Scenario: Cold-start seed wins the scheduling race
 
-- **WHEN** a new Plex-backed user's Seerr cold-start seed and Plex sync are both
-  eligible
-- **THEN** the Plex task starts only after the seed task settles, so Plex signals
-  cannot suppress Seerr request-history seeding
+- **WHEN** a user's Seerr request-history sync and Plex sync are both eligible
+- **THEN** the Plex task starts only after the Seerr task settles
 
 #### Scenario: Reset cannot be undone by an in-flight sync
 
 - **WHEN** reset races an active Plex history task
 - **THEN** reset consumes cancellation without propagating `CancelledError`,
-  returns 200 within the task's 30-second bound, clears signals and both sync
+  returns 204 within the task's 30-second bound, clears signals and both sync
   timestamps, and permits no canceled batch to commit afterward
 
 ### Requirement: Continue Watching composes as a capability-gated rail
 
-For a Plex-backed session with the rail type enabled, the home composer SHALL add
+For a user with a Plex link and the rail type enabled, the home composer SHALL add
 `continue-watching` titled **Continue Watching** ahead of the other personalized
 providers. It SHALL read bounded items from
 `MediaContainer.Hub[].Metadata` on each validated server, retain only
@@ -327,7 +320,7 @@ independent-degradation behavior.
 
 #### Scenario: Plex-backed user sees resumable titles
 
-- **WHEN** an enabled Plex-backed user has enough canonically mapped in-progress
+- **WHEN** an enabled user with a Plex link has enough canonically mapped in-progress
   movies, in-progress episodes, or next-up episodes
 - **THEN** Home begins its personalized rails with one de-duplicated Continue
   Watching rail of TMDB-backed summaries
@@ -379,7 +372,7 @@ independent-degradation behavior.
 
 #### Scenario: Tokenless or disabled capability performs no work
 
-- **WHEN** the session lacks a Plex token or the admin disabled Continue Watching
+- **WHEN** the user has no Plex link or the admin disabled Continue Watching
 - **THEN** no Plex read runs and no empty rail placeholder is returned
 
 #### Scenario: Plex failure does not fail Home
@@ -406,7 +399,7 @@ independent-degradation behavior.
 
 #### Scenario: Plex sessions share one user cache entry
 
-- **WHEN** two Plex-backed sessions for the same Tasterr user request Home during
+- **WHEN** two sessions for the same Tasterr user with a Plex link request Home during
   one cache lifetime
 - **THEN** they use the same caller-scoped Continue Watching result without a
   second Plex load
@@ -442,3 +435,32 @@ keys, titles, timestamps, URLs, or raw bodies.
 
 - **WHEN** `just check` runs
 - **THEN** no live Plex contract executes and no Plex network access is attempted
+
+### Requirement: Plex media reads use only the caller's linked-account material
+
+For an authenticated user with a Plex link, the system SHALL decrypt the token
+stored on that link only inside the server-side request/task that needs it. It
+SHALL validate the token against the Plex account endpoint, discover accessible
+Plex Media Server resources through plex.tv, and use each resource's access token
+only as an `X-Plex-Token` request header. A user without a Plex link, or whose
+link token cannot be decrypted, SHALL have no live Plex media capability. No Plex
+account token, resource access token, account id, server URL, machine id, rating
+key, or raw Plex payload SHALL be returned to the browser or written to logs.
+
+#### Scenario: Linked caller gains read capability
+
+- **WHEN** an authenticated user with a valid Plex link loads Home
+- **THEN** the backend can discover and read that user's accessible Plex servers
+  without serializing any credential or connection metadata, whichever method
+  they signed in with
+
+#### Scenario: Unlinked user has no live Plex capability
+
+- **WHEN** an authenticated user without a Plex link requests Home
+- **THEN** no Plex account, resources, history, or Continue Watching call is made
+
+#### Scenario: Credentials stay out of URLs and output
+
+- **WHEN** any Plex read succeeds or fails
+- **THEN** account/resource tokens appear only in outbound headers and are absent
+  from URLs, cache keys, logs, errors, API bodies, and generated browser contracts

@@ -100,6 +100,11 @@ class SeerrAuthClient:
     async def login_plex(self, auth_token: str) -> SeerrLogin:
         return await self._login("/api/v1/auth/plex", {"authToken": auth_token})
 
+    async def login_jellyfin(self, username: str, password: str) -> SeerrLogin:
+        return await self._login(
+            "/api/v1/auth/jellyfin", {"username": username, "password": password}
+        )
+
     async def login_local(self, email: str, password: str) -> SeerrLogin:
         login = await self._login("/api/v1/auth/local", {"email": email, "password": password})
         # Local sign-in returns only a partial identity; permissions come from /me.
@@ -112,34 +117,43 @@ class SeerrAuthClient:
             )
         except httpx.HTTPError:
             raise UpstreamUnavailable("seerr request failed") from None
-        if response.status_code != 200:
+        if response.status_code in (502, 503, 504):
             raise UpstreamUnavailable("seerr identity read failed")
+        if response.status_code != 200:
+            raise UpstreamRejected(response.status_code)
         try:
             user = SeerrUser.model_validate(response.json(), strict=True)
         except ValueError:
-            raise UpstreamUnavailable("unexpected seerr response shape") from None
+            raise UpstreamRejected(200) from None
         if user.id <= 0 or user.id != login.user.id:
-            raise UpstreamUnavailable("unexpected seerr user identity")
+            raise UpstreamRejected(200)
         if "permissions" not in user.model_fields_set:
-            raise UpstreamUnavailable("seerr identity omitted permissions")
+            raise UpstreamRejected(200)
         return SeerrLogin(user=user, cookie=login.cookie)
 
     async def _login(self, path: str, payload: dict[str, str]) -> SeerrLogin:
         try:
-            response = await self._http.post(f"{self._base}{path}", json=payload)
+            response = await self._http.post(
+                f"{self._base}{path}",
+                json=payload,
+                timeout=SEERR_TIMEOUT_SECONDS,
+                follow_redirects=False,
+            )
         except httpx.HTTPError:
             raise UpstreamUnavailable("seerr request failed") from None
-        if response.status_code >= 500:
+        if response.status_code in (502, 503, 504):
             raise UpstreamUnavailable(f"seerr returned {response.status_code}")
-        if response.status_code >= 400:
+        if response.status_code != 200:
             raise UpstreamRejected(response.status_code)
         cookie = response.cookies.get(SESSION_COOKIE)
         if cookie is None:
-            raise UpstreamUnavailable("seerr login set no session cookie")
+            raise UpstreamRejected(200)
         try:
             user = SeerrUser.model_validate(response.json())
         except ValueError as error:
-            raise UpstreamUnavailable("unexpected seerr response shape") from error
+            raise UpstreamRejected(200) from error
+        if user.id <= 0:
+            raise UpstreamRejected(200)
         return SeerrLogin(user=user, cookie=f"{SESSION_COOKIE}={cookie}")
 
 
@@ -257,7 +271,7 @@ class SeerrServerDetail(BaseModel):
 
 @dataclass
 class SeerrHistoricalRequest:
-    """One of the member's past requests — the cold-start seed's input."""
+    """One of the member's past requests — the request-history sync's input."""
 
     media_type: MediaType
     tmdb_id: int
@@ -265,7 +279,7 @@ class SeerrHistoricalRequest:
 
 
 HISTORY_PAGE_SIZE = 50
-HISTORY_MAX_ROWS = 200  # the seed only needs recent taste, not an archive
+HISTORY_MAX_ROWS = 200  # bounded recent request history, not an archive
 
 
 class SeerrClient:
@@ -327,14 +341,16 @@ class SeerrClient:
             )
         except httpx.HTTPError:
             raise UpstreamUnavailable("seerr request failed") from None
-        if response.status_code >= 400:
+        if response.status_code in (502, 503, 504):
             raise UpstreamUnavailable("seerr user read failed")
+        if response.status_code != 200:
+            raise UpstreamRejected(response.status_code)
         try:
             user = SeerrUser.model_validate(response.json())
         except ValueError as error:
-            raise UpstreamUnavailable("unexpected seerr response shape") from error
+            raise UpstreamRejected(200) from error
         if user.id != user_id:
-            raise UpstreamUnavailable("unexpected seerr user identity")
+            raise UpstreamRejected(200)
         return user
 
     async def request_settings(self) -> SeerrRequestSettings:

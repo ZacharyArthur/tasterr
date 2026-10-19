@@ -3,22 +3,26 @@
 # registered via decorator, not called directly.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnusedFunction=false
-
 import asyncio
 from datetime import timedelta
+from http.cookies import SimpleCookie
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
+import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from tests.factories import user_with_links
+from tests.test_account_api import db_call
 
 from tasterr.auth.cookies import COOKIE_NAME
 from tasterr.auth.deps import AuthedSession, require_admin, require_same_origin, require_session
-from tasterr.auth.sessions import SESSION_TTL, hash_token, new_token
+from tasterr.auth.sessions import SESSION_ABSOLUTE_TTL, SESSION_TTL, hash_token, new_token
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
-from tasterr.db.models import User, UserSession, utcnow
+from tasterr.db.models import UserSession, utcnow
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -62,14 +66,14 @@ def _seed_session(
             await upgrade_to_head(engine)
             maker = async_sessionmaker(engine, expire_on_commit=False)
             async with maker() as db:
-                user = User(
+                user = await user_with_links(
+                    db,
                     seerr_user_id=7,
                     display_name="Alice",
                     avatar_url=None,
                     auth_type="plex",
                     is_admin=is_admin,
                 )
-                db.add(user)
                 await db.flush()
                 token = new_token()
                 now = utcnow()
@@ -79,8 +83,6 @@ def _seed_session(
                     UserSession(
                         token_hash=hash_token(token),
                         user_id=user.id,
-                        seerr_cookie="connect.sid=s%3Aseed",
-                        plex_token_enc=None,
                         created_at=now,
                         expires_at=expires,
                         last_seen_at=last_seen,
@@ -132,6 +134,13 @@ def test_session_gate_passes_valid_token(tmp_path: Path) -> None:
     assert response.json() == {"user_id": 1}
 
 
+def _assert_refreshed_cookie(header: str, token: str) -> None:
+    assert header.startswith(f"{COOKIE_NAME}={token}")
+    max_age = int(SimpleCookie(header)[COOKIE_NAME]["max-age"])
+    lifetime = int(SESSION_TTL.total_seconds())
+    assert lifetime - 60 < max_age <= lifetime
+
+
 def test_stale_session_gets_a_refreshed_cookie(tmp_path: Path) -> None:
     """When the server-side window slides, the cookie's Max-Age must slide too."""
     app = _probe_app(tmp_path)
@@ -142,9 +151,7 @@ def test_stale_session_gets_a_refreshed_cookie(tmp_path: Path) -> None:
         response = client.get("/api/v1/probe/session")
 
     assert response.status_code == 200
-    header = response.headers["set-cookie"]
-    assert header.startswith(f"{COOKIE_NAME}={token}")
-    assert "max-age=2592000" in header.lower()
+    _assert_refreshed_cookie(cast("str", response.headers["set-cookie"]), token)
 
 
 def test_stale_session_refresh_survives_error_responses(tmp_path: Path) -> None:
@@ -158,9 +165,7 @@ def test_stale_session_refresh_survives_error_responses(tmp_path: Path) -> None:
         response = client.get("/api/v1/probe/admin")
 
     assert response.status_code == 403
-    header = response.headers["set-cookie"]
-    assert header.startswith(f"{COOKIE_NAME}={token}")
-    assert "max-age=2592000" in header.lower()
+    _assert_refreshed_cookie(cast("str", response.headers["set-cookie"]), token)
 
 
 def test_stale_session_refresh_survives_unhandled_500(tmp_path: Path) -> None:
@@ -178,9 +183,7 @@ def test_stale_session_refresh_survives_unhandled_500(tmp_path: Path) -> None:
     assert response.headers["content-security-policy"].startswith("default-src 'self'")
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["x-content-type-options"] == "nosniff"
-    header = response.headers["set-cookie"]
-    assert header.startswith(f"{COOKIE_NAME}={token}")
-    assert "max-age=2592000" in header.lower()
+    _assert_refreshed_cookie(cast("str", response.headers["set-cookie"]), token)
 
 
 def test_fresh_session_gets_no_cookie_churn(tmp_path: Path) -> None:
@@ -193,6 +196,41 @@ def test_fresh_session_gets_no_cookie_churn(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize(
+    "path,status",
+    [("/probe/session", 200), ("/probe/admin", 403), ("/probe/boom", 500)],
+)
+def test_absolute_expiry_401_and_cookie_refresh_cap(tmp_path: Path, path: str, status: int) -> None:
+    app = _probe_app(tmp_path)
+    token = _seed_session(tmp_path, stale=True)
+    db_path = tmp_path / "tasterr.db"
+
+    async def near_cap(db: AsyncSession) -> None:
+        session = (await db.scalars(select(UserSession))).one()
+        session.created_at = utcnow() - SESSION_ABSOLUTE_TTL + timedelta(seconds=60)
+
+    async def at_cap(db: AsyncSession) -> None:
+        session = (await db.scalars(select(UserSession))).one()
+        session.created_at = utcnow() - SESSION_ABSOLUTE_TTL
+        session.expires_at = utcnow() + SESSION_TTL
+
+    async def no_sessions(db: AsyncSession) -> None:
+        assert (await db.scalars(select(UserSession))).all() == []
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        db_call(db_path, near_cap)
+        client.cookies.set(COOKIE_NAME, token)
+        response = client.get(f"/api/v1{path}")
+        assert response.status_code == status
+        cookie = SimpleCookie(cast("str", response.headers["set-cookie"]))
+        assert 0 < int(cookie[COOKIE_NAME]["max-age"]) <= 60
+        db_call(db_path, at_cap)
+        expired = client.get(f"/api/v1{path}")
+        assert expired.status_code == 401
+        assert "set-cookie" not in expired.headers
+        db_call(db_path, no_sessions)
 
 
 def test_admin_gate_rejects_non_admin(tmp_path: Path) -> None:

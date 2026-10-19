@@ -1,8 +1,10 @@
 # taste-signals Specification
 
 ## Purpose
-TBD - created by archiving change m4-taste. Update Purpose after archive.
+Record bounded, caller-scoped taste events and canonical imported history with explicit weights, idempotency, and collection preferences.
+
 ## Requirements
+
 ### Requirement: In-app interaction signals are recorded per user
 
 `POST /api/v1/signals` SHALL record an interaction signal for the authenticated
@@ -10,6 +12,8 @@ user with a validated body: `media_type` constrained to `movie` or `tv`, an
 integer `tmdb_id` between 1 and 2,147,483,647 inclusive, and `kind` constrained
 to the client-recordable kinds — `detail_open`, `watchlist`, `not_interested`.
 Each stored signal SHALL carry its kind's fixed weight and a creation timestamp.
+A `detail_open` post SHALL succeed without storing anything while the user has
+switched off the `browsing` taste source.
 Signals SHALL be scoped to the authenticated user only: a signal is attributed
 to the session user, and no endpoint SHALL expose one user's signals to another.
 
@@ -34,18 +38,26 @@ to the session user, and no endpoint SHALL expose one user's signals to another.
 - **WHEN** the posted `tmdb_id` is outside the supported range
 - **THEN** input validation rejects it before any signal or profile side effect
 
+#### Scenario: Browsing switched off
+
+- **WHEN** a user with `browsing` switched off posts a `detail_open` signal
+- **THEN** the response is success and no signal row is stored
+
 ### Requirement: Server-recorded kinds are not accepted from the client
 
-The `request`, `seed_request_history`, and `watched_plex` signal kinds SHALL be
+The `request`, `seed_request_history`, `watched_plex`, and `watched_jellyfin`
+signal kinds SHALL be
 recorded only by the backend itself — by the successful Seerr request flow, the
-cold-start Seerr import, and the account-scoped Plex history sync respectively.
+incremental Seerr request-history sync, and the account-scoped Plex and Jellyfin
+history syncs
+respectively.
 `POST /api/v1/signals` SHALL reject these kinds by input validation, so a client
 cannot fabricate strong signals it did not earn.
 
 #### Scenario: Client cannot self-report a request signal
 
 - **WHEN** a client posts a signal with kind `request`,
-  `seed_request_history`, or `watched_plex`
+  `seed_request_history`, `watched_plex`, or `watched_jellyfin`
 - **THEN** the request is rejected by input validation and nothing is stored
 
 ### Requirement: Toggle signals are retractable
@@ -109,8 +121,7 @@ per user, media type, and TMDB id. Re-importing the same or an older observed
 watch SHALL be an idempotent no-op; observing a later watch SHALL update only that
 row's creation time and SHALL invalidate the user's materialized profile in the
 same transaction. The signal SHALL be a strong positive and SHALL be entirely
-rebuildable from the caller's Plex history while a usable Plex-backed session is
-available.
+rebuildable from the caller's Plex history while their Plex account is linked.
 
 #### Scenario: First canonical watch creates one signal
 
@@ -126,3 +137,23 @@ available.
 
 - **WHEN** a later sync observes the same title with a newer watch time
 - **THEN** the one row advances to that time and the user's profile is invalidated
+
+### Requirement: Jellyfin watched signals are unique latest-watch facts
+
+`watched_jellyfin` SHALL have the fixed stored weight +2.5 and at most one active
+row per user, media type, and TMDB id. Re-importing the same or an older observed
+play SHALL be an idempotent no-op; observing a later play SHALL update only that
+row's creation time and SHALL invalidate the user's materialized profile in the
+same transaction. The signal SHALL be a strong positive and SHALL be rebuildable
+from the caller's Jellyfin history while their Jellyfin account is linked.
+
+#### Scenario: First canonical play creates one signal
+
+- **WHEN** history sync first observes a played title with a TMDB id for a user
+- **THEN** one +2.5 `watched_jellyfin` row is stored at the observed play time
+
+#### Scenario: Same title on Plex and Jellyfin
+
+- **WHEN** a user has watched a title on both Plex and Jellyfin
+- **THEN** one `watched_plex` and one `watched_jellyfin` row exist, each from its
+  own source

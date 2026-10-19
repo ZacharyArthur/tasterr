@@ -1,7 +1,7 @@
 # media-browse Specification
 
 ## Purpose
-TBD - created by archiving change m2-browse. Update Purpose after archive.
+Let signed-in members browse composed discovery rails, search titles, inspect details, and act on availability and request controls without upstream failures blanking the feed.
 
 ## Requirements
 
@@ -265,7 +265,8 @@ after the view renders, so browsing never waits on Seerr. The detail modal SHALL
 present a **request affordance** in its where-and-how-to-watch section: a request
 button that is disabled when Seerr is unconfigured (per `PublicConfig`) or the
 title is already available/requested, shows an optimistic pending state on submit,
-prompts re-login when the backend signals `re_auth_required`, and offers a
+opens the "Connect Seerr" dialog (see `media-requests`) when the backend signals
+`re_auth_required`, and offers a
 server-provided "Request in Seerr" link on failure. Seerr/library text SHALL be
 rendered as text, and any Seerr external link SHALL come only from the backend.
 The detail modal SHALL additionally carry the **taste affordances**: opening a
@@ -316,7 +317,8 @@ endpoint only after an explicit confirmation.
 #### Scenario: Re-login prompted on re-auth signal
 
 - **WHEN** a request returns `re_auth_required`
-- **THEN** the SPA prompts the user to re-login rather than showing a generic error
+- **THEN** the SPA opens the "Connect Seerr" dialog rather than showing a generic
+  error or signing the user out
 
 #### Scenario: Opening a detail records a signal quietly
 

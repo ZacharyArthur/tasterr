@@ -4,6 +4,19 @@ This procedure is for stable releases. The current package version is
 `2.3.1`, its Git tag is `v2.3.1`, and its image is published by the `image` workflow
 only after all release changes are squash-merged to protected `main`.
 
+The four archived account changes are tracked in [unreleased notes](releases/unreleased.md).
+Choose the next version during release preparation; do not relabel `2.3.1` as
+containing them. Update backend `pyproject.toml` and `uv.lock`, frontend
+`package.json` and `package-lock.json`, the published tag in `compose.example.yaml`,
+the release-boundary notes in `.env.example` and README, this procedure, the supported line
+in root `SECURITY.md`, and the corresponding docs/release assertions together.
+Create the versioned evidence file only after selecting the version.
+
+Review linked-account and `/account` behavior, optional Plex/Seerr/Jellyfin sign-in,
+initials avatars, taste-source controls, and the 90-day absolute session cap in
+release notes. Call out migrations `0007`–`0009`, one forced re-sign-in, and the
+destructive downgrade limits from [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-rollback).
+
 ## 1. Prepare the required devcontainer
 
 From the repository root on the host, start the pinned development environment:
@@ -64,26 +77,39 @@ finding only when its advisory identifier, affected surface, and concise rationa
 are recorded in the release evidence. Never copy audit output containing private
 registry coordinates or environment data into the repository.
 
-## 5. Run live Seerr and Plex contracts
+## 5. Run live Seerr, Plex, and Jellyfin contracts
 
 Create `/tmp/tasterr-live.env` inside the devcontainer with mode `600`; never place it
 under the repository. It must supply the live Seerr URL, local account email/password,
 Seerr API key, a stored Plex token accepted by Seerr, a disposable movie identifier
 that the account may request, and the owner/managed/shared Plex tokens documented in
 `backend/tests/live/test_plex_live.py`. An optional known-available movie identifier
-enables the data-dependent availability case. Then run:
+enables the data-dependent availability case. Include the Jellyfin URL, API key,
+history user id (at least two played movies and two played episodes, with distinct
+play dates per type to verify newest-first ordering), and
+`TASTERR_LIVE_JELLYFIN_DISPOSABLE_USERS=true` documented in
+`backend/tests/live/test_jellyfin_live.py`. These tests create/delete disposable
+users and deliberately lock one out; obtain operator permission before running.
+Supply Jellyfin username/password for Seerr's `/auth/jellyfin` case, and exercise
+disabled Jellyfin/Plex login statuses on a disposable Seerr configuration using the
+flags documented in the live suite. Then run:
 
 ```console
 npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/tasterr-live.env; set +a; just test-live'
 ```
 
-Mandatory Seerr cases are local auth, invalid-session status, stored-Plex-token auth,
+Mandatory Seerr cases are local auth, Jellyfin auth, disabled media-server login
+refusal statuses, invalid-session status, stored-Plex-token auth,
 availability read, request-history read, and request-as-user attribution. Mandatory
 Plex cases cover owner, managed, and shared account/resource discovery, verified TLS
 and machine identity, local-account mapping, per-row history isolation, caller-scoped
 Continue Watching, merge timestamps, and canonical TMDB GUID mapping. The request
 case creates a real Seerr request and attempts cleanup, so choose a disposable title
-and verify cleanup afterward. Only a deeper pagination, available-title, or other
+and verify cleanup afterward. Mandatory Jellyfin cases cover auth/logout, user
+policy, played movie/episode queries, series provider ids, empty passwords, account
+lockout, deleted-user 404, and two users authenticating with one shared DeviceId
+while logging out one token. Record the tested Jellyfin version and verify every
+disposable account was deleted. Only a deeper pagination, available-title, or other
 explicitly documented data-precondition case may skip. Record only upstream versions
 and generic passed/skipped case names. If retained credentials have become stale or unavailable, a
 release owner may accept a recent complete automated baseline plus a fresh integrated
@@ -246,6 +272,11 @@ documented in [CONFIGURATION.md](CONFIGURATION.md). To roll back an image-only c
 set `TASTERR_IMAGE` to the preceding known-good digest and force-recreate the service
 against the existing volume. If a migration is not backward-compatible, stop the
 writer and restore the matching pre-upgrade backup before starting the old digest.
+For the unreleased account changes, follow the revision-specific `0009` → `0008`
+→ `0007` → `0006` downgrade limits in CONFIGURATION.md before starting an older
+image, or restore the matching backup. Downgrades can remove source preferences,
+Jellyfin accounts/history, users without Seerr, and sessions.
+
 Version 2.0 includes migration `0006`. To return to v1.1, use the v2 image to
 downgrade to `0005` before starting the old image, or restore the validated matching
 pre-upgrade backup. Do not start a v1.1 image directly on the v2 database.

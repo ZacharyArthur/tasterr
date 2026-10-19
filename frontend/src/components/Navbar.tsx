@@ -34,8 +34,9 @@ export function Navbar({ user }: { user: User }) {
 		// An explicit confirm gates the destructive wipe (media-browse spec).
 		if (
 			window.confirm(
-				"Reset your recommendations? This clears everything Tasterr has " +
-					"learned and starts over from your Seerr request history.",
+				"Reset your recommendations? This deletes all taste signals, " +
+					"including My List and Not interested, then re-imports history " +
+					"from your enabled sources. Your source preferences are kept.",
 			)
 		) {
 			reset.mutate();
@@ -65,34 +66,49 @@ export function Navbar({ user }: { user: User }) {
 						onClick={() => setMenuOpen((value) => !value)}
 						aria-haspopup="menu"
 						aria-expanded={menuOpen}
+						aria-label={user.display_name}
 						className="min-h-11 text-app-subtle transition-colors hover:text-app-text focus-visible:outline-2 focus-visible:outline-app-accent"
 					>
-						{user.display_name}
+						{user.display_name
+							.trim()
+							.split(/\s+/)
+							.slice(0, 2)
+							.map((part) => part[0])
+							.join("")
+							.toUpperCase()}
 					</button>
 					{menuOpen && (
-						<div
-							role="menu"
-							className="absolute right-0 top-full mt-2 w-56 rounded border border-app-border bg-app-panel p-1 shadow-lg"
-						>
-							{user.is_admin && (
+						<div className="absolute right-0 top-full mt-2 w-56 rounded border border-app-border bg-app-panel p-1 shadow-lg">
+							<p className="px-3 py-2 font-medium">{user.display_name}</p>
+							<div role="menu">
 								<Link
-									to="/settings"
+									to="/account"
 									role="menuitem"
 									onClick={() => setMenuOpen(false)}
 									className="block min-h-11 rounded px-3 py-2 text-app-text hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent"
 								>
-									Settings
+									Account
 								</Link>
-							)}
-							<button
-								role="menuitem"
-								type="button"
-								onClick={onReset}
-								disabled={reset.isPending}
-								className="min-h-11 w-full rounded px-3 py-2 text-left text-app-subtle transition-colors hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60"
-							>
-								Reset recommendations
-							</button>
+								{user.is_admin && (
+									<Link
+										to="/settings"
+										role="menuitem"
+										onClick={() => setMenuOpen(false)}
+										className="block min-h-11 rounded px-3 py-2 text-app-text hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent"
+									>
+										Settings
+									</Link>
+								)}
+								<button
+									role="menuitem"
+									type="button"
+									onClick={onReset}
+									disabled={reset.isPending}
+									className="min-h-11 w-full rounded px-3 py-2 text-left text-app-subtle transition-colors hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60"
+								>
+									Reset recommendations
+								</button>
+							</div>
 						</div>
 					)}
 				</div>
