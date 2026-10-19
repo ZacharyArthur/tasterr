@@ -7,7 +7,6 @@ entries when they ship.
 |---|---|---|
 | Starlette TestClient → httpx2 migration (currently a deprecation warning under pytest) | Upstream transition, non-failing today | dependency-bump chore |
 | `static_dir` default is a CWD-relative path | Container sets an absolute `STATIC_DIR`; only affects non-container runs, which are not a supported workflow yet | If local uvicorn runs ever become supported |
-| Source Compose custom container port | `docker-compose.yml` fixes the mapped target at 8000; changing `TASTERR_PORT` alone makes the listener unreachable. Keep it at 8000 and use `TASTERR_HTTP_PORT` for host-port changes. The published example already follows the listener port | Deployment bug fix with a custom-port contract test |
 | Richer where-to-watch categories | Catalog models retain rent/buy/free categories, but the detail UI still renders flatrate providers only | A dedicated detail presentation change |
 | Browser-level long-detail modal scroll regression | jsdom cannot verify layout scrolling; the unchanged overlay scroll CSS and body-lock lifecycle have unit coverage | Browser interaction E2E expansion |
 | Direct-detail Close then browser Back reopens the last detail | This is pre-existing history behavior outside the feedback fix; Close still returns Home as specified | Route-history UX polish, with a browser Back regression |

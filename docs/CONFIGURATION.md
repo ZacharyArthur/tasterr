@@ -24,9 +24,9 @@ supplies an optional default and `${VAR:?message}` rejects a missing requirement
 For example, `STATIC_DIR: "/app/static"` is an inline non-secret value. Keep
 `TASTERR_PORT` as substitution and set it in `.env`: an inline environment value
 does not supply the separate port mapping's substitution.
-The source-build `docker-compose.yml` currently fixes its container target at 8000;
-keep `TASTERR_PORT=8000` there and use `TASTERR_HTTP_PORT` to change the host port.
-The published example follows `TASTERR_PORT` for both listener and mapped target.
+Both source-build and published Compose use the resolved `TASTERR_PORT` for the
+container listener and mapped target, defaulting to 8000. `TASTERR_HTTP_PORT`
+independently controls host publication, defaulting to `127.0.0.1:8000`.
 Use `$$` for a literal dollar sign inline, and single-quote literal dollars in
 `.env`. Shell values override substitution values. With an alternate file, pass
 `--env-file` as well as setting `TASTERR_ENV_FILE`; keep relative paths beside the

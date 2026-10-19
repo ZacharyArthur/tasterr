@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Keep the fixed-port probes independent of the caller's listener setting.
+export TASTERR_PORT=8000
+
 # This smoke owns a unique Compose project, image tag, default network, env file,
 # and named volume. It never reads the deployment .env.
 suffix="${GITHUB_RUN_ID:-local}-$$-$(date +%s)"

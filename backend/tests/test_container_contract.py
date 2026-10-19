@@ -52,6 +52,7 @@ def _write_compose_env(
     *,
     network_name: str | None = None,
     http_port: str | None = None,
+    port: int | None = None,
 ) -> Path:
     env_file = tmp_path / "placeholder.env"
     values = [
@@ -65,6 +66,8 @@ def _write_compose_env(
     ]
     if http_port is not None:
         values.append(f"TASTERR_HTTP_PORT={http_port}")
+    if port is not None:
+        values.append(f"TASTERR_PORT={port}")
     if network_name is not None:
         values.append(f"TASTERR_MEDIA_NETWORK={network_name}")
     env_file.write_text("\n".join(values) + "\n", encoding="utf-8")
@@ -77,10 +80,16 @@ def _run_compose_config(
     external_network: bool,
     check: bool,
     compose_file: str = "docker-compose.yml",
+    shell_port: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     compose_files = ["-f", compose_file]
     if external_network:
         compose_files.extend(("-f", "docker-compose.seerr-network.yml"))
+    environment = {
+        key: value for key, value in os.environ.items() if key.upper() not in ENVIRONMENT_VARIABLES
+    }
+    if shell_port is not None:
+        environment["TASTERR_PORT"] = shell_port
     return subprocess.run(
         [
             "docker",
@@ -95,11 +104,7 @@ def _run_compose_config(
             "json",
         ],
         cwd=ROOT,
-        env={
-            key: value
-            for key, value in os.environ.items()
-            if key.upper() not in ENVIRONMENT_VARIABLES
-        },
+        env=environment,
         check=check,
         capture_output=True,
         text=True,
@@ -152,14 +157,15 @@ def test_published_compose_rejects_missing_required_values(tmp_path: Path, requi
     assert required in result.stderr
 
 
+@pytest.mark.parametrize("compose_file", ["docker-compose.yml", "compose.example.yaml"])
 def test_compose_contract_ignores_exported_deployment_values(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, compose_file: str
 ) -> None:
     for name in ENVIRONMENT_VARIABLES:
         monkeypatch.setenv(name, "invented-shell-value")
     env_file = _write_compose_env(tmp_path)
     result = _run_compose_config(
-        env_file, external_network=False, check=True, compose_file="compose.example.yaml"
+        env_file, external_network=False, check=True, compose_file=compose_file
     )
 
     assert "invented-shell-value" not in result.stdout + result.stderr
@@ -226,13 +232,45 @@ def test_compose_uses_managed_default_network_and_keeps_one_service(tmp_path: Pa
     ]
 
 
-def test_explicit_port_override_can_publish_to_lan(tmp_path: Path) -> None:
-    config = _compose_config(tmp_path, external_network=False, http_port="8000")
+@pytest.mark.parametrize(
+    ("env_port", "shell_port", "expected_port"),
+    [(None, None, 8000), (9000, None, 9000), (9000, "9100", 9100)],
+)
+def test_source_compose_aligns_listener_and_target_ports(
+    tmp_path: Path, env_port: int | None, shell_port: str | None, expected_port: int
+) -> None:
+    env_file = _write_compose_env(tmp_path, port=env_port)
+    result = _run_compose_config(
+        env_file, external_network=False, check=True, shell_port=shell_port
+    )
+    service = ComposeConfig.model_validate_json(result.stdout).services["tasterr"]
 
-    port = config.services["tasterr"].ports[0]
+    assert service.environment["TASTERR_PORT"] == str(expected_port)
+    assert service.ports[0].target == expected_port
+    assert service.ports[0].published == "8000"
+    assert service.ports[0].host_ip == "127.0.0.1"
+    assert service.environment["SEERR_API_KEY"] == "placeholder"
+
+
+@pytest.mark.parametrize(
+    ("http_port", "host_ip", "published"),
+    [
+        ("8000", None, "8000"),
+        ("127.0.0.1:8080", "127.0.0.1", "8080"),
+        ("192.0.2.10:8080", "192.0.2.10", "8080"),
+    ],
+)
+def test_explicit_port_override_changes_only_host_publication(
+    tmp_path: Path, http_port: str, host_ip: str | None, published: str
+) -> None:
+    config = _compose_config(tmp_path, external_network=False, http_port=http_port)
+
+    service = config.services["tasterr"]
+    assert service.environment["TASTERR_PORT"] == "8000"
+    port = service.ports[0]
     assert port.target == 8000
-    assert port.published == "8000"
-    assert port.host_ip is None
+    assert port.published == published
+    assert port.host_ip == host_ip
 
 
 def test_optional_override_joins_existing_seerr_network(tmp_path: Path) -> None:
@@ -276,6 +314,7 @@ def test_dockerfile_and_smoke_are_fail_closed() -> None:
     assert "COPY LICENSE /usr/share/licenses/tasterr/LICENSE" in dockerfile
 
     assert "trap cleanup EXIT INT TERM" in smoke
+    assert "export TASTERR_PORT=8000" in smoke
     assert "mktemp" in smoke
     assert 'project="tasterr-smoke-${suffix}"' in smoke
     assert "container-smoke-placeholder" in smoke
