@@ -1,9 +1,7 @@
 // Thin typed wrapper over fetch. Types come from the generated OpenAPI schema
 // (src/lib/api.gen.ts, regenerated via `just types`) — never hand-written twice.
-import type { components, paths } from "./api.gen";
+import type { components } from "./api.gen";
 
-export type HealthResponse =
-	paths["/api/v1/health"]["get"]["responses"]["200"]["content"]["application/json"];
 export type User = components["schemas"]["UserResponse"];
 export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
 export type JellyfinCredentials = components["schemas"]["JellyfinLoginRequest"];
@@ -29,7 +27,6 @@ export type SeasonSummary = components["schemas"]["SeasonSummary"];
 export type SearchResponse = components["schemas"]["SearchResponse"];
 export type MediaType = MediaSummary["media_type"];
 export type Availability = components["schemas"]["Availability"];
-export type AvailabilityStatus = Availability["status"];
 export type RequestResponse = components["schemas"]["RequestResponse"];
 export type RequestDestination = components["schemas"]["RequestDestination"];
 export type RequestOptions = components["schemas"]["RequestOptions"];
@@ -112,10 +109,6 @@ function putJson<T>(path: string, body: unknown): Promise<T> {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body),
 	});
-}
-
-export function getHealth(): Promise<HealthResponse> {
-	return request<HealthResponse>("/api/v1/health");
 }
 
 export function getAuthMethods(): Promise<AuthMethods> {

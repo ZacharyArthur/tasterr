@@ -4,7 +4,7 @@
 
 <h1 align="center">Tasterr</h1>
 
-<p align="center">Self-hosted discovery for TMDB and Seerr, with a learned taste profile for every household member.</p>
+<p align="center">Self-hosted discovery for TMDB, Plex, Jellyfin, and Seerr, with a learned taste profile for every household member.</p>
 
 <p align="center">
   <a href="https://github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml"><img alt="Gate" src="https://github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml/badge.svg"></a>
@@ -14,8 +14,13 @@
 </p>
 
 Tasterr is a self-hosted, Netflix-style discovery front end for a household media
-stack. It combines the TMDB catalog with linked Seerr accounts, library state, and requests,
+stack. It combines the TMDB catalog with optional linked Plex, Seerr, and Jellyfin
+accounts, library state, and requests,
 then learns a separate taste profile for each signed-in user.
+
+The pinned `2.3.1` image is the current published release. Linked accounts, direct
+Plex/Jellyfin sign-in, and per-member taste sources described here are unreleased;
+see [unreleased notes](docs/releases/unreleased.md) before upgrading.
 
 The current source supports Plex, Jellyfin, or local Seerr sign-in, composed discovery rails,
 search, title details, availability badges, requests attributed to the signed-in
@@ -34,11 +39,23 @@ an administrator even without Seerr.
 Jellyfin links learn taste from played movies and episodes (collapsed to their
 series), with the same bounded background sync and **Because You Watched** rails.
 Only the Jellyfin user id is retained; the sign-in token is immediately logged out.
-Jellyfin administrators also administer Tasterr. Jellyfin playback links, avatars,
-and Continue Watching are not supported.
+Jellyfin administrators also administer Tasterr. All member avatars render as
+initials. Jellyfin playback links, avatars, and Continue Watching are not supported.
 
 Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
 history or Plex progress, persist household groups, or run more than one process.
+
+Members use `/account` to link/unlink providers, delete their local account, and
+choose whether Seerr request history, Plex/Jellyfin watch history, and browsing
+activity shape their taste. All sources start on. Turning one off stops collection
+and removes its influence without deleting stored history; clearing history is a
+separate action. Explicit requests, My List/onboarding picks, and Not interested
+always count. Sessions slide for 30 days and expire at a 90-day absolute cap.
+
+Upgrades apply migrations `0007`–`0009` automatically and require one forced
+re-sign-in. Back up first: rollback across these revisions requires a downgrade or
+restoring the matching backup, and can delete accounts/history. See the
+[upgrade and rollback reference](docs/CONFIGURATION.md#upgrade-and-rollback).
 
 ## Screenshots
 
@@ -74,7 +91,7 @@ reachable through a routable LAN hostname or address.
    ```
 
 Open `http://127.0.0.1:8000`, choose **Continue with Plex**, **Continue with Jellyfin**, or **Continue with Seerr**,
-and use the Settings screen as the pinned Plex owner or a Seerr administrator to select the region, streaming services,
+and use the Settings screen as the pinned Plex owner, Seerr administrator, or Jellyfin administrator to select the region, streaming services,
 rails, theme, and accent. SQLite migrations run automatically on first boot.
 
 Setting `PLEX_SERVER_ID` restricts every Plex sign-in and link to accounts that can
@@ -116,55 +133,22 @@ for Seerr on another host.
 
 ### Run the published image
 
-To deploy a release without cloning the repository, save this as `compose.yaml`
-and create `.env` from [`.env.example`](.env.example), using the configuration
-for your chosen sign-in method above. Pin the desired version from the
-[Tasterr GHCR package](https://github.com/users/ZacharyArthur/packages/container/package/tasterr):
-
-```yaml
-services:
-  tasterr:
-    image: ghcr.io/zacharyarthur/tasterr:2.3.1
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8000:8000"
-    env_file:
-      - .env
-    volumes:
-      - tasterr-data:/data
-
-volumes:
-  tasterr-data:
-```
-
-Tasterr itself reads ordinary process environment variables and does not require a
-`.env` file. The example above asks Compose to load that file. If a service manager
-or container platform injects variables directly, set the same names on the Tasterr
-process/container and omit `env_file`. To use exported host variables with Compose,
-replace the `env_file` block with this explicit mapping:
-
-```yaml
-    environment:
-      - TMDB_API_KEY
-      - PLEX_SERVER_ID
-      - SEERR_INTERNAL_URL
-      - SEERR_EXTERNAL_URL
-      - SEERR_API_KEY
-      - TASTERR_SECRET_KEY
-```
-
-Host variables are not passed into a Compose service automatically. Add any optional
-variables from the [configuration table](docs/CONFIGURATION.md) to the mapping when
-needed.
+Save [compose.example.yaml](compose.example.yaml) as `compose.yaml` in an empty
+directory for a new deployment. For an existing deployment, replace `compose.yaml`
+in place and keep the same Compose project name and data volume. Create `.env`
+beside it from [`.env.example`](.env.example) only for a new deployment; otherwise
+keep your existing `.env`. Replace placeholders in a new file and configure Seerr
+for `2.3.1`. The example documents every setting, inline non-secret values, and
+file-based environment injection.
 
 ```console
-docker compose pull
 docker compose up -d
 curl --fail http://127.0.0.1:8000/api/v1/health
 ```
 
-Keep the loopback bind when using a reverse proxy or tunnel. Replace it with a
-specific LAN bind only when direct household-network access is intentional.
+The example pins the published `2.3.1` image; source features marked unreleased
+require a later release containing them. See the [configuration
+reference](docs/CONFIGURATION.md) for networking, secrets, and upgrades.
 
 ## Living documentation
 

@@ -271,7 +271,7 @@ class SeerrServerDetail(BaseModel):
 
 @dataclass
 class SeerrHistoricalRequest:
-    """One of the member's past requests — the cold-start seed's input."""
+    """One of the member's past requests — the request-history sync's input."""
 
     media_type: MediaType
     tmdb_id: int
@@ -279,7 +279,7 @@ class SeerrHistoricalRequest:
 
 
 HISTORY_PAGE_SIZE = 50
-HISTORY_MAX_ROWS = 200  # the seed only needs recent taste, not an archive
+HISTORY_MAX_ROWS = 200  # bounded recent request history, not an archive
 
 
 class SeerrClient:

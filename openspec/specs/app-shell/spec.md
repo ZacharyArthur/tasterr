@@ -1,7 +1,7 @@
 # app-shell Specification
 
 ## Purpose
-TBD - created by archiving change m0-scaffold. Update Purpose after archive.
+Provide a responsive, accessible household discovery shell with authenticated navigation, title overlays, and account controls.
 
 ## Requirements
 

@@ -22,7 +22,7 @@ are never committed; see SECURITY.md working notes):
 
 Validates the contract the recorded fixtures in tests/test_clients_seerr.py
 assume — auth (local login, the 403-not-401 deviation), M3 availability reads,
-request-as-user attribution, and the M4 request-history read the cold-start seed
+request-as-user attribution, and the M4 request-history read the request-history sync
 consumes — and prints the Seerr version tested. The interactive PIN half of the
 Plex flow still needs a human at plex.tv; supply a token obtained from any
 signed-in Plex client to cover the Seerr side. Known-good version: 3.3.0.
@@ -338,7 +338,7 @@ async def test_available_title_has_a_media_record() -> None:
 
 @requires_history
 async def test_request_history_read_contract() -> None:
-    """The M4 cold-start seed's read: the global key + explicit `requestedBy`
+    """The M4 request-history sync's read: the global key + explicit `requestedBy`
     filter returns only the member's requests, paginated, with the fields the
     seed consumes (tmdb id, movie/tv type, created-at). Read-only."""
     async with httpx.AsyncClient(timeout=10.0) as http:

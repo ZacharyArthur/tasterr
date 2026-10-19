@@ -1,7 +1,7 @@
 # taste-signals Specification
 
 ## Purpose
-TBD - created by archiving change m4-taste. Update Purpose after archive.
+Record bounded, caller-scoped taste events and canonical imported history with explicit weights, idempotency, and collection preferences.
 
 ## Requirements
 

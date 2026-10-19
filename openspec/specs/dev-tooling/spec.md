@@ -1,7 +1,7 @@
 # dev-tooling Specification
 
 ## Purpose
-TBD - created by archiving change m0-scaffold. Update Purpose after archive.
+Keep development reproducible in the devcontainer and enforce backend, frontend, browser, container, and generated-contract quality gates.
 
 ## Requirements
 

@@ -1,7 +1,7 @@
 # taste-onboarding Specification
 
 ## Purpose
-TBD - created by archiving change add-plex-play-and-taste-onboarding. Update Purpose after archive.
+Offer an optional inline taste picker after history sync, recording deliberate selections as watchlist signals while preserving uninterrupted browsing.
 
 ## Requirements
 

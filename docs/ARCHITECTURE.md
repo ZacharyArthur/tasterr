@@ -3,7 +3,7 @@
 Tasterr is one FastAPI process serving both a compiled React SPA and `/api/v1/*`.
 SQLite, in-process caches, and bounded asyncio background work keep deployment to one
 container. Running multiple workers is unsupported because rate limits, caches,
-single-flight seeding, and background task ownership are process-local.
+single-flight history sync, and background task ownership are process-local.
 
 ```mermaid
 flowchart LR
@@ -107,7 +107,7 @@ rebuildable SQLite caches; raw signals remain the durable source.
 Sign-in, linking, and Home evaluate a bounded incremental Seerr request-history
 sync. Each link has a six-hour attempt throttle and a success watermark with a
 24-hour overlap. Imports skip titles already requested in Tasterr. Per-user
-single-flight bookkeeping prevents duplicate seeds; failures never prevent browsing.
+single-flight bookkeeping prevents duplicate imports; failures never prevent browsing.
 Reset cancels and awaits history tasks under a scheduling guard, clears taste and
 link timestamps, then schedules normal background imports, Seerr before Plex and Jellyfin.
 
@@ -146,12 +146,28 @@ minutes. Progress is never stored. The unexpected-picks provider and caller-incl
 household blend reuse the existing profile/scoring/diversity pipeline. Household
 selection stays in component state; only the final standard rail crosses the API.
 
+The `/account` page manages proven provider links, unlinking, local account
+deletion, and four per-member taste sources (Seerr/Plex/Jellyfin history and
+browsing). `users.taste_excluded_sources` holds the disabled sources; deliberate
+request/watchlist/not-interested signals always count. Disabling cancels imports
+and filters profiles/candidate anchors without deleting history; browsing stops
+recording detail opens. Re-enabling resets link sync times. Clearing a source
+deletes its signals but keeps its watermark and toggle. Watched-title exclusions
+persist while the watched rows exist, even when the source is disabled.
+Profile publication rechecks eligible inputs under SQLite's write lock, so a
+concurrent preference change, clear, or reset cannot publish stale taste.
+
 ## SQLite and process lifecycle
 
 At lifespan startup the process opens one async SQLAlchemy engine, runs Alembic to
 head, creates the session factory, and sweeps expired sessions. The database lives at
-`DATABASE_PATH`, `/data/tasterr.db` in the production image. Lifespan shutdown closes
-the shared HTTP client and disposes the engine.
+`DATABASE_PATH`, `/data/tasterr.db` in the production image. Migration `0007` creates
+links and deletes sessions once while preserving taste;
+`0008` adds Jellyfin signal uniqueness; `0009` adds source preferences. Rollback
+requires the matching backup or explicit downgrade, with account/history deletion
+limits documented in [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-rollback).
+Lifespan shutdown cancels history tasks, closes the shared HTTP client and disposes
+the engine.
 
 SQLite is appropriate for one household and one writer process. The named volume is
 the only durable container state. Backups must stop the writer (or use SQLite's

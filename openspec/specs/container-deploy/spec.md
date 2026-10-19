@@ -1,7 +1,7 @@
 # container-deploy Specification
 
 ## Purpose
-TBD - created by archiving change m0-scaffold. Update Purpose after archive.
+Ship one non-root container serving the API and SPA, with persistent SQLite storage, safe networking defaults, and a verifiable deployment contract.
 
 ## Requirements
 

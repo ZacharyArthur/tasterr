@@ -1,7 +1,7 @@
 # household-recommendations Specification
 
 ## Purpose
-TBD - created by archiving change v2-plex-aware-personalization. Update Purpose after archive.
+Blend the caller and selected household members into ephemeral recommendations using their eligible taste profiles without persisting groups or exposing source preferences.
 
 ## Requirements
 

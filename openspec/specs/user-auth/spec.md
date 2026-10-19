@@ -1,7 +1,7 @@
 # user-auth Specification
 
 ## Purpose
-TBD - created by archiving change m1-auth. Update Purpose after archive.
+Authenticate members through configured Plex, Seerr, or Jellyfin providers, resolve proven linked identities, and protect access with bounded opaque sessions and explicit admission checks.
 
 ## Requirements
 

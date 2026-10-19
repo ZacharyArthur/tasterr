@@ -74,14 +74,18 @@ function openMenuAndReset() {
 
 test("reset stays put until the user confirms", () => {
 	const fetchMock = stubFetch();
-	vi.stubGlobal(
-		"confirm",
-		vi.fn(() => false),
-	);
+	const confirm = vi.fn(() => false);
+	vi.stubGlobal("confirm", confirm);
 	renderNavbar();
 
 	openMenuAndReset();
 
+	expect(confirm).toHaveBeenCalledWith(
+		expect.stringContaining("including My List and Not interested"),
+	);
+	expect(confirm).toHaveBeenCalledWith(
+		expect.stringContaining("from your enabled sources"),
+	);
 	expect(fetchMock).not.toHaveBeenCalled();
 });
 

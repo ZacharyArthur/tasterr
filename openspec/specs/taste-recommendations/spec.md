@@ -1,7 +1,7 @@
 # taste-recommendations Specification
 
 ## Purpose
-TBD - created by archiving change m4-taste. Update Purpose after archive.
+Build explainable per-member recommendations from eligible taste signals with decay, diversity, source controls, and graceful fallback during background sync or upstream failures.
 
 ## Requirements
 

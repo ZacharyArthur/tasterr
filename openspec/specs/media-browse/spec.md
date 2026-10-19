@@ -1,7 +1,7 @@
 # media-browse Specification
 
 ## Purpose
-TBD - created by archiving change m2-browse. Update Purpose after archive.
+Let signed-in members browse composed discovery rails, search titles, inspect details, and act on availability and request controls without upstream failures blanking the feed.
 
 ## Requirements
 

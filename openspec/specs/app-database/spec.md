@@ -1,7 +1,7 @@
 # app-database Specification
 
 ## Purpose
-TBD - created by archiving change m0-scaffold. Update Purpose after archive.
+Persist local users, linked accounts, sessions, taste signals, and rebuildable profiles in SQLite, with safe schema upgrades and explicit downgrade limits.
 
 ## Requirements
 

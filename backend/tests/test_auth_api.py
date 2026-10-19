@@ -925,13 +925,13 @@ def test_session_cookie_secure_follows_scheme(tmp_path: Path) -> None:
     assert "secure" in secure.headers["set-cookie"].lower()
 
 
-# --- Cold-start seed hook (M4) ---
+# --- Incremental request-history sync scheduling ---
 
 
-def test_logins_schedule_the_cold_start_seed(
+def test_logins_schedule_the_request_history_sync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both login paths hand the user off to the seed scheduler after the
+    """Plex and local Seerr login hand the user off to the history scheduler after the
     response is assembled — the login itself never waits on (or fails with)
     the import, which is unit-tested in test_recommend_seed.py."""
     scheduled: list[int] = []

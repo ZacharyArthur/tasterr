@@ -545,7 +545,7 @@ async def test_create_request_unparseable_body_defaults_pending() -> None:
     assert code == 2  # MEDIA_STATUS_PENDING
 
 
-# ── SeerrClient: request history (global API key, cold-start seed) ───────────
+# ── SeerrClient: request history (global API key, request-history sync) ───────────
 
 
 def _history_row(

@@ -106,8 +106,8 @@ class Signal(Base):
     """Append-only per-user interaction event (SPEC §5). `weight` is stored
     per row so history keeps the weight it earned if constants are retuned.
     The partial unique index makes the at-most-one-row-per-title kinds
-    (toggles + seed) a database guarantee, so concurrent writers — a
-    background login-seed racing a reset, or two tabs toggling — cannot
+    (toggles + imported history) a database guarantee, so concurrent writers — a
+    background history sync racing a reset, or two tabs toggling — cannot
     duplicate a title's influence."""
 
     __tablename__ = "signals"

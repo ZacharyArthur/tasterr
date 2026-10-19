@@ -4,6 +4,19 @@ This procedure is for stable releases. The current package version is
 `2.3.1`, its Git tag is `v2.3.1`, and its image is published by the `image` workflow
 only after all release changes are squash-merged to protected `main`.
 
+The four archived account changes are tracked in [unreleased notes](releases/unreleased.md).
+Choose the next version during release preparation; do not relabel `2.3.1` as
+containing them. Update backend `pyproject.toml` and `uv.lock`, frontend
+`package.json` and `package-lock.json`, the published tag in `compose.example.yaml`,
+the release-boundary notes in `.env.example` and README, this procedure, the supported line
+in root `SECURITY.md`, and the corresponding docs/release assertions together.
+Create the versioned evidence file only after selecting the version.
+
+Review linked-account and `/account` behavior, optional Plex/Seerr/Jellyfin sign-in,
+initials avatars, taste-source controls, and the 90-day absolute session cap in
+release notes. Call out migrations `0007`–`0009`, one forced re-sign-in, and the
+destructive downgrade limits from [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-rollback).
+
 ## 1. Prepare the required devcontainer
 
 From the repository root on the host, start the pinned development environment:
@@ -259,6 +272,11 @@ documented in [CONFIGURATION.md](CONFIGURATION.md). To roll back an image-only c
 set `TASTERR_IMAGE` to the preceding known-good digest and force-recreate the service
 against the existing volume. If a migration is not backward-compatible, stop the
 writer and restore the matching pre-upgrade backup before starting the old digest.
+For the unreleased account changes, follow the revision-specific `0009` → `0008`
+→ `0007` → `0006` downgrade limits in CONFIGURATION.md before starting an older
+image, or restore the matching backup. Downgrades can remove source preferences,
+Jellyfin accounts/history, users without Seerr, and sessions.
+
 Version 2.0 includes migration `0006`. To return to v1.1, use the v2 image to
 downgrade to `0005` before starting the old image, or restore the validated matching
 pre-upgrade backup. Do not start a v1.1 image directly on the v2 database.

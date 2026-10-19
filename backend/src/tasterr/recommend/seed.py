@@ -19,7 +19,7 @@ HISTORY_THROTTLE = timedelta(hours=6)
 
 
 def reserve_seed(seeding: set[int], user_id: int) -> bool:
-    """Synchronously reserve one user's background seed before scheduling it."""
+    """Synchronously reserve one user's history sync before scheduling it."""
     if user_id in seeding:
         return False
     seeding.add(user_id)
@@ -34,7 +34,7 @@ async def seed_user(
     seerr_user_id: int,
     since: datetime | None = None,
 ) -> int:
-    """Import the member's request history as backdated seed signals, then
+    """Import the member's request history as backdated signals, then
     build vectors and materialize the profile. Returns the signals actually
     committed — a failed materialization doesn't lose the count (the profile
     is a cache that self-heals on the next read). Raises on import failure —
@@ -67,7 +67,7 @@ async def seed_user(
     await finish_io(db.commit())
     if written:
         try:
-            await taste.recompute_profile(user_id)  # pre-builds the seeded vectors
+            await taste.recompute_profile(user_id)  # pre-builds imported title vectors
             await finish_io(db.commit())
         except Exception:  # signals are durable; the profile rebuilds on read
             logger.error("seed: profile materialization failed")
@@ -114,7 +114,7 @@ async def seed_in_background(
             link.sync_synced_at = cutoff
             await finish_io(db.commit())
             logger.info("seed: imported %s signals", written)
-    except Exception:  # background: degrade to unseeded, retry next login/reset
+    except Exception:  # background: keep browsing; retry on the next eligible trigger
         logger.error("seed: import failed")
     finally:
         seeding.discard(user_id)

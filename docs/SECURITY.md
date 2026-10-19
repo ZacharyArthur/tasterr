@@ -17,7 +17,7 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
   browser inside the household; XSS smuggled through third-party metadata (TMDB text is
   untrusted input); supply-chain compromise of a dependency.
 - **Explicitly not defended:** an attacker with shell/file access to the host — they own the
-  SQLite file and the env. (Encryption-at-rest for Plex tokens raises the bar, not a wall.)
+  SQLite file and the env. (Encryption-at-rest for linked credentials raises the bar, not a wall.)
 
 ## Non-negotiables (mechanically enforced)
 
@@ -140,6 +140,11 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       MIME-sniffing, referrer, and permissions policy; HSTS appears only on trusted
       effective HTTPS.
 
+- [ ] Display names render as text and all avatars render as initials; internal
+      provider avatar URLs never become browser image sources.
+- [ ] `/account` taste controls remain caller-scoped; disabling cancels collection,
+      clearing requires confirmation, and household endpoints expose no source settings.
+
 ### Database & migrations
 
 - [ ] SQLAlchemy expressions only — no string-built SQL, ever.
@@ -152,6 +157,13 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       holding the per-user scheduling guard through commit.
 - [ ] Backup/restore instructions stop the writer or use SQLite's backup API, run an
       integrity check, preserve runtime ownership, and treat backups as sensitive.
+
+Migration `0007` forces one re-sign-in and stores no old session credentials on
+new links. Revisions `0008`–`0009` add Jellyfin signals and taste-source preferences.
+An image-only rollback across these revisions is unsupported; `0008` downgrade
+deletes Jellyfin history/links and Jellyfin-only users, while `0007` downgrade
+deletes users without Seerr links and every session. Follow the stopped-writer,
+validated-backup procedure in [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-rollback).
 
 ### Dependencies & build
 

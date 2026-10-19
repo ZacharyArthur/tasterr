@@ -34,8 +34,9 @@ export function Navbar({ user }: { user: User }) {
 		// An explicit confirm gates the destructive wipe (media-browse spec).
 		if (
 			window.confirm(
-				"Reset your recommendations? This clears everything Tasterr has " +
-					"learned and starts over from your Seerr request history.",
+				"Reset your recommendations? This deletes all taste signals, " +
+					"including My List and Not interested, then re-imports history " +
+					"from your enabled sources. Your source preferences are kept.",
 			)
 		) {
 			reset.mutate();

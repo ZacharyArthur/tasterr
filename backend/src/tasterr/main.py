@@ -130,8 +130,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # A separate bounded cache for short-TTL Seerr availability reads, so they
     # never evict the longer-lived TMDB entries (and vice versa).
     app.state.seerr_cache = Cache()
-    # Cold-start seed bookkeeping (M4): per-user single-flight + strong refs
-    # so fire-and-forget seed tasks aren't garbage-collected mid-import.
+    # Seerr history sync uses per-user single-flight and strong task references
+    # so background imports aren't garbage-collected mid-flight.
     app.state.seeding = set()
     app.state.seed_tasks = {}
     app.state.history_locks = WeakValueDictionary()

@@ -4,6 +4,8 @@ import re
 import tomllib
 from pathlib import Path
 
+from tests.test_release_version import VERSION
+
 from tasterr.settings import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +16,7 @@ COMPOSE_VARIABLES = {
     "TASTERR_HTTP_PORT",
     "TASTERR_ENV_FILE",
 }
+ENVIRONMENT_VARIABLES = {name.upper() for name in Settings.model_fields} | COMPOSE_VARIABLES
 
 
 def _read(path: Path) -> str:
@@ -30,7 +33,7 @@ def _env_example_variables() -> set[str]:
 
 def test_configuration_documents_every_app_and_compose_variable() -> None:
     configuration = _read(DOCS / "CONFIGURATION.md")
-    expected = {name.upper() for name in Settings.model_fields} | COMPOSE_VARIABLES
+    expected = ENVIRONMENT_VARIABLES
 
     assert expected == _env_example_variables()
     missing = {name for name in expected if f"`{name}`" not in configuration}
@@ -56,12 +59,19 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "A shared Docker network is not required" in readme
     assert "TASTERR_HTTP_PORT=8000" in readme
     assert "github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml/badge.svg" in readme
-    assert "image: ghcr.io/zacharyarthur/tasterr:2.3.1" in readme
-    assert '- "127.0.0.1:8000:8000"' in readme
-    assert "tasterr-data:/data" in readme
-    assert "does not require a\n`.env` file" in readme
-    assert "Host variables are not passed into a Compose service automatically" in readme
-    assert "      - TMDB_API_KEY" in readme
+    assert "](compose.example.yaml)" in readme
+    assert "as `compose.yaml` in an empty" in readme
+    assert "keep your existing `.env`" in readme
+    assert "in place and keep the same Compose project name and data volume" in readme
+    assert "docker compose up -d\n" in readme
+    example = _read(ROOT / "compose.example.yaml")
+    assert f"image: ${{TASTERR_IMAGE:-ghcr.io/zacharyarthur/tasterr:{VERSION}}}" in example
+    assert '"${TASTERR_HTTP_PORT:-127.0.0.1:8000}:${TASTERR_PORT:-8000}"' in example
+    assert "tasterr-data:/data" in example
+    assert "env_file: ${TASTERR_ENV_FILE:-.env}" in example
+    assert "Host variables are not passed into a Compose service automatically" in example
+    assert "${TMDB_API_KEY:?" in example
+    assert "${TASTERR_SECRET_KEY:?" in example
     assert 'src="frontend/public/favicon.svg"' in readme
     assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />' in index
     assert (ROOT / "frontend" / "public" / "favicon.svg").is_file()
@@ -192,3 +202,22 @@ def test_plex_operator_docs_cover_privacy_recovery_and_release_order() -> None:
         assert term in security
     assert "Per-server Plex history watermarks" in decisions
     assert "Fuzzy title/year fallback" in decisions
+
+
+def test_published_compose_documents_every_setting_and_compose_variable() -> None:
+    example = _read(ROOT / "compose.example.yaml")
+    expected = ENVIRONMENT_VARIABLES
+    documented = set(re.findall(r"\b[A-Z][A-Z_]+\b", example))
+
+    assert not (expected - documented), f"compose.example.yaml is missing: {expected - documented}"
+
+
+def test_account_operator_docs_cover_unreleased_upgrade_and_member_controls() -> None:
+    for path in (ROOT / "README.md", DOCS / "CONFIGURATION.md", DOCS / "ARCHITECTURE.md"):
+        text = _read(path)
+        for term in ("/account", "Jellyfin", "initials", "0007", "0009"):
+            assert term in text, f"{path.name} is missing {term}"
+        assert re.search(r"90-day absolute|absolutely 90 days", text), path.name
+    notes = _read(DOCS / "releases" / "unreleased.md")
+    for term in ("PLEX_SERVER_ID", "JELLYFIN_ALLOW_EMPTY_PASSWORD", "0007", "0008", "0009"):
+        assert term in notes

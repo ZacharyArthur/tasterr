@@ -5,7 +5,10 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
+from tests.test_docs import ENVIRONMENT_VARIABLES
+from tests.test_release_version import VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "Dockerfile"
@@ -31,6 +34,7 @@ class ComposeService(BaseModel):
     volumes: list[ComposeMount]
     networks: dict[str, object | None]
     ports: list[ComposePort]
+    environment: dict[str, str | None]
 
 
 class ComposeNetwork(BaseModel):
@@ -68,9 +72,13 @@ def _write_compose_env(
 
 
 def _run_compose_config(
-    env_file: Path, *, external_network: bool, check: bool
+    env_file: Path,
+    *,
+    external_network: bool,
+    check: bool,
+    compose_file: str = "docker-compose.yml",
 ) -> subprocess.CompletedProcess[str]:
-    compose_files = ["-f", "docker-compose.yml"]
+    compose_files = ["-f", compose_file]
     if external_network:
         compose_files.extend(("-f", "docker-compose.seerr-network.yml"))
     return subprocess.run(
@@ -87,11 +95,100 @@ def _run_compose_config(
             "json",
         ],
         cwd=ROOT,
-        env=os.environ.copy(),
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key.upper() not in ENVIRONMENT_VARIABLES
+        },
         check=check,
         capture_output=True,
         text=True,
     )
+
+
+@pytest.mark.parametrize("external_network", [False, True])
+def test_published_compose_renders_with_placeholder_environment(
+    tmp_path: Path, external_network: bool
+) -> None:
+    env_file = _write_compose_env(
+        tmp_path, network_name="contract-media" if external_network else None
+    )
+    # Exercise the example's pinned default rather than the source-image override.
+    env_file.write_text(
+        env_file.read_text().replace("TASTERR_IMAGE=tasterr:contract\n", ""), encoding="utf-8"
+    )
+    result = _run_compose_config(
+        env_file, external_network=external_network, check=True, compose_file="compose.example.yaml"
+    )
+    config = ComposeConfig.model_validate_json(result.stdout)
+    assert set(config.services) == {"tasterr"}
+    service = config.services["tasterr"]
+    assert service.image == f"ghcr.io/zacharyarthur/tasterr:{VERSION}"
+    assert service.ports[0].host_ip == "127.0.0.1"
+    assert service.ports[0].target == 8000
+    assert any(mount.target == "/data" and mount.type == "volume" for mount in service.volumes)
+    assert service.environment["TMDB_API_KEY"] == "placeholder"
+    assert service.environment["TASTERR_SECRET_KEY"] == "placeholder"
+    # Passed only through env_file, not the example's environment mapping.
+    assert service.environment["SEERR_API_KEY"] == "placeholder"
+    if external_network:
+        assert config.networks["seerr"] == ComposeNetwork(name="contract-media", external=True)
+    else:
+        assert set(service.networks) == {"default"}
+
+
+@pytest.mark.parametrize("required", ["TMDB_API_KEY", "TASTERR_SECRET_KEY"])
+def test_published_compose_rejects_missing_required_values(tmp_path: Path, required: str) -> None:
+    env_file = _write_compose_env(tmp_path)
+    env_file.write_text(
+        env_file.read_text().replace(f"{required}=placeholder\n", f"{required}=\n"),
+        encoding="utf-8",
+    )
+    result = _run_compose_config(
+        env_file, external_network=False, check=False, compose_file="compose.example.yaml"
+    )
+
+    assert result.returncode != 0
+    assert required in result.stderr
+
+
+def test_compose_contract_ignores_exported_deployment_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ENVIRONMENT_VARIABLES:
+        monkeypatch.setenv(name, "invented-shell-value")
+    env_file = _write_compose_env(tmp_path)
+    result = _run_compose_config(
+        env_file, external_network=False, check=True, compose_file="compose.example.yaml"
+    )
+
+    assert "invented-shell-value" not in result.stdout + result.stderr
+    service = ComposeConfig.model_validate_json(result.stdout).services["tasterr"]
+    assert service.environment["TMDB_API_KEY"] == "placeholder"
+    assert service.environment["TASTERR_SECRET_KEY"] == "placeholder"
+    assert service.image == "tasterr:contract"
+    assert service.ports[0].host_ip == "127.0.0.1"
+
+
+def test_published_compose_supports_inline_nonsecret_and_env_port(tmp_path: Path) -> None:
+    env_file = _write_compose_env(tmp_path)
+    with env_file.open("a", encoding="utf-8") as file:
+        file.write("TASTERR_PORT=9000\nSTATIC_DIR=/unused-from-env-file\n")
+    compose_file = tmp_path / "compose.yaml"
+    compose_file.write_text(
+        (ROOT / "compose.example.yaml")
+        .read_text(encoding="utf-8")
+        .replace('# STATIC_DIR: "/app/static"', 'STATIC_DIR: "/app/static"'),
+        encoding="utf-8",
+    )
+    result = _run_compose_config(
+        env_file, external_network=False, check=True, compose_file=str(compose_file)
+    )
+    service = ComposeConfig.model_validate_json(result.stdout).services["tasterr"]
+
+    assert service.environment["STATIC_DIR"] == "/app/static"
+    assert service.environment["TASTERR_PORT"] == "9000"
+    assert service.ports[0].target == 9000
 
 
 def _compose_config(

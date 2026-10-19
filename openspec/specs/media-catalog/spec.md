@@ -1,8 +1,10 @@
 # media-catalog Specification
 
 ## Purpose
-TBD - created by archiving change m2-browse. Update Purpose after archive.
+Normalize and cache TMDB catalog metadata into typed, secret-free movie and series models for discovery, search, and detail views.
+
 ## Requirements
+
 ### Requirement: TMDB access is isolated behind the client boundary
 
 The system SHALL perform all TMDB access through a single client module in

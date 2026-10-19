@@ -59,7 +59,7 @@ async def record_signal(
     created_at: datetime | None = None,
 ) -> bool:
     """Record a signal honoring per-kind semantics; returns whether a row was
-    written. Toggle/seed re-adds and same-day detail reopens are successful
+    written. Toggle/history re-adds and same-day detail reopens are successful
     no-ops; watch facts move their one title row only to a newer watch time.
     `created_at` backdates server imports so decay prices them honestly
     (only server imports may backdate — the detail-open dedup window derives from the
@@ -71,7 +71,7 @@ async def record_signal(
     if kind in UNIQUE_PER_TITLE_KINDS:
         # The database decides (ux_signals_unique_per_title): there is no
         # check-then-insert to race, so concurrent sessions — a background
-        # login-seed vs. an inline reset — cannot duplicate a title's row.
+        # history import vs. another import — cannot duplicate a title's row.
         statement = sqlite_insert(Signal).values(
             user_id=user_id,
             tmdb_id=tmdb_id,
