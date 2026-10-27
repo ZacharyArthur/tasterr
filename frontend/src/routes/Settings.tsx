@@ -43,6 +43,7 @@ export function Settings() {
 				...settings.data.settings,
 				appearance: settings.data.settings.appearance ?? DEFAULT_APPEARANCE,
 				hide_library_items: settings.data.settings.hide_library_items ?? false,
+				hide_watched_items: settings.data.settings.hide_watched_items ?? true,
 				excluded_service_ids: settings.data.settings.excluded_service_ids ?? [],
 			});
 		}
@@ -81,6 +82,7 @@ export function Settings() {
 	const pending = save.isPending;
 	const lockedFields = settings.data.locked_fields ?? [];
 	const libraryLocked = lockedFields.includes("hide_library_items");
+	const watchedLocked = lockedFields.includes("hide_watched_items");
 	const servicesLocked = lockedFields.includes("excluded_service_ids");
 	const excludedIds = draft.excluded_service_ids ?? [];
 	const exclusionServices = [
@@ -189,6 +191,27 @@ export function Settings() {
 					{libraryLocked && (
 						<p className="mt-2 text-sm text-app-subtle">
 							Library hiding is controlled by an environment variable.
+						</p>
+					)}
+					<label className="mt-4 flex min-h-11 items-center gap-3 text-app-text">
+						<input
+							type="checkbox"
+							checked={draft.hide_watched_items ?? true}
+							disabled={pending || watchedLocked}
+							onChange={(event) =>
+								setDraft({ ...draft, hide_watched_items: event.target.checked })
+							}
+							className="h-5 w-5 accent-app-accent"
+						/>
+						Hide titles members have watched
+					</label>
+					<p className="text-sm text-app-subtle">
+						Each member's own watched titles are hidden from their discovery.
+						Not interested always hides a title from discovery.
+					</p>
+					{watchedLocked && (
+						<p className="mt-2 text-sm text-app-subtle">
+							Watched-title hiding is controlled by an environment variable.
 						</p>
 					)}
 					<fieldset disabled={pending || servicesLocked} className="mt-6">

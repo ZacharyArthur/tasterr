@@ -8,21 +8,24 @@ app.state; the TMDB api_key comes from settings and never leaves the server.
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.api.availability import AvailabilityDep
 from tasterr.api.runtime_settings import RuntimeSettingsDep
-from tasterr.auth.deps import AuthedSession, require_session
+from tasterr.auth.deps import AuthedSession, get_db, require_session
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.tmdb import TmdbClient
+from tasterr.recommend import store
 from tasterr.settings import Settings, get_settings
 
 
-def get_catalog(
+async def get_catalog(
     _authed: Annotated[AuthedSession, Depends(require_session)],
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     runtime: RuntimeSettingsDep,
     availability: AvailabilityDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CatalogService:
     # Session is required *before* the config check, so an unauthenticated
     # caller gets 401 (default-deny), never a 503 that leaks configuration state.
@@ -41,6 +44,9 @@ def get_catalog(
         availability=availability,
         hide_library_items=runtime.hide_library_items,
         excluded_service_ids=runtime.excluded_service_ids,
+        personal=await store.discovery_exclusions(
+            db, _authed.user.id, watched=runtime.hide_watched_items
+        ),
     )
 
 

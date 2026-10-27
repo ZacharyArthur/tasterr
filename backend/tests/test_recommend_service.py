@@ -286,6 +286,35 @@ async def test_stale_vector_is_rebuilt_and_persisted(db: AsyncSession) -> None:
     assert ("movie", 1) in fresh
 
 
+@pytest.mark.parametrize("household", [False, True])
+async def test_personal_only_filter_preserves_existing_availability_boost(
+    db: AsyncSession, household: bool
+) -> None:
+    class Library(FakeAvailability):
+        calls = 0
+
+        async def batch(self, items: list[TitleKey]) -> dict[str, Availability]:
+            self.calls += 1
+            return await super().batch(items)
+
+        async def status(self, media: str, tmdb_id: int) -> Availability:
+            return Availability(status="unknown", known=False)
+
+    catalog = FakeCatalog()
+    user_id = await _user(db)
+    await store.record_signal(db, user_id, "movie", 99, "request")
+    catalog.details[("movie", 99)] = _detail(99, [_summary(1), _summary(2), _summary(3)])
+    await store.save_profile(db, user_id, {"genre:drama": 1.0})
+    domain = cast("CatalogService", catalog)
+    library = Library({("movie", 2)})
+    domain.discovery_filter = DiscoveryFilter(
+        domain, cast("AvailabilityService", library), household, [], frozenset({("movie", 3)})
+    )
+    items = await _service(db, catalog, library).recommended_for_you(user_id)
+    assert [item.id for item in items] == ([1, 2] if household else [2, 1])
+    assert library.calls == (0 if household else 1)
+
+
 async def test_wrong_region_vector_is_rebuilt_lazily(db: AsyncSession) -> None:
     catalog = FakeCatalog()
     catalog.region = "GB"

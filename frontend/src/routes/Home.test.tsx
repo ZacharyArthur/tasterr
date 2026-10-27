@@ -277,6 +277,7 @@ test.each([
 			service_ids: [],
 			disabled_rail_types: [],
 			hide_library_items: false,
+			hide_watched_items: true,
 			excluded_service_ids: [],
 			appearance: { theme: "dark", accent: "crimson" },
 		},

@@ -107,4 +107,4 @@ Active filtering SHALL reuse completed title checks within a request and bound t
 
 #### Scenario: Defaults preserve existing behavior
 - **WHEN** both household filters are disabled and the caller has no personal exclusion
-- **THEN** discovery retains existing source requests and performs no exclusion lookups
+- **THEN** discovery retains existing source requests and performs no per-title verification lookups

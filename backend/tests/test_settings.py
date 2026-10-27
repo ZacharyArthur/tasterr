@@ -13,12 +13,18 @@ def test_discovery_environment_overrides_include_false_and_empty(
     stored = RuntimeSettings(hide_library_items=True, excluded_service_ids=[8])
     assert Settings().resolve_runtime(stored) == stored
     monkeypatch.setenv("TASTERR_HIDE_LIBRARY_ITEMS", "false")
+    monkeypatch.setenv("TASTERR_HIDE_WATCHED_ITEMS", "false")
     monkeypatch.setenv("TASTERR_EXCLUDED_SERVICE_IDS", "[]")
     settings = Settings()
     resolved = settings.resolve_runtime(stored)
     assert resolved.hide_library_items is False
+    assert resolved.hide_watched_items is False
     assert resolved.excluded_service_ids == []
-    assert settings.locked_discovery_fields == ["hide_library_items", "excluded_service_ids"]
+    assert settings.locked_discovery_fields == [
+        "hide_library_items",
+        "hide_watched_items",
+        "excluded_service_ids",
+    ]
     assert stored.hide_library_items is True
     assert stored.excluded_service_ids == [8]
 
@@ -34,11 +40,12 @@ def test_discovery_environment_rejects_invalid_ids(
         Settings()
 
 
-@pytest.mark.parametrize("value", ["", "null"])
+@pytest.mark.parametrize("value", ["", "null", "maybe"])
+@pytest.mark.parametrize("field", ["TASTERR_HIDE_LIBRARY_ITEMS", "TASTERR_HIDE_WATCHED_ITEMS"])
 def test_library_override_rejects_invalid_values(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str, field: str
 ) -> None:
-    monkeypatch.setenv("TASTERR_HIDE_LIBRARY_ITEMS", value)
+    monkeypatch.setenv(field, value)
     with pytest.raises(ValidationError):
         Settings()
 
@@ -60,6 +67,7 @@ ENV_VARS = (
     "TASTERR_FORWARDED_ALLOW_IPS",
     "TASTERR_PLEX_MAX_CONNECTION_PROBES",
     "TASTERR_HIDE_LIBRARY_ITEMS",
+    "TASTERR_HIDE_WATCHED_ITEMS",
     "TASTERR_EXCLUDED_SERVICE_IDS",
 )
 

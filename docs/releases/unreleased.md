@@ -1,5 +1,13 @@
 # Unreleased
 
+- Watched titles now disappear from each member's discovery by default, including
+  series with any watched episode and retained history from disabled taste sources.
+  Not interested always hides dismissed titles across discovery. Search, My List,
+  Continue Watching, and direct detail stay accessible. Discover rails refill;
+  Trending can shrink or disappear for heavy watchers. Turn off **Hide titles
+  members have watched** in Settings or set `TASTERR_HIDE_WATCHED_ITEMS=false`
+  to restore watched titles on generic rails.
+
 - Accounts now belong to Tasterr, with Plex, Seerr, and Jellyfin managed from
   **Account** (`/account`). Display names follow Seerr → Plex → Jellyfin;
   avatars render as initials.

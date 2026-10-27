@@ -38,15 +38,16 @@ SIGNAL_WEIGHTS: dict[SignalKind, float] = {
 
 # Kinds with on/off semantics: adding is idempotent, retracting deletes.
 TOGGLE_KINDS: frozenset[SignalKind] = frozenset(("watchlist", "not_interested"))
+WATCHED_KINDS: frozenset[SignalKind] = frozenset(("watched_plex", "watched_jellyfin"))
 # Kinds with at most one row per user+title. Imported rows are deduped so
 # overlapping history imports cannot double a
 # title's influence — idempotence instead of cross-request locking.
-UNIQUE_PER_TITLE_KINDS: frozenset[SignalKind] = TOGGLE_KINDS | frozenset(
-    ("seed_request_history", "watched_plex", "watched_jellyfin")
+UNIQUE_PER_TITLE_KINDS: frozenset[SignalKind] = (
+    TOGGLE_KINDS | WATCHED_KINDS | frozenset(("seed_request_history",))
 )
 # Positive kinds strong enough to anchor "More like X" and pool candidates.
-STRONG_POSITIVE_KINDS: frozenset[SignalKind] = frozenset(
-    ("request", "watchlist", "seed_request_history", "watched_plex", "watched_jellyfin")
+STRONG_POSITIVE_KINDS: frozenset[SignalKind] = (
+    frozenset(("request", "watchlist", "seed_request_history")) | WATCHED_KINDS
 )
 
 ALL_KINDS: frozenset[SignalKind] = frozenset(get_args(SignalKind))

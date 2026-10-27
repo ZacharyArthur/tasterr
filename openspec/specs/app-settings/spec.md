@@ -235,14 +235,14 @@ bootstrap rewrite.
 
 ### Requirement: Discovery preferences with explicit environment overrides
 
-The household runtime document SHALL include `hide_library_items` (false by default) and `excluded_service_ids` (empty by default, at most eight unique positive IDs). Existing documents SHALL gain those defaults without migration. Optional environment variables `TASTERR_HIDE_LIBRARY_ITEMS` and `TASTERR_EXCLUDED_SERVICE_IDS` SHALL override those preferences only when explicitly set; false and the empty JSON array SHALL be valid explicit overrides. Invalid environment values SHALL fail validation. Admin GET/PUT SHALL return effective values and allowlisted lock metadata; saving SHALL preserve stored preferences beneath locks. PublicConfig SHALL remain unchanged.
+The household runtime document SHALL include `hide_library_items` (false by default), `hide_watched_items` (true by default), and `excluded_service_ids` (empty by default, at most eight unique positive IDs). Existing documents SHALL gain those defaults without migration. Optional environment variables `TASTERR_HIDE_LIBRARY_ITEMS`, `TASTERR_HIDE_WATCHED_ITEMS`, and `TASTERR_EXCLUDED_SERVICE_IDS` SHALL override those preferences only when explicitly set; false and the empty JSON array SHALL be valid explicit overrides. Invalid environment values SHALL fail validation. Admin GET/PUT SHALL return effective values and allowlisted lock metadata; saving SHALL preserve stored preferences beneath locks. PublicConfig SHALL remain unchanged.
 
 #### Scenario: Missing fields preserve default browsing
 - **WHEN** an existing or fresh settings document has no exclusion fields
-- **THEN** both filters resolve disabled
+- **THEN** library hiding and service exclusions resolve disabled and watched hiding resolves enabled
 
 #### Scenario: Explicit overrides include false and empty
-- **WHEN** environment values explicitly disable library hiding or provide `[]`
+- **WHEN** environment values explicitly disable library or watched hiding or provide `[]`
 - **THEN** they override non-default stored preferences and appear locked to the admin
 
 #### Scenario: Saving locked controls preserves stored preferences
@@ -260,7 +260,11 @@ The household runtime document SHALL include `hide_library_items` (false by defa
 
 ### Requirement: Exclusion controls follow region and explain precedence
 
-The admin screen SHALL provide labelled library hiding and a separate excluded-service selector using regional service options, visible environment locks, best-effort semantics, and an explanation that exclusions win over inclusion. Changing region SHALL clear editable exclusions while retaining environment-controlled IDs for evaluation in the new region.
+The admin screen SHALL provide labelled library hiding, labelled watched-title hiding ("Hide titles members have watched", explaining that each member's own watched titles are hidden from their discovery and that Not interested always hides), and a separate excluded-service selector using regional service options, visible environment locks, best-effort semantics, and an explanation that exclusions win over inclusion. Changing region SHALL clear editable exclusions while retaining environment-controlled IDs for evaluation in the new region.
+
+#### Scenario: Watched hiding control reflects its lock
+- **WHEN** `TASTERR_HIDE_WATCHED_ITEMS` is set and an admin opens Settings
+- **THEN** the watched-title hiding control shows the effective value read-only with the environment explanation
 
 #### Scenario: Region changes clear editable exclusions
 - **WHEN** an admin changes region without a service-exclusion override

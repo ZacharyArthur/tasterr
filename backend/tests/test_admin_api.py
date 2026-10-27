@@ -168,24 +168,40 @@ def test_locked_settings_preserve_underlying_values(tmp_path: Path) -> None:
             ).status_code
             == 200
         )
-        overrides = Settings(tasterr_hide_library_items=False, tasterr_excluded_service_ids=[])
+        overrides = Settings(
+            tasterr_hide_library_items=False,
+            tasterr_hide_watched_items=False,
+            tasterr_excluded_service_ids=[],
+        )
         original = app.dependency_overrides[get_settings]
         app.dependency_overrides[get_settings] = lambda: overrides
         locked = client.get("/api/v1/settings").json()
-        assert locked["locked_fields"] == ["hide_library_items", "excluded_service_ids"]
+        assert locked["locked_fields"] == [
+            "hide_library_items",
+            "hide_watched_items",
+            "excluded_service_ids",
+        ]
+        assert locked["settings"]["hide_watched_items"] is False
         assert locked["settings"]["hide_library_items"] is False
         assert locked["settings"]["excluded_service_ids"] == []
         saved = client.put(
             "/api/v1/settings",
-            json={"region": "GB", "hide_library_items": False, "excluded_service_ids": []},
+            json={
+                "region": "GB",
+                "hide_library_items": False,
+                "hide_watched_items": False,
+                "excluded_service_ids": [],
+            },
         )
         assert saved.status_code == 200
         assert saved.json()["settings"]["region"] == "GB"
         assert saved.json()["settings"]["hide_library_items"] is False
+        assert saved.json()["settings"]["hide_watched_items"] is False
         app.dependency_overrides[get_settings] = original
         restored = client.get("/api/v1/settings").json()
         assert restored["locked_fields"] == []
         assert restored["settings"]["hide_library_items"] is True
+        assert restored["settings"]["hide_watched_items"] is True
         assert restored["settings"]["excluded_service_ids"] == [8]
         assert restored["settings"]["region"] == "GB"
 

@@ -14,7 +14,7 @@ DEFAULT_REGION = "US"
 LANGUAGE_PATTERN = r"^[a-z]{2}-[A-Z]{2}$"
 LanguageCode = Annotated[str, Field(pattern=LANGUAGE_PATTERN)]
 MAX_SELECTED_SERVICES = 8
-DiscoverySetting = Literal["hide_library_items", "excluded_service_ids"]
+DiscoverySetting = Literal["hide_library_items", "hide_watched_items", "excluded_service_ids"]
 
 
 def validate_service_ids(value: list[int]) -> list[int]:
@@ -83,6 +83,7 @@ class RuntimeSettings(BaseModel):
     language: LanguageCode = "en-US"
     service_ids: list[int] = Field(default=[], max_length=MAX_SELECTED_SERVICES)
     hide_library_items: bool = False
+    hide_watched_items: bool = True
     excluded_service_ids: list[StrictInt] = Field(default=[], max_length=MAX_SELECTED_SERVICES)
     disabled_rail_types: list[RailType] = []
     appearance: Appearance = Field(default_factory=Appearance)

@@ -73,3 +73,24 @@ test("a failed prior-session toggle cannot restore its user's state", async () =
 	);
 	expect(screen.getByRole("button", { name: "Visible" })).toBeTruthy();
 });
+
+test("Not interested refreshes Home, extra rails, and detail suggestions", async () => {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async () => ({ ok: true, status: 204 })),
+	);
+	const queryClient = new QueryClient();
+	const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+	render(
+		<QueryClientProvider client={queryClient}>
+			<Toggle initial={false} />
+		</QueryClientProvider>,
+	);
+	fireEvent.click(screen.getByRole("button", { name: "Visible" }));
+	await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3));
+	expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+		["home"],
+		["rails"],
+		["title"],
+	]);
+});

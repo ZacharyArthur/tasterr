@@ -153,10 +153,29 @@ async def test_discover_refills_after_confirmed_exclusions() -> None:
     assert fake.calls == 2
 
 
+async def test_personal_only_discovery_refills_an_empty_page_within_three_pages() -> None:
+    class PagedTmdb(FakeTmdb):
+        async def discover(self, media: str, *, page: int = 1, **kwargs: object) -> TmdbMediaPage:
+            self.calls += 1
+            return TmdbMediaPage(
+                page=page, total_pages=10, results=[TmdbMediaResult(id=page, title="Title")]
+            )
+
+    fake = PagedTmdb()
+    service = CatalogService(cast("TmdbClient", fake), personal=frozenset({("movie", 1)}))
+    assert service.discovery_filter is not None
+    assert not service.discovery_filter.household_active
+    assert [item.id for item in await service.discover("movie")] == [2, 3]
+    assert fake.calls == 3
+    assert _service(FakeTmdb()).discovery_filter is None
+
+
 @pytest.mark.parametrize("empty_first", [False, True])
+@pytest.mark.parametrize("personal", [False, True])
 async def test_stalled_refill_stops_at_shared_deadline_and_retains_first_page(
     monkeypatch: pytest.MonkeyPatch,
     empty_first: bool,
+    personal: bool,
 ) -> None:
     monkeypatch.setattr(discovery_mod, "VERIFICATION_SECONDS", 0.03)
     cancelled = asyncio.Event()
@@ -173,11 +192,20 @@ async def test_stalled_refill_stops_at_shared_deadline_and_retains_first_page(
             return TmdbMediaPage(
                 page=page,
                 total_pages=10,
-                results=[] if empty_first else [TmdbMediaResult(id=page, title="Title")],
+                results=[]
+                if empty_first
+                else [TmdbMediaResult(id=page, title="Title")]
+                + ([TmdbMediaResult(id=2, title="Hidden")] if personal else []),
             )
 
     service = _service(StalledTmdb())
-    service.discovery_filter = DiscoveryFilter(service, None, False, [8])
+    service.discovery_filter = DiscoveryFilter(
+        service,
+        None,
+        False,
+        [] if personal else [8],
+        frozenset({("movie", 2)}) if personal else frozenset(),
+    )
     async with asyncio.timeout(0.3):
         assert [item.id for item in await service.discover("movie")] == ([] if empty_first else [1])
     assert pages == [1, 2]

@@ -93,7 +93,14 @@ def test_runtime_shape_has_no_deployment_or_secret_fields() -> None:
 
 async def test_absent_row_returns_defaults_without_write(db: AsyncSession) -> None:
     assert await load_runtime_settings(db) == RuntimeSettings()
+    assert (await load_runtime_settings(db)).hide_watched_items is True
     assert (await db.execute(select(Setting))).scalars().all() == []
+
+
+async def test_old_settings_document_defaults_to_watched_hiding(db: AsyncSession) -> None:
+    db.add(Setting(key=GLOBAL_SETTINGS_KEY, value='{"region":"GB"}'))
+    await db.flush()
+    assert (await load_runtime_settings(db)).hide_watched_items is True
 
 
 async def test_settings_round_trip_and_last_write_wins(db: AsyncSession) -> None:

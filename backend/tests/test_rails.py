@@ -601,6 +601,38 @@ async def test_build_home_returns_hero_and_rails() -> None:
     assert "trending" in {r.id for r in feed.rails}
 
 
+async def test_personal_exclusions_shrink_trending_then_drop_it_and_fall_back_for_hero() -> None:
+    fake = FakeCatalog()
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(
+        ctx.catalog, None, False, [], frozenset({("movie", 1)})
+    )
+    feed = await build_home(ctx)
+    trending = next(rail for rail in feed.rails if rail.id == "trending")
+    assert [item.id for item in trending.items] == [2, 3, 4, 5, 6]
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(
+        ctx.catalog, None, False, [], frozenset({("movie", i) for i in range(1, 5)})
+    )
+    feed = await build_home(ctx)
+    assert "trending" not in {rail.id for rail in feed.rails}
+    assert feed.hero
+    assert [slide.item.id for slide in feed.hero] == [
+        item.id for item in feed.rails[0].items[:HERO_SIZE]
+    ]
+
+
+async def test_personal_exclusions_allow_successful_empty_feed() -> None:
+    fake = FakeCatalog()
+    fake.fixed_discover = list(fake.trending_items)
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(
+        ctx.catalog, None, False, [], frozenset({("movie", i) for i in range(1, 7)})
+    )
+    feed = await build_home(ctx)
+    assert feed.hero == feed.rails == []
+
+
 class ExcludedCatalog(FakeCatalog):
     async def title_facts(self, media: MediaType, tmdb_id: int) -> TitleFacts:
         return TitleFacts(

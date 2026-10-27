@@ -31,7 +31,7 @@ from tasterr.recommend.scorer import (
     rank,
     rank_exploration,
 )
-from tasterr.recommend.signals import STRONG_POSITIVE_KINDS, MediaType, TitleKey
+from tasterr.recommend.signals import STRONG_POSITIVE_KINDS, WATCHED_KINDS, MediaType, TitleKey
 
 logger = logging.getLogger("tasterr.recommend")
 
@@ -185,7 +185,7 @@ class TasteService:
             ranked = rank(profile, candidates, RAIL_SIZE)
             items = [pool[candidate.key] for candidate in ranked]
             if items:
-                return detail.title, _kind(source) in ("watched_plex", "watched_jellyfin"), items
+                return detail.title, _kind(source) in WATCHED_KINDS, items
         return None
 
     async def unexpected_picks(self, user_id: int) -> list[MediaSummary]:
@@ -423,8 +423,9 @@ class TasteService:
     async def _in_library(self, keys: list[TitleKey]) -> set[TitleKey]:
         """Titles earning the availability boost; Seerr unconfigured/down
         degrades to no boost, never an error."""
-        if self._catalog.discovery_filter is not None:
-            return await self._catalog.discovery_filter.in_library(keys)
+        discovery = self._catalog.discovery_filter
+        if discovery is not None and discovery.household_active:
+            return await discovery.in_library(keys)
         if self._availability is None or not keys:
             return set()
         statuses = await self._availability.batch(keys)

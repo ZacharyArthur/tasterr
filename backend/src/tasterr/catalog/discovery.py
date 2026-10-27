@@ -24,17 +24,23 @@ class DiscoveryFilter:
         availability: AvailabilityService | None,
         hide_library_items: bool,
         excluded_service_ids: list[int],
+        personal: frozenset[TitleKey] = frozenset(),
     ) -> None:
         self._catalog = catalog
         self._availability = availability
         self._hide_library_items = hide_library_items
         self.excluded_service_ids = frozenset(excluded_service_ids)
+        self.personal = personal
         self._deadline: float | None = None
         self._semaphore = asyncio.Semaphore(VERIFICATION_CONCURRENCY)
         self._checked: set[TitleKey] = set()
         self._hidden: set[TitleKey] = set()
         self._statuses: dict[TitleKey, Availability] = {}
         self._locks: dict[TitleKey, asyncio.Lock] = {}
+
+    @property
+    def household_active(self) -> bool:
+        return self._hide_library_items or bool(self.excluded_service_ids)
 
     @property
     def deadline(self) -> float | None:
@@ -49,8 +55,14 @@ class DiscoveryFilter:
         return [item for item in items if (item.media_type, item.id) not in self._hidden]
 
     async def eligible(self, keys: list[TitleKey]) -> set[TitleKey]:
+        self._hidden.update(self.personal.intersection(keys))
         await self._run(
-            [key for key in dict.fromkeys(keys) if key not in self._checked], self._check
+            [
+                key
+                for key in dict.fromkeys(keys)
+                if key not in self._checked and key not in self.personal and self.household_active
+            ],
+            self._check,
         )
         return set(keys) - self._hidden
 

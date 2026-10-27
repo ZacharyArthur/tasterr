@@ -1206,6 +1206,11 @@ export interface components {
              */
             hide_library_items: boolean;
             /**
+             * Hide Watched Items
+             * @default true
+             */
+            hide_watched_items: boolean;
+            /**
              * Excluded Service Ids
              * @default []
              */
@@ -1286,7 +1291,7 @@ export interface components {
              * Locked Fields
              * @default []
              */
-            locked_fields: ("hide_library_items" | "excluded_service_ids")[];
+            locked_fields: ("hide_library_items" | "hide_watched_items" | "excluded_service_ids")[];
         };
         /** SignalBody */
         SignalBody: {

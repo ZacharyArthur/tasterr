@@ -8,7 +8,7 @@ import asyncio
 
 from tasterr.catalog import facts, normalize
 from tasterr.catalog.availability import AvailabilityService
-from tasterr.catalog.discovery import DiscoveryFilter
+from tasterr.catalog.discovery import DiscoveryFilter, TitleKey
 from tasterr.catalog.models import (
     Genre,
     MediaDetail,
@@ -37,15 +37,16 @@ class CatalogService:
         availability: AvailabilityService | None = None,
         hide_library_items: bool = False,
         excluded_service_ids: list[int] | None = None,
+        personal: frozenset[TitleKey] = frozenset(),
     ) -> None:
         self._client = client
         self._region = region
         self._language = language
         self._service_ids = tuple(service_ids or [])
         self.discovery_filter: DiscoveryFilter | None = None
-        if hide_library_items or excluded_service_ids:
+        if hide_library_items or excluded_service_ids or personal:
             self.discovery_filter = DiscoveryFilter(
-                self, availability, hide_library_items, excluded_service_ids or []
+                self, availability, hide_library_items, excluded_service_ids or [], personal
             )
 
     @property

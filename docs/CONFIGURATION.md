@@ -62,6 +62,7 @@ empty volume. Keep the existing `.env` rather than replacing it with placeholder
 | `TASTERR_FORWARDED_ALLOW_IPS` | No | `127.0.0.1` | Comma-separated direct proxy-peer IP addresses or CIDRs allowed to supply forwarded client/scheme headers. |
 | `TASTERR_PLEX_MAX_CONNECTION_PROBES` | No | `6` | Maximum unauthenticated Plex identity probes per advertised server resource. Accepts 3–12. Up to four resources are probed concurrently, so raising it can increase aggregate bounded discovery traffic. |
 | `TASTERR_HIDE_LIBRARY_ITEMS` | No | unset | Override household library hiding with `true` or `false`; locks the admin control. |
+| `TASTERR_HIDE_WATCHED_ITEMS` | No | unset | Override household watched-title hiding (on by default) with `true` or `false`; locks the admin control. |
 | `TASTERR_EXCLUDED_SERVICE_IDS` | No | unset | Override subscription-service exclusions with a JSON array of up to eight unique positive TMDB provider IDs, e.g. `[8]`; `[]` explicitly clears exclusions and locks the control. |
 
 Missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
@@ -143,6 +144,7 @@ Administrators manage these non-secret values in the Settings screen:
   a hyphen, then two upper-case letters, such as `es-ES`);
 - up to eight streaming service identifiers;
 - library hiding and up to eight excluded subscription-service identifiers (both off by default);
+- watched-title hiding (on by default, using each member's own history);
 - enabled/disabled rail types;
 - dark/light theme and crimson, azure, violet, emerald, or amber accent.
 
@@ -174,6 +176,25 @@ remain eligible. Excluded services match subscription availability in the config
 region, even when another service also offers the title. Rental, purchase, free, and
 ad-supported listings alone do not hide it. Exclusions win over selected services;
 a conflicting service rail is omitted and other discovery may become thin or empty.
+
+`hide_watched_items` defaults **on**, including when upgrading an existing settings
+document. Each member's own stored watched titles are hidden from their discovery,
+including any series with one watched episode, even when that history source is
+switched off for taste learning. Clearing the source's history restores eligibility
+unless another retained signal still excludes the title. Not interested always hides
+the member's dismissed titles from discovery, regardless of the watched setting.
+Search, My List, Continue Watching, and direct title detail remain accessible.
+Household blend retains its existing veto for every participant's watched and
+dismissed titles, even with watched hiding off.
+
+This changes generic discovery on upgrade: discover rails refill within three
+pages, while fixed-list Trending only shrinks and can disappear for heavy watchers.
+The hero then uses a surviving discovery rail. Turn off **Hide titles members have
+watched** in Settings or set `TASTERR_HIDE_WATCHED_ITEMS=false` to restore watched
+titles on generic rails. Personal exclusions use stored signals without upstream
+verification and still apply after the shared deadline. With only personal
+exclusions, ranking boosts keep their existing availability lookup outside that
+budget; the first filtering step still starts the deadline for refill.
 
 Verification is best-effort with one five-second budget across a request's checks,
 concurrency eight, and at most three pages per discover source for replacements.

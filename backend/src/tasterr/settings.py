@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     tasterr_forwarded_allow_ips: str = "127.0.0.1"
     tasterr_plex_max_connection_probes: int = Field(default=6, ge=3, le=12)
     tasterr_hide_library_items: bool | None = None
+    tasterr_hide_watched_items: bool | None = None
     tasterr_excluded_service_ids: Annotated[list[StrictInt] | None, NoDecode] = Field(
         default=None, max_length=MAX_SELECTED_SERVICES, validate_default=False
     )
@@ -70,6 +71,8 @@ class Settings(BaseSettings):
         fields: list[DiscoverySetting] = []
         if self.tasterr_hide_library_items is not None:
             fields.append("hide_library_items")
+        if self.tasterr_hide_watched_items is not None:
+            fields.append("hide_watched_items")
         if self.tasterr_excluded_service_ids is not None:
             fields.append("excluded_service_ids")
         return fields

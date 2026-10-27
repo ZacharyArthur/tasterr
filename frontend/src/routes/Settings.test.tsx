@@ -24,6 +24,7 @@ const SETTINGS = {
 		disabled_rail_types: [],
 		appearance: { theme: "dark", accent: "crimson" },
 		hide_library_items: false,
+		hide_watched_items: true,
 		excluded_service_ids: [],
 	},
 	rail_types: [
@@ -130,6 +131,7 @@ test("initializes the complete draft and saves only the typed runtime document",
 		disabled_rail_types: ["popular"],
 		appearance: { theme: "light", accent: "azure" },
 		hide_library_items: false,
+		hide_watched_items: true,
 		excluded_service_ids: [],
 	});
 	for (const key of [["config"], ["home"], ["rails"], ["title"]]) {
@@ -240,6 +242,48 @@ test("saves exclusions separately from selected services and clears them on regi
 			(screen.getByLabelText("Exclude Netflix") as HTMLInputElement).checked,
 		).toBe(false),
 	);
+});
+
+test.each([
+	false,
+	true,
+])("watched hiding renders its effective value and lock=%s", async (locked) => {
+	const baseFetch = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && !init?.method) {
+				return response({
+					...SETTINGS,
+					settings: { ...SETTINGS.settings, hide_watched_items: !locked },
+					locked_fields: locked ? ["hide_watched_items"] : [],
+				});
+			}
+			return baseFetch(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	const checkbox = (await screen.findByLabelText(
+		"Hide titles members have watched",
+	)) as HTMLInputElement;
+	expect(checkbox.checked).toBe(!locked);
+	expect(checkbox.disabled).toBe(locked);
+	expect(screen.getByText(/Each member's own watched titles/)).toBeTruthy();
+	expect(screen.getByText(/Not interested always hides/)).toBeTruthy();
+	expect(screen.getByText(/Unknown availability stays visible/)).toBeTruthy();
+	if (locked) {
+		expect(
+			screen.getByText(
+				"Watched-title hiding is controlled by an environment variable.",
+			),
+		).toBeTruthy();
+	} else {
+		fireEvent.click(checkbox);
+		expect(checkbox.checked).toBe(false);
+	}
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByText("Settings saved.");
+	const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+	expect(JSON.parse(String(put?.[1]?.body)).hide_watched_items).toBe(false);
 });
 
 test("shows environment locks and preserves locked exclusions when changing region", async () => {

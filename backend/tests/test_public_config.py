@@ -63,6 +63,7 @@ def _sentineled_settings() -> Settings:
     values: dict[str, object] = {
         "plex_server_id": f"{SENTINEL}-plex-server-id",
         "tasterr_hide_library_items": True,
+        "tasterr_hide_watched_items": True,
         "tasterr_excluded_service_ids": [8],
         "jellyfin_allow_empty_password": True,
         "jellyfin_internal_url": "http://jellyfin-sentinel:8096",
@@ -100,6 +101,7 @@ def test_serialized_output_contains_no_secret_values() -> None:
     )
     assert "service_ids" not in dumped
     assert "hide_library_items" not in dumped
+    assert "hide_watched_items" not in dumped
     assert "excluded_service_ids" not in dumped
 
 
@@ -108,9 +110,11 @@ def test_discovery_override_fields_are_not_public() -> None:
     assert names.isdisjoint(
         {
             "hide_library_items",
+            "hide_watched_items",
             "excluded_service_ids",
             "locked_fields",
             "tasterr_hide_library_items",
+            "tasterr_hide_watched_items",
             "tasterr_excluded_service_ids",
         }
     )
