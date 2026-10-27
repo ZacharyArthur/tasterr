@@ -5,6 +5,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import {
+	getLanguages,
 	getRegions,
 	getServices,
 	getSettings,
@@ -43,6 +44,15 @@ export function useRegions(enabled = true) {
 	});
 }
 
+export function useLanguages(enabled = true) {
+	return useQuery({
+		queryKey: ["admin", "languages"],
+		queryFn: getLanguages,
+		enabled,
+		staleTime: 24 * 60 * 60 * 1000,
+	});
+}
+
 export function useServices(region: string, enabled = true) {
 	return useQuery({
 		queryKey: ["admin", "services", region],
@@ -59,7 +69,15 @@ export function useSaveSettings() {
 		onMutate: () => captureSession(queryClient),
 		onSuccess: async (response, _settings, sessionEpoch) => {
 			if (!isSessionCurrent(queryClient, sessionEpoch)) return;
-			const keys = [["config"], ["home"], ["rails"], ["title"]];
+			const keys = [
+				["config"],
+				["home"],
+				["rails"],
+				["title"],
+				["search"],
+				["admin", "regions"],
+				["admin", "services"],
+			];
 			await Promise.all(
 				keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
 			);
@@ -71,7 +89,11 @@ export function useSaveSettings() {
 			queryClient.setQueryData(SETTINGS_QUERY_KEY, response);
 			queryClient.setQueryData(["config"], (current: object | undefined) =>
 				current
-					? { ...current, appearance: response.settings.appearance }
+					? {
+							...current,
+							appearance: response.settings.appearance,
+							metadata_language: response.settings.language,
+						}
 					: current,
 			);
 			for (const key of keys) {

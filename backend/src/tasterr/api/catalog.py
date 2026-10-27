@@ -37,6 +37,7 @@ def get_catalog(
         client,
         runtime.region,
         runtime.service_ids,
+        language=runtime.language,
         availability=availability,
         hide_library_items=runtime.hide_library_items,
         excluded_service_ids=runtime.excluded_service_ids,

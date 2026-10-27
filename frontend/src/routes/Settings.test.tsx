@@ -19,6 +19,7 @@ afterEach(() => {
 const SETTINGS = {
 	settings: {
 		region: "US",
+		language: "en-US",
 		service_ids: [8],
 		disabled_rail_types: [],
 		appearance: { theme: "dark", accent: "crimson" },
@@ -86,6 +87,8 @@ function routeAdminFetch() {
 		}
 		if (url === "/api/v1/settings") return response(SETTINGS);
 		if (url === "/api/v1/regions") return response(REGIONS);
+		if (url === "/api/v1/languages")
+			return response({ languages: ["en-US", "es-ES"] });
 		if (url.includes("/api/v1/services"))
 			return response({
 				...SERVICES,
@@ -122,6 +125,7 @@ test("initializes the complete draft and saves only the typed runtime document",
 	const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
 	expect(JSON.parse(String(put?.[1]?.body))).toEqual({
 		region: "US",
+		language: "en-US",
 		service_ids: [8, 9],
 		disabled_rail_types: ["popular"],
 		appearance: { theme: "light", accent: "azure" },
@@ -148,6 +152,67 @@ test("changing region clears selections and loads region services", async () => 
 		),
 	);
 	expect(screen.queryByText(/Selected:/)).toBeNull();
+});
+
+test("labels metadata languages, retains a saved code missing from options, and saves the selection", async () => {
+	const baseFetch = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && !init?.method) {
+				return response({
+					...SETTINGS,
+					settings: { ...SETTINGS.settings, language: "fr-CA" },
+				});
+			}
+			return baseFetch(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	const select = (await screen.findByLabelText(
+		"Metadata language",
+	)) as HTMLSelectElement;
+	const names = new Intl.DisplayNames(undefined, { type: "language" });
+	expect(select.value).toBe("fr-CA");
+	expect(
+		await screen.findByRole("option", { name: `${names.of("es-ES")} (es-ES)` }),
+	).toBeTruthy();
+	expect(
+		screen.getByRole("option", { name: `${names.of("fr-CA")} (fr-CA)` }),
+	).toBeTruthy();
+	fireEvent.change(select, { target: { value: "es-ES" } });
+	expect(
+		screen.getByRole("option", { name: `${names.of("fr-CA")} (fr-CA)` }),
+	).toBeTruthy();
+	fireEvent.change(select, { target: { value: "fr-CA" } });
+	expect(select.value).toBe("fr-CA");
+	expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(
+		false,
+	);
+	fireEvent.change(select, { target: { value: "es-ES" } });
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByText("Settings saved.");
+	const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+	expect(JSON.parse(String(put?.[1]?.body)).language).toBe("es-ES");
+});
+
+test("keeps the saved metadata language selectable when choices fail", async () => {
+	const baseFetch = routeAdminFetch();
+	renderSettings(
+		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+			String(input) === "/api/v1/languages"
+				? response({}, 503)
+				: baseFetch(input, init),
+		),
+	);
+	const select = (await screen.findByLabelText(
+		"Metadata language",
+	)) as HTMLSelectElement;
+	expect(select.value).toBe("en-US");
+	expect(
+		await screen.findByText(/Language options are unavailable/),
+	).toBeTruthy();
+	fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+	await screen.findByText("Settings saved.");
 });
 
 test("saves exclusions separately from selected services and clears them on region change", async () => {
@@ -393,10 +458,18 @@ test.each([
 	expect(queryClient.getMutationCache().getAll()).toHaveLength(1);
 	if (phase === "cancellation") {
 		lateSave.resolve(response({ ...SETTINGS, owner: "A-late" }));
-		await waitFor(() => expect(cancelQueries).toHaveBeenCalledTimes(4));
+		await waitFor(() => expect(cancelQueries).toHaveBeenCalledTimes(7));
 		expect(
 			cancelQueries.mock.calls.map(([filters]) => filters?.queryKey),
-		).toEqual([["config"], ["home"], ["rails"], ["title"]]);
+		).toEqual([
+			["config"],
+			["home"],
+			["rails"],
+			["title"],
+			["search"],
+			["admin", "regions"],
+			["admin", "services"],
+		]);
 	}
 	await setConfirmedSession(queryClient, {
 		id: 2,

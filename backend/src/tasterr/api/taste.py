@@ -93,6 +93,7 @@ def build_taste(
         client,
         resolved.region,
         resolved.service_ids,
+        language=resolved.language,
         availability=availability,
         hide_library_items=resolved.hide_library_items,
         excluded_service_ids=resolved.excluded_service_ids,
@@ -177,7 +178,10 @@ def schedule_seed(
 
     def taste_factory(db: AsyncSession, runtime: RuntimeSettings) -> TasteService:
         client = TmdbClient(state.http, tmdb_key, state.catalog_cache)
-        return TasteService(db, CatalogService(client, runtime.region, runtime.service_ids))
+        return TasteService(
+            db,
+            CatalogService(client, runtime.region, runtime.service_ids, language=runtime.language),
+        )
 
     maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
     seeding = cast("set[int]", state.seeding)

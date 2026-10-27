@@ -868,6 +868,7 @@ def test_config_serves_public_projection_without_secrets(tmp_path: Path) -> None
         "tmdb_configured": False,
         "seerr_configured": True,
         "appearance": {"theme": "dark", "accent": "crimson"},
+        "metadata_language": "en-US",
     }
     assert SECRET not in response.text
     assert "seerr:5055" not in response.text

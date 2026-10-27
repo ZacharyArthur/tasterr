@@ -5,6 +5,7 @@ import {
 } from "../components/RegionServicePicker";
 import {
 	useConnectionTest,
+	useLanguages,
 	useRegions,
 	useSaveSettings,
 	useServices,
@@ -29,6 +30,7 @@ const ACCENTS: { id: Appearance["accent"]; label: string }[] = [
 export function Settings() {
 	const settings = useSettings();
 	const regions = useRegions();
+	const languages = useLanguages();
 	const save = useSaveSettings();
 	const probe = useConnectionTest();
 	const [draft, setDraft] = useState<RuntimeSettings | null>(null);
@@ -67,6 +69,15 @@ export function Settings() {
 	}
 
 	const appearance = draft.appearance ?? DEFAULT_APPEARANCE;
+	const language = draft.language;
+	const languageCodes = [
+		...new Set([
+			settings.data.settings.language,
+			language,
+			...(languages.data?.languages ?? []),
+		]),
+	].sort();
+	const languageNames = new Intl.DisplayNames(undefined, { type: "language" });
 	const pending = save.isPending;
 	const lockedFields = settings.data.locked_fields ?? [];
 	const libraryLocked = lockedFields.includes("hide_library_items");
@@ -125,7 +136,31 @@ export function Settings() {
 						onSelectedIdsChange={(service_ids) =>
 							setDraft({ ...draft, service_ids })
 						}
-					/>
+					>
+						<label className="flex max-w-sm flex-col gap-1 text-sm text-app-subtle">
+							Metadata language
+							<select
+								value={language}
+								disabled={pending}
+								onChange={(event) =>
+									setDraft({ ...draft, language: event.target.value })
+								}
+								className="min-h-11 rounded border border-app-border bg-app-surface px-3 text-app-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent"
+							>
+								{languageCodes.map((code) => (
+									<option key={code} value={code}>
+										{languageNames.of(code)} ({code})
+									</option>
+								))}
+							</select>
+						</label>
+					</RegionServicePicker>
+					{languages.isError && (
+						<p role="alert" className="mt-3 text-sm text-status-error">
+							Language options are unavailable. Your saved language is still
+							available.
+						</p>
+					)}
 				</SettingsSection>
 
 				<SettingsSection title="Discovery exclusions">

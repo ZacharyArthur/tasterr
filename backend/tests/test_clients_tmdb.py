@@ -68,7 +68,7 @@ async def test_discover_parses_results_and_sends_key() -> None:
         assert request.url.params["watch_region"] == "US"
         return httpx.Response(200, json=DISCOVER_JSON)
 
-    page = await _client(handler).discover("movie", region="US")
+    page = await _client(handler).discover("movie", region="US", language="en-US")
 
     assert [r.id for r in page.results] == [1]
     assert page.results[0].title == "A Movie"
@@ -81,7 +81,7 @@ async def test_discover_serializes_selected_services_as_flate_rate_or() -> None:
         assert request.url.params["with_watch_monetization_types"] == "flatrate"
         return httpx.Response(200, json=DISCOVER_JSON)
 
-    await _client(handler).discover("movie", region="GB", providers=[8, 337])
+    await _client(handler).discover("movie", region="GB", providers=[8, 337], language="en-US")
 
 
 async def test_discover_omits_provider_parameters_for_empty_selection() -> None:
@@ -90,7 +90,7 @@ async def test_discover_omits_provider_parameters_for_empty_selection() -> None:
         assert "with_watch_monetization_types" not in request.url.params
         return httpx.Response(200, json=DISCOVER_JSON)
 
-    await _client(handler).discover("movie", region="US", providers=[])
+    await _client(handler).discover("movie", region="US", providers=[], language="en-US")
 
 
 async def test_detail_parses_appended_blocks() -> None:
@@ -102,7 +102,7 @@ async def test_detail_parses_appended_blocks() -> None:
         assert "content_ratings" in append
         return httpx.Response(200, json=DETAIL_JSON)
 
-    detail = await _client(handler).detail("movie", 42, "US")
+    detail = await _client(handler).detail("movie", 42, "US", language="en-US")
 
     assert detail.id == 42
     assert detail.runtime == 120
@@ -121,7 +121,7 @@ async def test_detail_requests_and_parses_movie_keywords() -> None:
         }
         return httpx.Response(200, json=payload)
 
-    detail = await _client(handler).detail("movie", 42, "US")
+    detail = await _client(handler).detail("movie", 42, "US", language="en-US")
 
     assert detail.keywords is not None
     assert [k.name for k in detail.keywords.all] == ["dystopia"]
@@ -137,7 +137,7 @@ async def test_detail_parses_tv_keywords_and_creator() -> None:
         }
         return httpx.Response(200, json=payload)
 
-    detail = await _client(handler).detail("tv", 1399, "US")
+    detail = await _client(handler).detail("tv", 1399, "US", language="en-US")
 
     assert [c.name for c in detail.created_by] == ["Show Runner"]
     assert detail.keywords is not None
@@ -148,7 +148,7 @@ async def test_detail_tolerates_absent_keywords() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=DETAIL_JSON)
 
-    detail = await _client(handler).detail("movie", 42, "US")
+    detail = await _client(handler).detail("movie", 42, "US", language="en-US")
 
     assert detail.keywords is None
     assert detail.created_by == []
@@ -159,7 +159,7 @@ async def test_genres_returns_list() -> None:
         assert request.url.path == "/3/genre/movie/list"
         return httpx.Response(200, json={"genres": [{"id": 28, "name": "Action"}]})
 
-    genres = await _client(handler).genres("movie")
+    genres = await _client(handler).genres("movie", language="en-US")
 
     assert [g.name for g in genres] == ["Action"]
 
@@ -193,10 +193,10 @@ async def test_regions_and_providers_are_typed_and_cached_by_region() -> None:
         )
 
     client = _client(handler)
-    assert (await client.regions())[0].english_name == "United Kingdom"
-    assert (await client.regions())[0].iso_3166_1 == "GB"
-    gb = await client.providers("movie", "GB")
-    us = await client.providers("movie", "US")
+    assert (await client.regions(language="en-US"))[0].english_name == "United Kingdom"
+    assert (await client.regions(language="en-US"))[0].iso_3166_1 == "GB"
+    gb = await client.providers("movie", "GB", language="en-US")
+    us = await client.providers("movie", "US", language="en-US")
     assert gb[0].priority_for("GB") == 2
     assert us[0].priority_for("US") == 5
     assert len(calls) == 3
@@ -227,8 +227,8 @@ async def test_second_identical_call_is_cached() -> None:
         return httpx.Response(200, json=DISCOVER_JSON)
 
     client = _client(handler)
-    await client.discover("movie", region="US")
-    await client.discover("movie", region="US")
+    await client.discover("movie", region="US", language="en-US")
+    await client.discover("movie", region="US", language="en-US")
 
     assert calls == 1
 
@@ -244,7 +244,7 @@ async def test_retries_on_429_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> 
             return httpx.Response(429, headers={"retry-after": "0"}, json={})
         return httpx.Response(200, json=DISCOVER_JSON)
 
-    page = await _client(handler).discover("movie", region="US")
+    page = await _client(handler).discover("movie", region="US", language="en-US")
 
     assert calls == 2
     assert page.results[0].id == 1
@@ -259,7 +259,7 @@ async def test_persistent_5xx_is_unavailable_without_leaking_body(
         return httpx.Response(503, text="upstream boom secret detail")
 
     with pytest.raises(UpstreamUnavailable) as excinfo:
-        await _client(handler).discover("movie", region="US")
+        await _client(handler).discover("movie", region="US", language="en-US")
 
     assert "boom" not in str(excinfo.value)  # upstream body never surfaces
 
@@ -269,7 +269,7 @@ async def test_unknown_id_is_rejected() -> None:
         return httpx.Response(404, json={"status_message": "The resource you requested..."})
 
     with pytest.raises(UpstreamRejected) as excinfo:
-        await _client(handler).detail("movie", 999, "US")
+        await _client(handler).detail("movie", 999, "US", language="en-US")
 
     assert excinfo.value.status_code == 404
 
@@ -279,7 +279,7 @@ async def test_missing_key_raises_not_configured() -> None:
         return httpx.Response(200, json=DISCOVER_JSON)
 
     with pytest.raises(CatalogNotConfigured):
-        await _client(handler, api_key=None).discover("movie", region="US")
+        await _client(handler, api_key=None).discover("movie", region="US", language="en-US")
 
 
 async def test_malformed_json_is_unavailable() -> None:
@@ -287,7 +287,7 @@ async def test_malformed_json_is_unavailable() -> None:
         return httpx.Response(200, text="not json", headers={"content-type": "text/plain"})
 
     with pytest.raises(UpstreamUnavailable):
-        await _client(handler).discover("movie", region="US")
+        await _client(handler).discover("movie", region="US", language="en-US")
 
 
 async def test_transport_error_message_carries_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -297,7 +297,7 @@ async def test_transport_error_message_carries_no_key(monkeypatch: pytest.Monkey
         raise httpx.ConnectError("connect failed", request=request)
 
     with pytest.raises(UpstreamUnavailable) as excinfo:
-        await _client(handler).discover("movie", region="US")
+        await _client(handler).discover("movie", region="US", language="en-US")
 
     assert API_KEY not in str(excinfo.value)  # the api_key rides in the request URL
     assert excinfo.value.__cause__ is None  # chain dropped so no tracker captures the URL
@@ -309,4 +309,35 @@ async def test_no_browser_headers_are_forwarded() -> None:
         assert "authorization" not in request.headers
         return httpx.Response(200, json=DISCOVER_JSON)
 
-    await _client(handler).discover("movie", region="US")
+    await _client(handler).discover("movie", region="US", language="en-US")
+
+
+@pytest.mark.parametrize(
+    "language, fallback", [("en-US", "en,null"), ("en-GB", "en,null"), ("es-ES", "es,en,null")]
+)
+async def test_all_display_reads_send_language_and_partition_cache(
+    language: str, fallback: str
+) -> None:
+    seen: list[httpx.URL] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url)
+        assert request.url.params["language"] in {language, "fr-FR"}
+        if request.url.path == "/3/movie/42":
+            expected = fallback if request.url.params["language"] == language else "fr,en,null"
+            assert request.url.params["include_image_language"] == expected
+            assert request.url.params["include_video_language"] == expected
+            return httpx.Response(200, json=DETAIL_JSON)
+        return httpx.Response(200, json={"genres": [], "results": []})
+
+    client = _client(handler)
+    for code in [language, language, "fr-FR"]:
+        await client.discover("movie", region="US", language=code)
+        await client.trending(language=code)
+        await client.multi_search("Deep", language=code)
+        await client.detail("movie", 42, "US", language=code)
+        await client.genres("movie", language=code)
+        await client.regions(language=code)
+        await client.providers("movie", "US", language=code)
+    assert len(seen) == 14
+    assert [url.params["language"] for url in seen] == [language] * 7 + ["fr-FR"] * 7

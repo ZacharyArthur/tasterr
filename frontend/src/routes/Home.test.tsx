@@ -273,6 +273,7 @@ test.each([
 	const settings = {
 		settings: {
 			region: "US",
+			language: "en-US",
 			service_ids: [],
 			disabled_rail_types: [],
 			hide_library_items: false,

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import cast
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -110,6 +111,7 @@ def test_admin_settings_default_and_round_trip(tmp_path: Path) -> None:
             "/api/v1/settings",
             json={
                 "region": "gb",
+                "language": "es-ES",
                 "service_ids": [8, 337],
                 "disabled_rail_types": ["hero", "genres"],
                 "appearance": {"theme": "light", "accent": "azure"},
@@ -119,6 +121,7 @@ def test_admin_settings_default_and_round_trip(tmp_path: Path) -> None:
 
     assert default.status_code == 200
     assert default.json()["settings"]["region"] == "US"
+    assert default.json()["settings"]["language"] == "en-US"
     assert {item["id"] for item in default.json()["rail_types"]} >= {"hero", "services"}
     assert {item["id"]: item["label"] for item in default.json()["rail_types"]}["recent"] == (
         "Recent releases"
@@ -135,15 +138,21 @@ def test_admin_settings_default_and_round_trip(tmp_path: Path) -> None:
     assert saved.status_code == 200
     assert saved.json()["settings"] == reread.json()["settings"]
     assert reread.json()["settings"]["region"] == "GB"
+    assert reread.json()["settings"]["language"] == "es-ES"
     assert reread.json()["settings"]["appearance"] == {"theme": "light", "accent": "azure"}
 
 
-def test_invalid_settings_do_not_replace_previous_value(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "invalid_payload", [{"region": "USA"}, {"language": "es"}, {"language": "ES-es"}]
+)
+def test_invalid_settings_do_not_replace_previous_value(
+    tmp_path: Path, invalid_payload: dict[str, object]
+) -> None:
     app = _app(tmp_path)
     db_path = tmp_path / "tasterr.db"
     with _client(app, db_path) as client:
         assert client.put("/api/v1/settings", json={"region": "GB"}).status_code == 200
-        invalid = client.put("/api/v1/settings", json={"region": "USA"})
+        invalid = client.put("/api/v1/settings", json=invalid_payload)
         current = client.get("/api/v1/settings").json()["settings"]
 
     assert invalid.status_code == 422
@@ -306,7 +315,7 @@ def test_admin_openapi_models_are_secret_free(tmp_path: Path) -> None:
 
 def test_every_admin_route_declares_an_explicit_response_model() -> None:
     routes = [route for route in admin_router.routes if isinstance(route, APIRoute)]
-    assert len(routes) == 5
+    assert len(routes) == 6
     assert all(route.response_model is not None for route in routes)
 
 
@@ -317,6 +326,7 @@ def test_saved_settings_change_later_browse_requests_without_restart(tmp_path: P
         seen.append(request.url)
         if request.url.path.startswith("/3/discover/"):
             assert request.url.params["watch_region"] == "GB"
+            assert request.url.params["language"] == "es-ES"
             assert request.url.params["with_watch_providers"] == "8"
             is_tv = request.url.path.endswith("/tv")
             start = 101 if is_tv else 1
@@ -365,6 +375,7 @@ def test_saved_settings_change_later_browse_requests_without_restart(tmp_path: P
             json={
                 "region": "GB",
                 "service_ids": [8],
+                "language": "es-ES",
                 "disabled_rail_types": [
                     "trending",
                     "recent",
@@ -386,4 +397,63 @@ def test_saved_settings_change_later_browse_requests_without_restart(tmp_path: P
     assert [rail["id"] for rail in home.json()["rails"]] == ["popular", "popular-tv"]
     assert extra.json() == {"rails": [], "next_cursor": None}
     assert detail.json()["certification"] == "12"
+    assert any(url.path == "/3/movie/1" and url.params["language"] == "es-ES" for url in seen)
     assert any(url.path == "/3/discover/movie" for url in seen)
+
+
+def test_languages_validate_deduplicate_sort_and_cache(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        assert request.url.path == "/3/configuration/primary_translations"
+        return httpx.Response(
+            200, json=["es-ES", "en-US", "es-ES", "es", "EN-us", "es-ES\n", 1, None]
+        )
+
+    app = _app(tmp_path)
+    with _client(app, tmp_path / "tasterr.db") as client:
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        for _ in range(2):
+            response = client.get("/api/v1/languages")
+            assert response.status_code == 200
+            assert response.json() == {"languages": ["en-US", "es-ES"]}
+        saved = client.put("/api/v1/settings", json={"language": "zz-ZZ"})
+        assert saved.status_code == 200
+        assert saved.json()["settings"]["language"] == "zz-ZZ"
+        assert client.get("/api/v1/config").json()["metadata_language"] == "zz-ZZ"
+    assert calls == ["/3/configuration/primary_translations"]
+
+
+def test_languages_members_denied_before_catalog_configuration_or_http(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, json=[])
+
+    app = _app(tmp_path)
+    with _client(app, tmp_path / "tasterr.db", is_admin=False) as client:
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        assert client.get("/api/v1/languages").status_code == 403
+        app.dependency_overrides[get_settings] = lambda: Settings()
+        assert client.get("/api/v1/languages").status_code == 403
+    assert calls == []
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_languages_unavailable_is_generic(tmp_path: Path, configured: bool) -> None:
+    app = _app(tmp_path)
+    with _client(app, tmp_path / "tasterr.db") as client:
+        app.state.http = httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(200, json={"private": "SENTINEL"})
+            )
+        )
+        if not configured:
+            app.dependency_overrides[get_settings] = lambda: Settings()
+        response = client.get("/api/v1/languages")
+        assert response.status_code == (502 if configured else 503)
+        assert response.json() == {
+            "detail": "Catalog service unavailable" if configured else "Catalog unavailable"
+        }

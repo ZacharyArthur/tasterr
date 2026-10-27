@@ -97,6 +97,7 @@ test("logout tolerates the empty 204 body", async () => {
 test("admin settings replacement uses a typed JSON PUT with same-origin credentials", async () => {
 	const body = {
 		region: "US",
+		language: "en-US",
 		service_ids: [8],
 		hide_library_items: false,
 		excluded_service_ids: [],

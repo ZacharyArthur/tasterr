@@ -100,6 +100,26 @@ def test_pick_logo_none_when_empty() -> None:
     assert pick_logo([]) is None
 
 
+def test_configured_logo_and_trailer_language_precedes_other_ranking() -> None:
+    logos = [
+        TmdbImage(file_path="/es.png", iso_639_1="es", vote_average=0),
+        TmdbImage(file_path="/en.png", iso_639_1="en", vote_average=10),
+        TmdbImage(file_path="/neutral.png", vote_average=20),
+        TmdbImage(file_path="/fr.png", iso_639_1="fr", vote_average=100),
+    ]
+    videos = [
+        TmdbVideo(key="es", site="YouTube", type="Teaser", iso_639_1="es"),
+        TmdbVideo(key="en", site="YouTube", type="Trailer", official=True, iso_639_1="en"),
+        TmdbVideo(key="neutral", site="YouTube", type="Trailer", official=True),
+        TmdbVideo(key="fr", site="YouTube", type="Trailer", official=True, iso_639_1="fr"),
+    ]
+    for offset, expected in enumerate(["es", "en", "neutral", "fr"]):
+        assert pick_logo(logos[offset:], "es") == f"/{expected}.png"
+        trailer = pick_trailer(videos[offset:], "es")
+        assert trailer is not None
+        assert trailer.key == expected
+
+
 def _movie_detail() -> TmdbDetail:
     return TmdbDetail(
         id=42,

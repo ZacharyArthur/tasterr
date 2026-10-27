@@ -5,10 +5,21 @@ import type { HeroSlide } from "../lib/api";
 import { AvailabilityContext } from "../lib/availability";
 import { Hero } from "./Hero";
 
+const config = vi.hoisted(() => ({
+	language: undefined as string | undefined,
+}));
+vi.mock("../lib/availability", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../lib/availability")>()),
+	useConfig: () => ({
+		data: config.language ? { metadata_language: config.language } : undefined,
+	}),
+}));
+
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
 	vi.useRealTimers();
+	config.language = undefined;
 });
 
 function slide(id: number, title: string): HeroSlide {
@@ -64,6 +75,31 @@ test("rotates the hero when motion is allowed", () => {
 		vi.advanceTimersByTime(7000);
 	});
 	expect(screen.getByRole("heading", { name: "Second" })).toBeTruthy();
+});
+
+test.each([
+	"es-ES",
+	"en-US",
+	undefined,
+])("marks hero title and overview with loaded language %s", (language) => {
+	config.language = language;
+	stubMatchMedia(true);
+	const entry = slide(1, "Primero");
+	entry.item.overview = "Una historia";
+	render(
+		<MemoryRouter>
+			<Hero slides={[entry]} />
+		</MemoryRouter>,
+	);
+	expect(
+		screen.getByRole("heading", { name: "Primero" }).getAttribute("lang"),
+	).toBe(language ?? null);
+	expect(screen.getByText("Una historia").getAttribute("lang")).toBe(
+		language ?? null,
+	);
+	expect(
+		screen.getByRole("link", { name: "View details" }).hasAttribute("lang"),
+	).toBe(false);
 });
 
 test("does not rotate under reduced motion", () => {

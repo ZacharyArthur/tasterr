@@ -116,6 +116,9 @@ class FakeCatalog:
             raise UpstreamUnavailable("down")
         return {"Action": 28, "Comedy": 35, "Drama": 18, "Thriller": 53}
 
+    async def genres(self, media: str) -> list[Genre]:
+        return [Genre(id=gid, name=name) for name, gid in (await self.genre_map(media)).items()]
+
     async def detail(self, media: str, tmdb_id: int) -> MediaDetail:
         if tmdb_id in self.unknown_ids:
             raise UpstreamRejected(404)
@@ -1051,7 +1054,7 @@ class TasteCatalog(FakeCatalog):
     def __init__(self) -> None:
         super().__init__()
         self.recs: dict[int, list[MediaSummary]] = {}
-        self.genres: dict[int, list[str]] = {}
+        self.facts_genres: dict[int, list[str]] = {}
 
     async def detail(self, media: str, tmdb_id: int) -> MediaDetail:
         base = await super().detail(media, tmdb_id)
@@ -1062,7 +1065,7 @@ class TasteCatalog(FakeCatalog):
             tmdb_id=tmdb_id,
             media_type="tv" if media == "tv" else "movie",
             title=f"T{tmdb_id}",
-            genres=self.genres.get(tmdb_id, ["Drama"]),
+            genres=self.facts_genres.get(tmdb_id, ["Drama"]),
             vote_average=7.0,
             vote_count=1000,
         )
@@ -1115,7 +1118,7 @@ def test_two_users_get_visibly_different_homes(tmp_path: Path) -> None:
     catalog = TasteCatalog()
     catalog.recs[1001] = [_summary(1002), _summary(1003)]
     catalog.recs[1010] = [_summary(1020), _summary(1030)]
-    catalog.genres.update(
+    catalog.facts_genres.update(
         {
             1001: ["Drama"],
             1002: ["Drama"],

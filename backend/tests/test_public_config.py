@@ -83,6 +83,7 @@ def _sentineled_settings() -> Settings:
 def test_serialized_output_contains_no_secret_values() -> None:
     runtime = RuntimeSettings(
         region="GB",
+        language="es-ES",
         service_ids=[8],
         hide_library_items=True,
         excluded_service_ids=[9],
@@ -93,6 +94,10 @@ def test_serialized_output_contains_no_secret_values() -> None:
     assert SENTINEL not in dumped
     assert '"theme":"light"' in dumped
     assert '"accent":"azure"' in dumped
+    assert '"metadata_language":"es-ES"' in dumped
+    assert PublicConfig.model_json_schema()["properties"]["metadata_language"]["pattern"] == (
+        r"^[a-z]{2}-[A-Z]{2}$"
+    )
     assert "service_ids" not in dumped
     assert "hide_library_items" not in dumped
     assert "excluded_service_ids" not in dumped

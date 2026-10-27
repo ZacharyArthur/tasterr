@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import type { MediaDetail, MediaType } from "../lib/api";
+import { useConfig } from "../lib/availability";
 import { useTitle } from "../lib/browse";
 import {
 	backdropUrl,
@@ -104,6 +105,7 @@ export function DetailModal() {
 }
 
 function DetailBody({ detail }: { detail: MediaDetail }) {
+	const language = useConfig().data?.metadata_language;
 	const backdrop = backdropUrl(detail.backdrop_path);
 	const logo = logoUrl(detail.logo_path);
 	const providers = detail.watch.flatrate;
@@ -134,10 +136,13 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 					<img
 						src={logo}
 						alt={detail.title}
+						lang={language}
 						className="max-h-20 w-auto max-w-xs object-contain object-left"
 					/>
 				) : (
-					<h2 className="text-3xl font-bold text-app-text">{detail.title}</h2>
+					<h2 lang={language} className="text-3xl font-bold text-app-text">
+						{detail.title}
+					</h2>
 				)}
 				<div className="flex flex-wrap items-center gap-3 text-sm text-app-subtle">
 					<AvailabilityBadge availability={detail.availability} />
@@ -153,9 +158,13 @@ function DetailBody({ detail }: { detail: MediaDetail }) {
 					)}
 				</div>
 				{detail.tagline && (
-					<p className="italic text-app-subtle">{detail.tagline}</p>
+					<p lang={language} className="italic text-app-subtle">
+						{detail.tagline}
+					</p>
 				)}
-				<p className="text-app-text">{detail.overview}</p>
+				<p lang={language} className="text-app-text">
+					{detail.overview}
+				</p>
 				<a
 					href={detail.external_url}
 					target="_blank"

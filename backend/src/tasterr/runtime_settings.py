@@ -6,11 +6,13 @@ makes the env/DB boundary structural rather than convention-based.
 """
 
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StrictInt, field_validator
 
 DEFAULT_REGION = "US"
+LANGUAGE_PATTERN = r"^[a-z]{2}-[A-Z]{2}$"
+LanguageCode = Annotated[str, Field(pattern=LANGUAGE_PATTERN)]
 MAX_SELECTED_SERVICES = 8
 DiscoverySetting = Literal["hide_library_items", "excluded_service_ids"]
 
@@ -78,6 +80,7 @@ class Appearance(BaseModel):
 
 class RuntimeSettings(BaseModel):
     region: str = DEFAULT_REGION
+    language: LanguageCode = "en-US"
     service_ids: list[int] = Field(default=[], max_length=MAX_SELECTED_SERVICES)
     hide_library_items: bool = False
     excluded_service_ids: list[StrictInt] = Field(default=[], max_length=MAX_SELECTED_SERVICES)

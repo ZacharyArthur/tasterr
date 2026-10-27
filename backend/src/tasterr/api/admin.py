@@ -23,6 +23,7 @@ from tasterr.clients.tmdb import CatalogNotConfigured, TmdbClient
 from tasterr.db.runtime_settings import load_runtime_settings, save_runtime_settings
 from tasterr.runtime_settings import (
     DiscoverySetting,
+    LanguageCode,
     RailTypeDescriptor,
     RuntimeSettings,
     rail_type_descriptors,
@@ -40,6 +41,10 @@ class SettingsResponse(BaseModel):
 
 class RegionsResponse(BaseModel):
     regions: list[RegionOption]
+
+
+class LanguagesResponse(BaseModel):
+    languages: list[LanguageCode]
 
 
 class ServicesResponse(BaseModel):
@@ -105,6 +110,14 @@ async def get_regions(
     _admin: Annotated[AuthedSession, Depends(require_admin)],
 ) -> RegionsResponse:
     return RegionsResponse(regions=await catalog.regions())
+
+
+@router.get("/languages", response_model=LanguagesResponse)
+async def get_languages(
+    _admin: Annotated[AuthedSession, Depends(require_admin)],
+    catalog: CatalogDep,
+) -> LanguagesResponse:
+    return LanguagesResponse(languages=await catalog.languages())
 
 
 @router.get("/services", response_model=ServicesResponse)

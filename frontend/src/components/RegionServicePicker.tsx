@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { RegionOption, ServiceOption } from "../lib/api";
 import { providerLogoUrl } from "../lib/images";
 
@@ -13,6 +14,7 @@ export function RegionServicePicker({
 	disabled,
 	onRegionChange,
 	onSelectedIdsChange,
+	children,
 }: {
 	region: string;
 	regions: RegionOption[];
@@ -23,6 +25,7 @@ export function RegionServicePicker({
 	disabled: boolean;
 	onRegionChange: (region: string) => void;
 	onSelectedIdsChange: (ids: number[]) => void;
+	children?: ReactNode;
 }) {
 	const selectedServices = selectedIds
 		.map((id) => services.find((service) => service.provider_id === id))
@@ -39,21 +42,24 @@ export function RegionServicePicker({
 
 	return (
 		<div className="flex flex-col gap-4">
-			<label className="flex max-w-sm flex-col gap-1 text-sm text-app-subtle">
-				Region
-				<select
-					value={region}
-					disabled={disabled}
-					onChange={(event) => onRegionChange(event.target.value)}
-					className="min-h-11 rounded border border-app-border bg-app-surface px-3 text-app-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent"
-				>
-					{regions.map((option) => (
-						<option key={option.code} value={option.code}>
-							{option.name} ({option.code})
-						</option>
-					))}
-				</select>
-			</label>
+			<div className="grid gap-4 sm:grid-cols-2">
+				<label className="flex max-w-sm flex-col gap-1 text-sm text-app-subtle">
+					Region
+					<select
+						value={region}
+						disabled={disabled}
+						onChange={(event) => onRegionChange(event.target.value)}
+						className="min-h-11 rounded border border-app-border bg-app-surface px-3 text-app-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent"
+					>
+						{regions.map((option) => (
+							<option key={option.code} value={option.code}>
+								{option.name} ({option.code})
+							</option>
+						))}
+					</select>
+				</label>
+				{children}
+			</div>
 
 			<div>
 				<h3 className="font-medium text-app-text">Streaming services</h3>

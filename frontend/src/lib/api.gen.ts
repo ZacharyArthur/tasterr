@@ -345,6 +345,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Languages */
+        get: operations["get_languages_api_v1_languages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/services": {
         parameters: {
             query?: never;
@@ -823,6 +840,11 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** LanguagesResponse */
+        LanguagesResponse: {
+            /** Languages */
+            languages: string[];
+        };
         /** LinkPollResponse */
         LinkPollResponse: {
             /**
@@ -1006,6 +1028,8 @@ export interface components {
             /** Seerr Configured */
             seerr_configured: boolean;
             appearance: components["schemas"]["Appearance"];
+            /** Metadata Language */
+            metadata_language: string;
         };
         /** Rail */
         Rail: {
@@ -1166,6 +1190,11 @@ export interface components {
              * @default US
              */
             region: string;
+            /**
+             * Language
+             * @default en-US
+             */
+            language: string;
             /**
              * Service Ids
              * @default []
@@ -1973,6 +2002,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RegionsResponse"];
+                };
+            };
+        };
+    };
+    get_languages_api_v1_languages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanguagesResponse"];
                 };
             };
         };

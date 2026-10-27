@@ -150,6 +150,12 @@ class FakeCatalog:
             raise UpstreamUnavailable("genres down")
         return dict(self.genre_map_result)
 
+    async def genres(self, media: str) -> list[Genre]:
+        self.genre_map_calls.append(media)
+        if self.fail_genre_map:
+            raise UpstreamUnavailable("genres down")
+        return [Genre(id=gid, name=name) for name, gid in self.genre_map_result.items()]
+
     async def detail(self, media: str, tmdb_id: int) -> MediaDetail:
         return _detail(tmdb_id)
 
@@ -161,6 +167,20 @@ class FakeCatalog:
 
 def _ctx(fake: FakeCatalog) -> RailContext:
     return RailContext(cast("CatalogService", fake))
+
+
+async def test_genre_rail_titles_use_display_names_without_engine_map() -> None:
+    class LocalizedCatalog(FakeCatalog):
+        async def genres(self, media: str) -> list[Genre]:
+            return [Genre(id=28, name="Acción")]
+
+        async def genre_map(self, media: str) -> dict[str, int]:
+            raise AssertionError("Engine map must not supply display labels")
+
+    rails = await _all_extra_rails(_ctx(LocalizedCatalog()))
+    genre_rails = [rail for rail in rails if rail.id.startswith("genre-")]
+    assert len(genre_rails) == 2
+    assert all("Acción" in rail.title for rail in genre_rails)
 
 
 async def _all_extra_rails(ctx: RailContext) -> list[Rail]:

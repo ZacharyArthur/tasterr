@@ -14,6 +14,7 @@ from tasterr.runtime_settings import (
     MAX_SELECTED_SERVICES,
     Appearance,
     DiscoverySetting,
+    LanguageCode,
     RuntimeSettings,
     validate_service_ids,
 )
@@ -169,6 +170,7 @@ class PublicConfig(BaseModel):
     tmdb_configured: bool
     seerr_configured: bool
     appearance: Appearance
+    metadata_language: LanguageCode
 
     @classmethod
     def from_settings(
@@ -179,6 +181,7 @@ class PublicConfig(BaseModel):
             tmdb_configured=settings.tmdb_configured,
             seerr_configured=settings.seerr_configured,
             appearance=resolved.appearance,
+            metadata_language=resolved.language,
         )
 
 

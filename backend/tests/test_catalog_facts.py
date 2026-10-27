@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import httpx
+import pytest
 
 from tasterr.cache import Cache
 from tasterr.catalog.facts import to_facts
@@ -82,20 +83,60 @@ def test_bare_detail_yields_empty_facts() -> None:
     assert facts.creators == []
 
 
-async def test_warm_detail_cache_serves_facts_without_a_fetch() -> None:
-    calls = 0
+@pytest.mark.parametrize(
+    ("language", "expected_reads"),
+    [("en-US", ["en-US"]), ("en-GB", ["en-GB", "en-US"])],
+)
+async def test_detail_and_facts_share_cache_only_for_engine_language(
+    language: str, expected_reads: list[str]
+) -> None:
+    reads: list[str] = []
 
-    def handler(_: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
+    def handler(request: httpx.Request) -> httpx.Response:
+        reads.append(request.url.params["language"])
         return httpx.Response(200, json=MOVIE_JSON)
 
-    service = _service(handler)
+    service = _service(handler, language)
     await service.detail("movie", 42)
     facts = await service.title_facts("movie", 42)
 
-    assert calls == 1
+    assert reads == expected_reads
     assert facts.keywords == ["wormhole", "space travel"]
+
+
+async def test_spanish_display_keeps_english_facts_and_engine_genres() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        language = request.url.params["language"]
+        seen.append((request.url.path, language))
+        genres = [
+            {"id": 878, "name": "Ciencia ficción" if language == "es-ES" else "Science Fiction"}
+        ]
+        if "/genre/" in request.url.path:
+            return httpx.Response(200, json={"genres": genres})
+        return httpx.Response(
+            200,
+            json={
+                **MOVIE_JSON,
+                "title": "Profundo" if language == "es-ES" else "Deep",
+                "genres": genres,
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        service = CatalogService(TmdbClient(http, "key", Cache()), language="es-ES")
+        assert (await service.detail("movie", 42)).title == "Profundo"
+        assert (await service.title_facts("movie", 42)).genres == ["Science Fiction"]
+        assert (await service.title_facts("movie", 42)).title == "Deep"
+        assert await service.genre_map("movie") == {"Science Fiction": 878}
+        assert (await service.genres("movie"))[0].name == "Ciencia ficción"
+    assert seen == [
+        ("/3/movie/42", "es-ES"),
+        ("/3/movie/42", "en-US"),
+        ("/3/genre/movie/list", "en-US"),
+        ("/3/genre/movie/list", "es-ES"),
+    ]
 
 
 def test_facts_never_appear_in_the_api_schema(tmp_path: Path) -> None:
@@ -107,6 +148,6 @@ def test_facts_never_appear_in_the_api_schema(tmp_path: Path) -> None:
     assert "TitleFacts" not in schema.get("components", {}).get("schemas", {})
 
 
-def _service(handler: Callable[[httpx.Request], httpx.Response]) -> CatalogService:
+def _service(handler: Callable[[httpx.Request], httpx.Response], language: str) -> CatalogService:
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return CatalogService(TmdbClient(http, "key", Cache()))
+    return CatalogService(TmdbClient(http, "key", Cache()), language=language)

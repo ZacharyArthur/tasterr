@@ -139,6 +139,8 @@ and fresh admission/admin checks.
 Administrators manage these non-secret values in the Settings screen:
 
 - two-letter TMDB region (default `US`);
+- household TMDB metadata language (default `en-US`, two lower-case letters,
+  a hyphen, then two upper-case letters, such as `es-ES`);
 - up to eight streaming service identifiers;
 - library hiding and up to eight excluded subscription-service identifiers (both off by default);
 - enabled/disabled rail types;
@@ -146,6 +148,23 @@ Administrators manage these non-secret values in the Settings screen:
 
 They are stored in SQLite, returned through an explicit public response model, and
 never accept URLs, keys, tokens, cookies, or credentials.
+
+The metadata language applies to display-facing TMDB reads: titles, overviews,
+details, genre rail names, regions, and providers. Settings offers TMDB's primary
+translations, labelled with the browser's language names and their codes; the saved
+value remains available even if TMDB omits it or is unavailable. Saving validates
+only the code format and never needs a TMDB call. This is one household preference,
+with no per-member setting or environment override, and the UI stays English.
+Missing translations use TMDB's original text; images and trailers prefer the
+configured language, then English, then language-neutral assets.
+
+The recommendation engine keeps its English vocabulary, including engine-derived
+English genre labels in explanations. Households using a metadata language other
+than `en-US` (including `en-GB`) make extra `en-US` detail reads for newly featurized
+titles and English genre-list reads, covered by the normal cache. Changing language
+does not rebuild stored taste features or need
+a migration. Continue Watching may show the previous language for up to five
+minutes after a change, until its existing per-user rail cache expires.
 
 Discovery exclusions apply to Home, additional rails, featured heroes, household
 picks, and related-title suggestions. Search, My List, Continue Watching, and direct

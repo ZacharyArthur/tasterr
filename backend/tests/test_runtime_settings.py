@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -40,6 +40,7 @@ def test_runtime_settings_normalize_and_serialize() -> None:
     settings = RuntimeSettings.model_validate(
         {
             "region": " gb ",
+            "language": "es-ES",
             "service_ids": [8, 337],
             "disabled_rail_types": ["hero", "genres"],
             "appearance": {"theme": "light", "accent": "azure"},
@@ -47,6 +48,7 @@ def test_runtime_settings_normalize_and_serialize() -> None:
     )
 
     assert settings.region == "GB"
+    assert settings.language == "es-ES"
     assert settings.service_ids == [8, 337]
     assert settings.disabled_rail_types == [RailType.HERO, RailType.GENRES]
     assert settings.appearance == Appearance(theme=Theme.LIGHT, accent=Accent.AZURE)
@@ -58,6 +60,10 @@ def test_runtime_settings_normalize_and_serialize() -> None:
     [
         {"region": "USA"},
         {"region": "1!"},
+        *(
+            {"language": code}
+            for code in ["es", "ES-es", "es-es", " es-ES", "es-ES\n", "spa-ES", None]
+        ),
         {"service_ids": [0]},
         {"service_ids": [8, 8]},
         {"service_ids": list(range(1, 10))},
@@ -91,13 +97,14 @@ async def test_absent_row_returns_defaults_without_write(db: AsyncSession) -> No
 
 
 async def test_settings_round_trip_and_last_write_wins(db: AsyncSession) -> None:
-    first = RuntimeSettings(region="GB", service_ids=[8])
+    first = RuntimeSettings(region="GB", language="es-ES", service_ids=[8])
     second = RuntimeSettings(
         region="CA",
         service_ids=[337],
         appearance=Appearance(theme=Theme.LIGHT, accent=Accent.EMERALD),
     )
     await save_runtime_settings(db, first)
+    assert await load_runtime_settings(db) == first
     await save_runtime_settings(db, second)
     await db.commit()
 
@@ -128,3 +135,19 @@ async def test_setting_primary_key_is_enforced(db: AsyncSession) -> None:
     )
     with pytest.raises(IntegrityError):
         await db.flush()
+
+
+async def test_old_document_gains_language_without_changing_other_values(db: AsyncSession) -> None:
+    db.add(Setting(key=GLOBAL_SETTINGS_KEY, value='{"region":"GB","service_ids":[8]}'))
+    await db.commit()
+    assert await load_runtime_settings(db) == RuntimeSettings(region="GB", service_ids=[8])
+    assert (await load_runtime_settings(db)).language == "en-US"
+
+
+def test_older_model_ignores_language_on_rollback() -> None:
+    class OlderSettings(BaseModel):
+        region: str = "US"
+
+    assert OlderSettings.model_validate_json(
+        RuntimeSettings(region="GB", language="es-ES").model_dump_json()
+    ) == OlderSettings(region="GB")
