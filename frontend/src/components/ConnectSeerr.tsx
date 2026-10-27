@@ -63,14 +63,20 @@ export function ConnectSeerr({
 			{jellyfin && (
 				<button
 					type="button"
-					aria-expanded={jellyfinExpanded}
 					disabled={link.isPending}
 					className="min-h-11 rounded border border-app-border px-4"
 					onClick={() => setJellyfinExpanded(!jellyfinExpanded)}
 				>
-					Use Jellyfin credentials
+					{jellyfinExpanded
+						? "Use Seerr email instead"
+						: "Use Jellyfin credentials"}
 				</button>
 			)}
+			<p className="text-sm text-app-subtle">
+				{jellyfinExpanded
+					? "Sign in with your Jellyfin username and password."
+					: "Sign in with your Seerr account email and password."}
+			</p>
 			{jellyfinExpanded ? (
 				<JellyfinCredentialsForm
 					onSubmit={(body) => connect({ method: "jellyfin", ...body })}

@@ -354,6 +354,11 @@ test.each([
 		],
 	});
 	fireEvent.click(await screen.findByRole("button", { name: "Link Seerr" }));
+	expect(
+		screen.getByText("Sign in with your Seerr account email and password."),
+	).toBeTruthy();
+	expect(screen.getByLabelText("Email")).toBeTruthy();
+	expect(screen.getByLabelText("Password")).toBeTruthy();
 	if (!available) {
 		expect(
 			screen.queryByRole("button", { name: "Use Jellyfin credentials" }),
@@ -362,6 +367,31 @@ test.each([
 	}
 	fireEvent.click(
 		await screen.findByRole("button", { name: "Use Jellyfin credentials" }),
+	);
+	expect(
+		screen.getByText("Sign in with your Jellyfin username and password."),
+	).toBeTruthy();
+	expect(screen.getByLabelText("Username")).toBeTruthy();
+	expect(screen.queryByLabelText("Email")).toBeNull();
+	expect(
+		screen.queryByText("Sign in with your Seerr account email and password."),
+	).toBeNull();
+	const useSeerr = screen.getByRole("button", {
+		name: "Use Seerr email instead",
+	});
+	expect(useSeerr.hasAttribute("aria-expanded")).toBe(false);
+	fireEvent.click(useSeerr);
+	expect(
+		screen.getByText("Sign in with your Seerr account email and password."),
+	).toBeTruthy();
+	expect(screen.getByLabelText("Email")).toBeTruthy();
+	expect(screen.getByLabelText("Password")).toBeTruthy();
+	expect(screen.queryByLabelText("Username")).toBeNull();
+	expect(
+		screen.queryByText("Sign in with your Jellyfin username and password."),
+	).toBeNull();
+	fireEvent.click(
+		screen.getByRole("button", { name: "Use Jellyfin credentials" }),
 	);
 	fireEvent.change(screen.getByLabelText("Username"), {
 		target: { value: "viewer" },
