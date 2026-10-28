@@ -61,6 +61,7 @@ empty volume. Keep the existing `.env` rather than replacing it with placeholder
 | `TASTERR_PORT` | No | `8000` | Uvicorn container port and healthcheck target. |
 | `TASTERR_FORWARDED_ALLOW_IPS` | No | `127.0.0.1` | Comma-separated direct proxy-peer IP addresses or CIDRs allowed to supply forwarded client/scheme headers. |
 | `TASTERR_PLEX_MAX_CONNECTION_PROBES` | No | `6` | Maximum unauthenticated Plex identity probes per advertised server resource. Accepts 3–12. Up to four resources are probed concurrently, so raising it can increase aggregate bounded discovery traffic. |
+| `TASTERR_WATCH_HISTORY_DAYS` | No | `365` | Initial lookback in days for a link's first Plex or Jellyfin history sync. Accepts 1–3650; invalid, null, or empty values fail boot. Server-side only. |
 | `TASTERR_HIDE_LIBRARY_ITEMS` | No | unset | Override household library hiding with `true` or `false`; locks the admin control. |
 | `TASTERR_HIDE_WATCHED_ITEMS` | No | unset | Override household watched-title hiding (on by default) with `true` or `false`; locks the admin control. |
 | `TASTERR_EXCLUDED_SERVICE_IDS` | No | unset | Override subscription-service exclusions with a JSON array of up to eight unique positive TMDB provider IDs, e.g. `[8]`; `[]` explicitly clears exclusions and locks the control. |
@@ -249,6 +250,15 @@ clearing their signals removes that exclusion. Recommendation reset deletes all
 taste signals, including My List and Not interested, clears sync times, and
 schedules enabled sources in the background. Source preferences and the onboarding
 completion flag are preserved.
+
+`TASTERR_WATCH_HISTORY_DAYS` sets the first-sync lookback for Plex and Jellyfin
+watch history (default 365 days, range 1–3650). Later syncs keep their watermark
+with a 24-hour overlap; changing the value does not re-import existing links.
+After changing it and restarting, use **Reset taste profile** to re-import with
+the new window, or switch the affected source off and back on. Reset deletes all
+taste signals as described above. Caps stay unchanged: Plex reads at most 500
+rows per server with 500 total metadata resolutions; Jellyfin reads at most 500
+rows per item type. Both retain the six-hour throttle and 30-second deadline.
 
 ## Plex-aware operation
 

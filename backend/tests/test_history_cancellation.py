@@ -3,6 +3,7 @@ import asyncio
 import sqlite3
 from collections.abc import Iterable
 from contextlib import suppress
+from datetime import timedelta
 from pathlib import Path
 from typing import cast
 
@@ -87,6 +88,7 @@ async def test_cancel_during_database_io_releases_cursor_before_returning(
             "secret",
             encrypt_token("secret", "token"),
             user_id,
+            timedelta(days=365),
         )
     else:
         coroutine = seed_in_background(

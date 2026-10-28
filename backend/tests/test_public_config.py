@@ -65,6 +65,7 @@ def _sentineled_settings() -> Settings:
         "tasterr_hide_library_items": True,
         "tasterr_hide_watched_items": True,
         "tasterr_excluded_service_ids": [8],
+        "tasterr_watch_history_days": 730,
         "jellyfin_allow_empty_password": True,
         "jellyfin_internal_url": "http://jellyfin-sentinel:8096",
     }
@@ -103,6 +104,7 @@ def test_serialized_output_contains_no_secret_values() -> None:
     assert "hide_library_items" not in dumped
     assert "hide_watched_items" not in dumped
     assert "excluded_service_ids" not in dumped
+    assert "watch_history" not in dumped
 
 
 def test_discovery_override_fields_are_not_public() -> None:
@@ -158,6 +160,7 @@ def test_v2_private_fields_are_absent_from_browser_contracts() -> None:
             "machine_identifier",
             "rating_key",
             "tasterr_plex_max_connection_probes",
+            "tasterr_watch_history_days",
             "profile",
             "profiles",
             "similarity",

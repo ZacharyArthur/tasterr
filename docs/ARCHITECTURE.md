@@ -114,8 +114,9 @@ link timestamps, then schedules normal background imports, Seerr before Plex and
 Jellyfin history joins the same per-user scheduling guard and cancellation lifecycle.
 It waits for Seerr sync, reads `/Items?userId=` with header-only API-key auth, and
 maps movie TMDB provider ids and episode series ids to canonical `watched_jellyfin`
-facts. First imports cover 365 days; incremental imports overlap the success
-watermark by 24 hours. Pages and series batches contain at most 100 items, reads
+facts. First imports cover the `TASTERR_WATCH_HISTORY_DAYS` window (default 365
+days); incremental imports overlap the success watermark by 24 hours. Pages and
+series batches contain at most 100 items, reads
 cap at 500 items per type under a 30-second deadline, and writes commit at most
 100 facts per transaction. Only complete reads advance the watermark; raw items
 and tokens are discarded. Jellyfin watches anchor **Because You Watched** and

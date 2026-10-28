@@ -1,5 +1,9 @@
 # Unreleased
 
+- `TASTERR_WATCH_HISTORY_DAYS` configures the first Plex/Jellyfin history sync
+  lookback (1–3650 days, default 365). Later syncs and caps are unchanged; restart
+  and use **Reset taste profile** to re-import existing links with the new window.
+
 - Watched titles now disappear from each member's discovery by default, including
   series with any watched episode and retained history from disabled taste sources.
   Not interested always hides dismissed titles across discovery. Search, My List,

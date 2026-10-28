@@ -164,7 +164,8 @@ or fail login/Home and SHALL be bounded to four deterministic servers, pages of
 concurrency eight, and a 30-second network/mapping deadline.
 
 Each sync SHALL capture a cutoff. A first sync SHALL request from no earlier than
-365 days before that cutoff; a later sync SHALL start 24 hours before
+the configured initial window (`TASTERR_WATCH_HISTORY_DAYS`, default 365 days, see
+`app-settings`) before that cutoff; a later sync SHALL start 24 hours before
 the Plex link's `sync_synced_at`. For each PMS, the identity validated by `/api/v2/user`
 SHALL resolve to exactly one positive server-local `/accounts` row: first by exact
 numeric `id` or `key`, or, when no numeric match exists, by one case-insensitive
@@ -196,7 +197,13 @@ SHALL be retained.
 
 - **WHEN** a user whose Plex link has no sync timestamps signs in
 - **THEN** sign-in completes normally while one background task imports at most
-  the bounded 365-day history window
+  the bounded history window configured by `TASTERR_WATCH_HISTORY_DAYS`
+
+#### Scenario: Longer configured window reaches older plays
+
+- **WHEN** `TASTERR_WATCH_HISTORY_DAYS` is 730 and a Plex link's first sync runs
+- **THEN** history is requested from 730 days before the cutoff, within the same
+  row and metadata caps
 
 #### Scenario: Sync does not depend on the sign-in method
 

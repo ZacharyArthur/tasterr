@@ -2,7 +2,7 @@
 # pyright: reportUnknownArgumentType=false
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Event
 from typing import cast
@@ -640,6 +640,7 @@ def test_reset_cancels_and_awaits_a_real_hung_plex_import(
                     "test-secret-key",
                     encrypt_token("test-secret-key", "plex-token"),
                     user_id,
+                    timedelta(days=365),
                 )
             )
             app.state.plex_history_tasks[user_id] = task

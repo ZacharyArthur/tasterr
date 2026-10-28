@@ -123,7 +123,9 @@ commit the attempt timestamp before network work and SHALL NOT delay or fail
 sign-in or Home. It SHALL read the linked user's played movies and played
 episodes with the API key, newest play first, in pages of 100, at most 500 rows
 per item type, under a 30-second network/mapping deadline. A first sync SHALL
-read plays no older than 365 days before the captured cutoff; a later sync SHALL
+read plays no older than the configured initial window
+(`TASTERR_WATCH_HISTORY_DAYS`, default 365 days, see `app-settings`) before the
+captured cutoff; a later sync SHALL
 stop at plays older than 24 hours before `sync_synced_at`.
 
 Movies SHALL map only from a valid positive TMDB provider id within the shared
@@ -141,7 +143,13 @@ write transaction. No raw Jellyfin item, item id, or play data SHALL be retained
 
 - **WHEN** a user links Jellyfin
 - **THEN** the response returns immediately while one background task imports
-  at most the bounded 365-day window
+  at most the bounded window configured by `TASTERR_WATCH_HISTORY_DAYS`
+
+#### Scenario: Play just outside the default window
+
+- **WHEN** a member's newest Jellyfin play is 400 days old and
+  `TASTERR_WATCH_HISTORY_DAYS` is 730
+- **THEN** the first sync imports it
 
 #### Scenario: Episodes count toward their series
 

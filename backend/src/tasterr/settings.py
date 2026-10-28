@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     tasterr_port: int = 8000
     tasterr_forwarded_allow_ips: str = "127.0.0.1"
     tasterr_plex_max_connection_probes: int = Field(default=6, ge=3, le=12)
+    tasterr_watch_history_days: int = Field(default=365, ge=1, le=3650)
     tasterr_hide_library_items: bool | None = None
     tasterr_hide_watched_items: bool | None = None
     tasterr_excluded_service_ids: Annotated[list[StrictInt] | None, NoDecode] = Field(

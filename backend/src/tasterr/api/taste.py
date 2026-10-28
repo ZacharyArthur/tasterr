@@ -39,7 +39,6 @@ from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
 
 logger = logging.getLogger("tasterr.taste")
-WATCH_HISTORY_INITIAL_WINDOW = timedelta(days=365)
 WATCH_HISTORY_OVERLAP = timedelta(hours=24)
 WATCH_HISTORY_WRITE_BATCH = 100
 
@@ -250,7 +249,14 @@ def schedule_plex_history(
             server_id=settings.plex_server_id,
         )
         history = PlexCatalogService(plex, None, cast("Cache", state.catalog_cache))
-        await import_plex_history(maker, history, secret_key, plex_token_enc, user_id)
+        await import_plex_history(
+            maker,
+            history,
+            secret_key,
+            plex_token_enc,
+            user_id,
+            timedelta(days=settings.tasterr_watch_history_days),
+        )
 
     _start_history_task(tasks, user_id, run())
 
@@ -275,7 +281,9 @@ def schedule_jellyfin_history(
     async def run() -> None:
         while user_id in state.seeding:
             await asyncio.sleep(0.05)
-        await import_jellyfin_history(maker, client, user_id)
+        await import_jellyfin_history(
+            maker, client, user_id, timedelta(days=settings.tasterr_watch_history_days)
+        )
 
     _start_history_task(tasks, user_id, run())
 
@@ -286,7 +294,10 @@ async def cancel_jellyfin_history(request: Request, user_id: int) -> None:
 
 
 async def import_jellyfin_history(
-    maker: "async_sessionmaker[AsyncSession]", client: JellyfinClient, user_id: int
+    maker: "async_sessionmaker[AsyncSession]",
+    client: JellyfinClient,
+    user_id: int,
+    initial_window: timedelta,
 ) -> None:
     cutoff = utcnow()
     async with maker() as db:
@@ -302,9 +313,7 @@ async def import_jellyfin_history(
             link.sync_attempted_at = cutoff
             await finish_io(db.commit())
             start = (
-                cutoff - WATCH_HISTORY_INITIAL_WINDOW
-                if synced_at is None
-                else synced_at - WATCH_HISTORY_OVERLAP
+                cutoff - initial_window if synced_at is None else synced_at - WATCH_HISTORY_OVERLAP
             )
             result = await read_history(client, link.external_id, start, cutoff)
             watches = list(result.watches.items())
@@ -333,6 +342,7 @@ async def import_plex_history(
     secret_key: str,
     plex_token_enc: str,
     user_id: int,
+    initial_window: timedelta,
 ) -> None:
     """Commit the attempt, finish all reads, then write facts in small batches."""
     cutoff = utcnow()
@@ -361,11 +371,7 @@ async def import_plex_history(
         except InvalidToken:
             logger.warning("plex history: session token unavailable")
             return
-        start = (
-            cutoff - WATCH_HISTORY_INITIAL_WINDOW
-            if synced_at is None
-            else synced_at - WATCH_HISTORY_OVERLAP
-        )
+        start = cutoff - initial_window if synced_at is None else synced_at - WATCH_HISTORY_OVERLAP
         try:
             result = await history.history(
                 account_token,

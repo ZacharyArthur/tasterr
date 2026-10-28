@@ -94,6 +94,10 @@ services:
       # TASTERR_PLEX_MAX_CONNECTION_PROBES: default 6, range 3-12; bounded probes
       # per advertised server (up to four without pinning). Server-side only.
       # TASTERR_PLEX_MAX_CONNECTION_PROBES: ${TASTERR_PLEX_MAX_CONNECTION_PROBES:-6}
+      # TASTERR_WATCH_HISTORY_DAYS: default 365, range 1-3650; first Plex/Jellyfin
+      # history sync only. Caps unchanged; restart and Reset taste profile to re-import.
+      # Requires a release after 2.3.1; ignored by 2.3.1.
+      # TASTERR_WATCH_HISTORY_DAYS: ${TASTERR_WATCH_HISTORY_DAYS:-365}
       # TASTERR_HIDE_LIBRARY_ITEMS: default unset (admin preference); explicit
       # true/false overrides and locks the admin control. Omit to leave editable.
       # TASTERR_HIDE_LIBRARY_ITEMS: ${TASTERR_HIDE_LIBRARY_ITEMS}
