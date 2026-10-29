@@ -124,3 +124,83 @@ def test_device_identifier_is_stable_and_secret_independent() -> None:
     assert jellyfin_device_identifier("secret") == jellyfin_device_identifier("secret")
     assert jellyfin_device_identifier("secret") != jellyfin_device_identifier("different")
     assert "secret" not in jellyfin_device_identifier("secret")
+
+
+@pytest.mark.parametrize("next_up", [False, True])
+async def test_resume_paths_scoping_header_only_key_and_strict_fields(next_up: bool) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == ("/Shows/NextUp" if next_up else "/UserItems/Resume")
+        expected = {
+            "userId": USER_ID,
+            "Fields": "ProviderIds",
+            "EnableUserData": "true",
+            "Limit": "50",
+        }
+        expected.update(
+            {"EnableResumable": "false", "EnableRewatching": "false"}
+            if next_up
+            else {"IncludeItemTypes": "Movie,Episode", "MediaTypes": "Video"}
+        )
+        assert dict(request.url.params) == expected
+        assert f'Token="{KEY}"' in request.headers["Authorization"]
+        assert sum(KEY in value for value in request.headers.values()) == 1
+        assert KEY not in str(request.url)
+        assert request.extensions["timeout"]["read"] == 5.0
+        return httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {
+                        **ITEM,
+                        "Type": "Episode",
+                        "RunTimeTicks": 100,
+                        "ParentIndexNumber": 0,
+                        "IndexNumber": 3,
+                        "UserData": {"PlaybackPositionTicks": 40},
+                        "Secret": KEY,
+                    }
+                ],
+                "TotalRecordCount": 1,
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        client = JellyfinClient(http, "http://jellyfin", KEY, "device")
+        page = await (client.next_up(USER_ID) if next_up else client.resume_items(USER_ID))
+        item = page.items[0]
+        assert (item.type, item.run_time_ticks, item.parent_index_number, item.index_number) == (
+            "Episode",
+            100,
+            0,
+            3,
+        )
+        assert item.user_data is not None and item.user_data.playback_position_ticks == 40
+        assert KEY not in str(page.model_dump())
+
+
+@pytest.mark.parametrize("next_up", [False, True])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {},
+        {"Items": {}, "TotalRecordCount": 0},
+        {"Items": [ITEM] * 51, "TotalRecordCount": 51},
+        *[
+            {"Items": [{**ITEM, field: value}], "TotalRecordCount": 1}
+            for field, value in (
+                ("RunTimeTicks", "100"),
+                ("ParentIndexNumber", True),
+                ("IndexNumber", 1.2),
+                ("UserData", {"PlaybackPositionTicks": "40"}),
+                ("Type", 1),
+            )
+        ],
+    ],
+)
+async def test_bad_resume_shapes_raise_typed_errors(next_up: bool, bad: dict[str, object]) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=bad))
+    ) as http:
+        client = JellyfinClient(http, "http://jellyfin", KEY, "device")
+        with pytest.raises(UpstreamRejected):
+            await (client.next_up(USER_ID) if next_up else client.resume_items(USER_ID))

@@ -288,9 +288,10 @@ SHALL be retained.
 
 ### Requirement: Continue Watching composes as a capability-gated rail
 
-For a user with a Plex link and the rail type enabled, the home composer SHALL add
-`continue-watching` titled **Continue Watching** ahead of the other personalized
-providers. It SHALL read bounded items from
+For a user with a usable Plex link or a usable Jellyfin link (as defined in
+`jellyfin-personalization`) and the rail type enabled, the home composer SHALL
+add `continue-watching` titled **Continue Watching** ahead of the other
+personalized providers. For the Plex contribution it SHALL read bounded items from
 `MediaContainer.Hub[].Metadata` on each validated server, retain only
 account-scoped in-progress movie items and eligible in-progress or next-up
 episode items, order them by the first available item, show, or season
@@ -298,16 +299,22 @@ last-viewed timestamp and deterministic resource/input order, de-duplicate equal
 per-server rating keys, and let at most the first `RAIL_SIZE = 20` enter Plex
 metadata/GUID expansion. A next-up episode with none of those timestamps SHALL
 remain eligible in its server-provided hub position rather than be dropped.
-Those candidates SHALL then be canonically mapped/merged and no more than 20
-SHALL enter browser-facing TMDB resolution. Each server hub SHALL return at most
-50 items. The complete load SHALL have a ten-second wall-clock deadline. Final
-secret-free results SHALL be cached per user for five minutes. A failed/timed-out
-load SHALL replace the result with an empty negative entry for five minutes;
+Those candidates SHALL then be canonically mapped, merged with any Jellyfin
+candidates as defined in `jellyfin-personalization`, and no more than 20 merged
+candidates SHALL enter browser-facing TMDB resolution. Each server hub SHALL
+return at most 50 items. Plex source collection and canonical mapping SHALL have
+a ten-second wall-clock deadline, excluding shared browser-facing TMDB resolution.
+That resolution SHALL have its own ten-second deadline after source collection;
+expiry SHALL cancel resolution and cache an empty negative entry for five minutes.
+Final secret-free results SHALL be cached per user for five
+minutes in one entry shared with any Jellyfin contribution. A failed or timed-out
+Plex load SHALL contribute nothing to that entry; when no contributing source
+succeeds, the entry SHALL be an empty negative entry for five minutes;
 stale-on-error SHALL NOT be used. Plex capability gating SHALL happen before
 cache access. Raw Plex payloads, server connections, and access tokens SHALL NOT
-be cached. The provider SHALL use no request DB session and SHALL compose non-
-exclusively; its declared response order SHALL remain first among personalized
-providers.
+be cached. The provider SHALL use no request DB session and SHALL compose
+non-exclusively; its declared response order SHALL remain first among
+personalized providers.
 
 Progress SHALL equal `floor(100 * view_offset / duration)` when the offset is
 finite and non-negative and duration is finite and positive. Started items SHALL
@@ -386,13 +393,22 @@ independent-degradation behavior.
 
 - **WHEN** plex.tv or every accessible PMS is unavailable and no cached result is
   usable
-- **THEN** Continue Watching is omitted while the remaining Home feed returns
+- **THEN** the Plex contribution is omitted while the remaining Home feed returns
 
 #### Scenario: Hanging Continue Watching is negatively cached
 
-- **WHEN** the aggregate Plex load exceeds ten seconds
+- **WHEN** the Plex source collection and canonical mapping exceed ten seconds
+  for a user whose only
+  Continue Watching source is Plex
 - **THEN** Home omits the rail, returns normally, and another request within five
   minutes performs no Plex retry
+
+#### Scenario: Plex failure keeps the Jellyfin contribution
+
+- **WHEN** a user with Plex and Jellyfin links loads Home, the Plex load fails,
+  and Jellyfin returns eligible items
+- **THEN** Continue Watching shows the Jellyfin items and that result is cached for
+  five minutes
 
 #### Scenario: Recovered Continue Watching replaces a negative entry
 

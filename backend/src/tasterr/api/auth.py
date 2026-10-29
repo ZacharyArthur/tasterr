@@ -27,6 +27,7 @@ from tasterr.auth.login import (
 from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket, mutation_rate_limit
 from tasterr.auth.sessions import revoke_session
+from tasterr.catalog.resume import continue_watching_key
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexAuthClient
@@ -276,6 +277,7 @@ async def poll_plex_pin(
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
     except AccountConflict as error:
         raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
+    await request.app.state.catalog_cache.invalidate(continue_watching_key(user.id))
     _set_cookie(request, response, token)
     logger.info("auth: plex login succeeded")
     await schedule_history(request, settings, db, user.id)
@@ -376,6 +378,7 @@ async def jellyfin_login(
         raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
     except UpstreamUnavailable as error:
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
+    await request.app.state.catalog_cache.invalidate(continue_watching_key(user.id))
     _set_cookie(request, response, token)
     logger.info("auth: jellyfin login succeeded")
     await schedule_history(request, settings, db, user.id)

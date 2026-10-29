@@ -10,6 +10,7 @@ from pydantic import SecretStr
 import tasterr.cache as cache_module
 from tasterr.cache import Cache
 from tasterr.catalog.plex import PlexCatalogService
+from tasterr.catalog.resume import continue_watching
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.plex import (
     PlexCloudAccount,
@@ -70,14 +71,16 @@ async def test_continue_watching_changes_language_only_after_five_minute_expiry(
     plex = cast("PlexMediaClient", Plex())
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         tmdb = TmdbClient(http, "test-key", cache)
-        english = PlexCatalogService(plex, CatalogService(tmdb, language="en-US"), cache)
-        spanish = PlexCatalogService(plex, CatalogService(tmdb, language="es-ES"), cache)
-        assert (await english.continue_watching(1, "test-token"))[0].title == "Deep"
+        source = PlexCatalogService(plex, None, cache)
+        sources = [lambda: source.resume_candidates("test-token")]
+        english = CatalogService(tmdb, language="en-US")
+        spanish = CatalogService(tmdb, language="es-ES")
+        assert (await continue_watching(cache, english, 1, sources))[0].title == "Deep"
         now += 299
-        cached = await spanish.continue_watching(1, "test-token")
+        cached = await continue_watching(cache, spanish, 1, sources)
         assert (cached[0].title, cached[0].overview) == ("Deep", "en-US")
         assert seen == ["en-US"]
         now += 1
-        refreshed = await spanish.continue_watching(1, "test-token")
+        refreshed = await continue_watching(cache, spanish, 1, sources)
         assert (refreshed[0].title, refreshed[0].overview) == ("Profundo", "es-ES")
         assert seen == ["en-US", "es-ES"]

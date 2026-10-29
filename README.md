@@ -38,12 +38,16 @@ an administrator even without Seerr.
 
 Jellyfin links learn taste from played movies and episodes (collapsed to their
 series), with the same bounded background sync and **Because You Watched** rails.
+They also contribute resumable movies and episodes plus next-up episodes to
+Continue Watching. Members with Plex and Jellyfin get one merged rail, with the
+newest known activity per title, cached for five minutes. Jellyfin next-up recency
+uses a bounded recent-episode lookup.
 Only the Jellyfin user id is retained; the sign-in token is immediately logged out.
 Jellyfin administrators also administer Tasterr. All member avatars render as
-initials. Jellyfin playback links, avatars, and Continue Watching are not supported.
+initials. Jellyfin playback links and avatars remain unsupported.
 
 Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
-history or Plex progress, persist household groups, or run more than one process.
+history or playback progress, persist household groups, or run more than one process.
 
 Members use `/account` to link/unlink providers, delete their local account, and
 choose whether Seerr request history, Plex/Jellyfin watch history, and browsing

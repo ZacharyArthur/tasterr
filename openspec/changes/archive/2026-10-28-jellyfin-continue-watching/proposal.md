@@ -16,16 +16,23 @@ with `plex-personalization`.
 - A member with a Jellyfin link (Jellyfin configured, rail type enabled) gets
   Continue Watching from Jellyfin's resumable movies and episodes plus next-up
   episodes, read live with the API key scoped to the member's Jellyfin user id.
+- One bounded page of the 100 most recent played episodes supplies next-up
+  activity dates; it neither adds cards nor imports history. A missing match
+  falls back to the series date, then next-up position after dated candidates.
 - A member with both Plex and Jellyfin links gets **one** Continue Watching
   rail: candidates from both sources are canonically mapped to TMDB, merged per
   title (newest activity wins), and capped at 20 before TMDB resolution.
 - One per-user five-minute cache entry covers the merged rail. A failure in one
   source drops only that source's contribution. A failure in every contributing
   source caches the empty negative entry, as Plex-only members get today.
+- Shared TMDB resolution has its own ten-second deadline after the independent
+  ten-second source loads. Expiry cancels resolution and caches an empty result;
+  a cold rail can therefore take approximately twenty seconds.
 - Progress, episode context, and next-up rules match Plex: progress 1–99 %,
   `S{n} E{n}` context, and next-up episodes allowed with null progress.
 - Unlinking Jellyfin clears the cached Continue Watching entry, as unlinking
-  Plex does. The admin `continue-watching` toggle gates Jellyfin work too.
+  Plex does. Successful Plex/Jellyfin link saves clear it too, including negative
+  entries. The admin `continue-watching` toggle gates Jellyfin work too.
 - Docs and README drop "Continue Watching is not supported" for Jellyfin.
 
 ## Non-goals

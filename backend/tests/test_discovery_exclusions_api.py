@@ -18,6 +18,7 @@ from tests.test_browse_api import (
 
 from tasterr.api.runtime_settings import get_runtime_settings
 from tasterr.catalog.models import MediaSummary, MediaType
+from tasterr.catalog.resume import ResumeCandidate
 from tasterr.catalog.service import CatalogService
 from tasterr.db.engine import create_engine
 from tasterr.db.models import Signal
@@ -102,11 +103,8 @@ def test_personal_exclusions_cover_discovery_and_preserve_access_and_taste(
         def __init__(self, *_args: object) -> None:
             pass
 
-        async def continue_watching(self, user_id: int, account_token: str) -> list[MediaSummary]:
-            return [
-                _summary(i).model_copy(update={"media_type": media, "progress_percent": 50})
-                for i in range(1, 7)
-            ]
+        async def resume_candidates(self, account_token: str) -> list[ResumeCandidate]:
+            return [ResumeCandidate(media, i, -i, (0, 0), 50) for i in range(1, 7)]
 
     monkeypatch.setattr("tasterr.api.home.PlexCatalogService", Resume)
 

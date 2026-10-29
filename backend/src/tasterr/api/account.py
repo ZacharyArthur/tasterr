@@ -43,7 +43,7 @@ from tasterr.auth.login import (
     link_account,
 )
 from tasterr.auth.ratelimit import mutation_rate_limit
-from tasterr.catalog.plex import continue_watching_key
+from tasterr.catalog.resume import continue_watching_key
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.db.models import LinkedAccount, Provider, Signal, User, utcnow
 from tasterr.recommend import store
@@ -193,6 +193,8 @@ async def _save_link(
         logger.info("account: link %s refused", account.provider)
         raise HTTPException(status_code=409, detail=CONFLICT_GUIDANCE) from error
     logger.info("account: link %s succeeded", account.provider)
+    if account.provider in ("plex", "jellyfin"):
+        await request.app.state.catalog_cache.invalidate(continue_watching_key(authed.user.id))
     await schedule_history(request, settings, db, authed.user.id)
 
 
@@ -394,7 +396,7 @@ async def unlink_account(
             await invalidate_profile(db, user_id)
         await db.commit()
         logger.info("account: unlink %s succeeded", provider)
-        if provider == "plex":
+        if provider in ("plex", "jellyfin"):
             await request.app.state.catalog_cache.invalidate(continue_watching_key(user_id))
 
 

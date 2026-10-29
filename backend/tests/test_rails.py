@@ -19,6 +19,7 @@ from tasterr.catalog.models import (
     WatchProviders,
 )
 from tasterr.catalog.plex import PlexCatalogService
+from tasterr.catalog.resume import ResumeCandidate
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.db.models import User
@@ -199,13 +200,15 @@ class FakePlexCatalog:
         self.calls = 0
         self.fail = False
 
-    async def continue_watching(self, user_id: int, account_token: str) -> list[MediaSummary]:
+    async def resume_candidates(self, account_token: str) -> list[ResumeCandidate]:
         self.calls += 1
-        assert user_id == 1
         assert account_token == "account-token"
         if self.fail:
             raise UpstreamUnavailable("plex down")
-        return self.items
+        return [
+            ResumeCandidate(item.media_type, item.id, -index, (0, 0), item.progress_percent)
+            for index, item in enumerate(self.items)
+        ]
 
 
 def _resume(*ids: int) -> list[MediaSummary]:
@@ -319,18 +322,18 @@ async def test_continue_watching_fetch_overlaps_but_keeps_response_priority() ->
         await gate.wait()
 
     original_trending = fake.trending
-    original_continue = plex.continue_watching
+    original_continue = plex.resume_candidates
 
     async def trending() -> list[MediaSummary]:
         await wait_for_peer("trending")
         return await original_trending()
 
-    async def continue_watching(user_id: int, account_token: str) -> list[MediaSummary]:
+    async def resume_candidates(account_token: str) -> list[ResumeCandidate]:
         await wait_for_peer("plex")
-        return await original_continue(user_id, account_token)
+        return await original_continue(account_token)
 
     fake.trending = trending  # type: ignore[method-assign]
-    plex.continue_watching = continue_watching  # type: ignore[method-assign]
+    plex.resume_candidates = resume_candidates  # type: ignore[method-assign]
 
     feed = await build_home(_plex_ctx(fake, plex))
 

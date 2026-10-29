@@ -38,6 +38,7 @@ class JellyfinUserData(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     last_played_date: datetime | None = Field(default=None, alias="LastPlayedDate")
+    playback_position_ticks: int | None = Field(default=None, alias="PlaybackPositionTicks")
 
 
 class JellyfinItem(BaseModel):
@@ -47,6 +48,10 @@ class JellyfinItem(BaseModel):
     provider_ids: dict[str, str] = Field(default_factory=dict, alias="ProviderIds")
     series_id: str | None = Field(default=None, alias="SeriesId", pattern=r"^[a-fA-F0-9-]{32,36}$")
     user_data: JellyfinUserData | None = Field(default=None, alias="UserData")
+    type: str | None = Field(default=None, alias="Type")
+    run_time_ticks: int | None = Field(default=None, alias="RunTimeTicks")
+    parent_index_number: int | None = Field(default=None, alias="ParentIndexNumber")
+    index_number: int | None = Field(default=None, alias="IndexNumber")
 
 
 class JellyfinItems(BaseModel):
@@ -136,6 +141,7 @@ class JellyfinClient:
                 "IncludeItemTypes": item_type,
                 "Filters": "IsPlayed",
                 "Recursive": "true",
+                "EnableUserData": "true",
                 "Fields": "ProviderIds",
                 "SortBy": "DatePlayed",
                 "SortOrder": "Descending",
@@ -144,6 +150,38 @@ class JellyfinClient:
             },
         )
         return self._items(response)
+
+    async def resume_items(self, user_id: str) -> JellyfinItems:
+        response = await self._request(
+            "GET",
+            "/UserItems/Resume",
+            token=self._key,
+            params={
+                "userId": user_id,
+                "Fields": "ProviderIds",
+                "EnableUserData": "true",
+                "Limit": 50,
+                "IncludeItemTypes": "Movie,Episode",
+                "MediaTypes": "Video",
+            },
+        )
+        return self._items(response, limit=50)
+
+    async def next_up(self, user_id: str) -> JellyfinItems:
+        response = await self._request(
+            "GET",
+            "/Shows/NextUp",
+            token=self._key,
+            params={
+                "userId": user_id,
+                "Fields": "ProviderIds",
+                "EnableUserData": "true",
+                "Limit": 50,
+                "EnableResumable": "false",
+                "EnableRewatching": "false",
+            },
+        )
+        return self._items(response, limit=50)
 
     async def series(self, user_id: str, ids: list[str]) -> JellyfinItems:
         if not 1 <= len(ids) <= JELLYFIN_PAGE_SIZE:
@@ -156,17 +194,18 @@ class JellyfinClient:
                 "userId": user_id,
                 "Ids": ",".join(ids),
                 "Fields": "ProviderIds",
+                "EnableUserData": "true",
                 "Limit": JELLYFIN_PAGE_SIZE,
             },
         )
         return self._items(response)
 
     @staticmethod
-    def _items(response: httpx.Response) -> JellyfinItems:
+    def _items(response: httpx.Response, *, limit: int = JELLYFIN_PAGE_SIZE) -> JellyfinItems:
         try:
             page = JellyfinItems.model_validate_json(response.content, strict=True)
         except ValueError:
             raise UpstreamRejected(200) from None
-        if len(page.items) > JELLYFIN_PAGE_SIZE:
+        if len(page.items) > limit:
             raise UpstreamRejected(200)
         return page

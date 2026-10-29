@@ -15,13 +15,17 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.test_auth_api import PLEX_TOKEN, SECRET, _harness, _poll_pin, _start_pin_login
+from tests.test_clients_jellyfin import TOKEN, USER
 
+from tasterr.api.auth import AuthContext, get_auth_context
 from tasterr.api.taste import history_guard
 from tasterr.auth.crypto import decrypt_token
 from tasterr.auth.login import CONFLICT_GUIDANCE, get_link
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.cache import CacheOpts
+from tasterr.catalog.resume import continue_watching_key
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexCloudAccount, PlexResourceAccess
 from tasterr.db.engine import create_engine
 from tasterr.db.models import LinkedAccount, Profile, Signal, User, UserSession
@@ -151,6 +155,73 @@ def test_summary_link_refresh_unlink_and_credentials_survive_logout(tmp_path: Pa
         assert client.post("/api/v1/account/links/seerr/unlink", json={}).status_code == 409
 
 
+@pytest.mark.parametrize("provider", ["plex", "jellyfin"])
+@pytest.mark.parametrize("negative", [False, True])
+def test_link_media_account_clears_positive_and_negative_continue_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    negative: bool,
+) -> None:
+    harness = _harness(tmp_path)
+    harness.plex.token = PLEX_TOKEN
+    settings = cast(Settings, harness.app.dependency_overrides[get_settings]())
+    settings.jellyfin_internal_url = "http://jellyfin"
+    settings.jellyfin_api_key = SecretStr("fixture-key")
+
+    async def no_history(*_args: object) -> None:
+        pass
+
+    monkeypatch.setattr("tasterr.api.account.schedule_history", no_history)
+    monkeypatch.setattr("tasterr.api.auth.schedule_history", no_history)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/Users/AuthenticateByName":
+            return httpx.Response(200, json={"User": USER, "AccessToken": TOKEN})
+        assert request.url.path == "/Sessions/Logout"
+        return httpx.Response(204)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    auth = cast(AuthContext, harness.app.dependency_overrides[get_auth_context]())
+    auth.jellyfin = JellyfinClient(http, "http://jellyfin", "fixture-key", "device")
+    harness.app.dependency_overrides[get_auth_context] = lambda: auth
+    try:
+        with TestClient(harness.app) as client:
+            login(client)
+            assert client.portal is not None
+
+            async def cached() -> list[int]:
+                return [] if negative else [1]
+
+            client.portal.call(
+                harness.app.state.catalog_cache.cached,
+                continue_watching_key(1),
+                CacheOpts(300, 0),
+                cached,
+            )
+            response = (
+                link_plex(client)
+                if provider == "plex"
+                else client.post(
+                    "/api/v1/account/links/jellyfin",
+                    json={"username": "Viewer", "password": "fixture-password"},
+                )
+            )
+            assert response.status_code == (200 if provider == "plex" else 204)
+
+            async def fresh() -> list[int]:
+                return [2]
+
+            assert client.portal.call(
+                harness.app.state.catalog_cache.cached,
+                continue_watching_key(1),
+                CacheOpts(300, 0),
+                fresh,
+            ) == [2]
+    finally:
+        asyncio.run(http.aclose())
+
+
 @pytest.mark.parametrize(
     "path,body",
     [
@@ -270,7 +341,7 @@ def test_unlink_history_and_continue_cache(tmp_path: Path, delete_history: bool)
 
         client.portal.call(
             harness.app.state.catalog_cache.cached,
-            "plex:continue-watching:user:1",
+            continue_watching_key(1),
             CacheOpts(300, 0),
             load,
         )
@@ -287,7 +358,7 @@ def test_unlink_history_and_continue_cache(tmp_path: Path, delete_history: bool)
         assert (
             client.portal.call(
                 harness.app.state.catalog_cache.cached,
-                "plex:continue-watching:user:1",
+                continue_watching_key(1),
                 CacheOpts(300, 0),
                 replacement,
             )
@@ -321,7 +392,7 @@ def test_account_deletion_cascade_wrong_confirmation_and_session_invalidation(
 
         client.portal.call(
             harness.app.state.catalog_cache.cached,
-            "plex:continue-watching:user:1",
+            continue_watching_key(1),
             CacheOpts(300, 0),
             cached,
         )
@@ -336,7 +407,7 @@ def test_account_deletion_cascade_wrong_confirmation_and_session_invalidation(
         assert (
             client.portal.call(
                 harness.app.state.catalog_cache.cached,
-                "plex:continue-watching:user:1",
+                continue_watching_key(1),
                 CacheOpts(300, 0),
                 replacement,
             )

@@ -279,10 +279,30 @@ available) from `/account`, or their next sign-in creates a new, empty Tasterr a
 
 Plex history sync is best-effort and never blocks sign-in or Home. Tasterr evaluates
 one bounded import per user with a Plex link at most every six hours. Continue Watching is
-live, caller-scoped presentation data cached for five minutes; raw history, progress,
-server URLs, account ids, rating keys, and resource tokens are not stored. Plex
-failure removes the affected rail/import only. TMDB or Seerr degradation keeps its
-existing independent behavior.
+live, caller-scoped presentation data from linked Plex and Jellyfin accounts.
+Jellyfin contributes resumable movies and episodes plus next-up episodes using
+reads scoped to the linked user id. Members with both links get one rail: newest
+activity wins per TMDB title, then non-null progress, then Plex on equal activity.
+At most 20 merged titles enter TMDB resolution. One per-user cache entry lasts
+five minutes, with no stale progress served after expiry. Linking, refreshing, or
+unlinking either source clears the entry. The admin Continue Watching switch gates both sources; member
+taste-source toggles do not affect this rail. Cards open Tasterr title detail;
+Jellyfin playback links remain unsupported.
+
+Jellyfin next-up ordering uses matching activity from one page of the 100 most
+recently played episodes, read with the linked user's id. If a series is outside
+that window, its own last-played date is used when present; otherwise its next-up
+card keeps Jellyfin's supplied position after dated candidates. This presentation
+read does not import taste signals or advance history watermarks.
+
+Raw history, playback positions, Jellyfin item ids, progress, server URLs, account
+ids, rating keys, and resource tokens are not stored in SQLite. Each source has a
+ten-second deadline and a failure removes only its contribution. After source
+collection, shared TMDB resolution has a separate ten-second budget; expiry
+cancels resolution and caches an empty result for five minutes. A cold rail can
+therefore take approximately twenty seconds. When both sources
+fail, or the only linked source fails, the empty result is cached for five minutes.
+TMDB or Seerr degradation keeps its existing independent behavior.
 
 Tasterr only joins Plex media to TMDB through canonical GUIDs. A legacy Plex metadata
 agent may therefore leave an otherwise valid watch unresolved. Upgrade movie
@@ -348,12 +368,14 @@ same headers as defense-in-depth but must not weaken them.
   attempt with its encrypted token. Otherwise the request opens **Connect Seerr**;
   successful linking retries the original selection once.
 - Plex token invalid, plex.tv down, or every advertised server unreachable: ordinary
-  Home rails remain available; Continue Watching is omitted and history retries only
-  after the attempt throttle.
+  Home rails remain available; the Plex Continue Watching contribution is omitted
+  while Jellyfin can still contribute. History retries only after the attempt throttle.
 - One Plex server unreachable: successful siblings still contribute; the history
   success watermark waits for a later all-server bounded pass.
 - Jellyfin down: existing sessions keep browsing; history retries after its six-hour
-  attempt throttle. Jellyfin sign-in/linking returns a generic upstream error.
+  attempt throttle. Its Continue Watching contribution is omitted while Plex can
+  still contribute; no resume retry occurs within the five-minute cache lifetime.
+  Jellyfin sign-in/linking returns a generic upstream error.
 - Plex media without a canonical TMDB GUID: only that item is omitted; repair its
   library metadata as described above.
 

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.api.availability import AvailabilityDep
 from tasterr.api.catalog import CatalogDep
 from tasterr.api.runtime_settings import RuntimeSettingsDep
-from tasterr.api.taste import schedule_history
+from tasterr.api.taste import build_jellyfin, schedule_history
 from tasterr.auth.crypto import decrypt_token, plex_client_identifier
 from tasterr.auth.deps import AuthedSession, get_db, require_session
 from tasterr.auth.login import get_link
@@ -73,6 +73,16 @@ async def get_home(
                 request.app.state.catalog_cache,
             )
     taste = TasteService(db, catalog, availability)
+    jellyfin = None
+    jellyfin_user_id = None
+    if (
+        settings.jellyfin_configured
+        and RailType.CONTINUE_WATCHING not in runtime.disabled_rail_types
+    ):
+        jellyfin_link = await get_link(db, authed.user.id, "jellyfin")
+        if jellyfin_link is not None:
+            jellyfin = build_jellyfin(request, settings)
+            jellyfin_user_id = jellyfin_link.external_id
     feed = await build_home(
         RailContext(
             catalog,
@@ -80,6 +90,9 @@ async def get_home(
             taste=taste,
             plex=plex,
             plex_account_token=plex_account_token,
+            jellyfin=jellyfin,
+            jellyfin_user_id=jellyfin_user_id,
+            resume_cache=request.app.state.catalog_cache,
             disabled_rail_types=frozenset(runtime.disabled_rail_types),
         )
     )

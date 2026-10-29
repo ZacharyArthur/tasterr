@@ -212,9 +212,9 @@ The server-owned rail type registry SHALL add `continue-watching`,
 Watching**, **Picks You Wouldn't Usually Watch**, and **Something for Everyone
 Tonight**. Each type SHALL be absent from the default disabled set and therefore
 enabled for existing/fresh settings until an admin disables it. Disablement SHALL
-gate the corresponding provider/member/blend work before any Plex, profile, or
-catalog fetch. Existing stored settings SHALL remain valid without a migration or
-bootstrap rewrite.
+gate the corresponding provider/member/blend work before any Plex, Jellyfin,
+profile, or catalog fetch. Existing stored settings SHALL remain valid without a
+migration or bootstrap rewrite.
 
 #### Scenario: Existing settings enable new types by default
 
@@ -224,8 +224,8 @@ bootstrap rewrite.
 #### Scenario: Admin can disable one V2 rail only
 
 - **WHEN** an admin saves `continue-watching` in the disabled set
-- **THEN** Continue Watching performs no Plex work while unexpected picks,
-  household blend, and all other enabled rail types remain available
+- **THEN** Continue Watching performs no Plex or Jellyfin work while unexpected
+  picks, household blend, and all other enabled rail types remain available
 
 #### Scenario: Settings API owns V2 descriptors
 

@@ -16,8 +16,11 @@ remain eligible in its server-provided hub position rather than be dropped.
 Those candidates SHALL then be canonically mapped, merged with any Jellyfin
 candidates as defined in `jellyfin-personalization`, and no more than 20 merged
 candidates SHALL enter browser-facing TMDB resolution. Each server hub SHALL
-return at most 50 items. The complete Plex load SHALL have a ten-second
-wall-clock deadline. Final secret-free results SHALL be cached per user for five
+return at most 50 items. Plex source collection and canonical mapping SHALL have
+a ten-second wall-clock deadline, excluding shared browser-facing TMDB resolution.
+That resolution SHALL have its own ten-second deadline after source collection;
+expiry SHALL cancel resolution and cache an empty negative entry for five minutes.
+Final secret-free results SHALL be cached per user for five
 minutes in one entry shared with any Jellyfin contribution. A failed or timed-out
 Plex load SHALL contribute nothing to that entry; when no contributing source
 succeeds, the entry SHALL be an empty negative entry for five minutes;
@@ -108,7 +111,8 @@ independent-degradation behavior.
 
 #### Scenario: Hanging Continue Watching is negatively cached
 
-- **WHEN** the aggregate Plex load exceeds ten seconds for a user whose only
+- **WHEN** the Plex source collection and canonical mapping exceed ten seconds
+  for a user whose only
   Continue Watching source is Plex
 - **THEN** Home omits the rail, returns normally, and another request within five
   minutes performs no Plex retry

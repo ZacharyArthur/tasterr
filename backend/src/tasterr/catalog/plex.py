@@ -5,8 +5,15 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from tasterr.cache import Cache, CacheOpts
+from tasterr.cache import Cache
 from tasterr.catalog.models import MAX_TMDB_ID, MediaSummary, MediaType
+from tasterr.catalog.resume import (
+    CONTINUE_RESOLUTION_MAX,
+    CONTINUE_WATCHING_DEADLINE_SECONDS,
+    ResumeCandidate,
+    continue_watching,
+    merge,
+)
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamError, UpstreamUnavailable
 from tasterr.clients.plex import (
@@ -18,15 +25,8 @@ from tasterr.clients.plex import (
 )
 
 HISTORY_DEADLINE_SECONDS = 30.0
-CONTINUE_WATCHING_DEADLINE_SECONDS = 10.0
 METADATA_MAX = 500
 METADATA_CONCURRENCY = 8
-CONTINUE_RESOLUTION_MAX = 20
-CONTINUE_CACHE_OPTS = CacheOpts(ttl=300, stale=0)
-
-
-def continue_watching_key(user_id: int) -> str:
-    return f"plex:continue-watching:user:{user_id}"
 
 
 @dataclass(frozen=True)
@@ -40,16 +40,6 @@ class PlexWatch:
 class PlexHistoryResult:
     watches: tuple[PlexWatch, ...]
     complete: bool
-
-
-@dataclass(frozen=True)
-class _Candidate:
-    media_type: MediaType
-    tmdb_id: int
-    timestamp: int
-    server_index: int
-    progress_percent: int | None = None
-    context: str | None = None
 
 
 class PlexCatalogService:
@@ -87,7 +77,7 @@ class PlexCatalogService:
             viewed_before=viewed_before,
             deadline=deadline,
         )
-        merged = _merge_candidates(candidates)
+        merged = merge(candidates)
         watches = tuple(
             PlexWatch(
                 media_type=item.media_type,
@@ -99,14 +89,14 @@ class PlexCatalogService:
         return PlexHistoryResult(watches, complete=discovery.complete and complete)
 
     async def continue_watching(self, user_id: int, account_token: str) -> list[MediaSummary]:
-        async def loader() -> list[MediaSummary]:
-            try:
-                async with asyncio.timeout(CONTINUE_WATCHING_DEADLINE_SECONDS):
-                    return await self._load_continue_watching(account_token)
-            except (TimeoutError, UpstreamError):
-                return []
-
-        return await self._cache.cached(continue_watching_key(user_id), CONTINUE_CACHE_OPTS, loader)
+        """Retain the Plex-only entry point while Home merges source candidates."""
+        return await continue_watching(
+            self._cache,
+            self._catalog,
+            user_id,
+            [lambda: self.resume_candidates(account_token)],
+            deadline=CONTINUE_WATCHING_DEADLINE_SECONDS,
+        )
 
     async def _history_candidates(
         self,
@@ -116,10 +106,10 @@ class PlexCatalogService:
         viewed_after: int,
         viewed_before: int,
         deadline: float,
-    ) -> tuple[list[_Candidate], bool]:
+    ) -> tuple[list[ResumeCandidate], bool]:
         resolver = _MetadataResolver(self._plex)
 
-        async def load(index: int, server: PlexServer) -> tuple[list[_Candidate], bool]:
+        async def load(index: int, server: PlexServer) -> tuple[list[ResumeCandidate], bool]:
             account_id = await self._plex.resolve_account_id(server, account)
             rows = await self._plex.history(
                 server,
@@ -140,7 +130,7 @@ class PlexCatalogService:
                 ),
                 return_exceptions=True,
             )
-            candidates: list[_Candidate] = []
+            candidates: list[ResumeCandidate] = []
             complete = True
             for result in mapped:
                 if isinstance(result, asyncio.CancelledError):
@@ -161,7 +151,7 @@ class PlexCatalogService:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-        candidates: list[_Candidate] = []
+        candidates: list[ResumeCandidate] = []
         complete = not pending
         for task in done:
             try:
@@ -173,7 +163,7 @@ class PlexCatalogService:
             complete = complete and mapping_complete
         return candidates, complete and len(done) == len(servers)
 
-    async def _load_continue_watching(self, account_token: str) -> list[MediaSummary]:
+    async def resume_candidates(self, account_token: str) -> list[ResumeCandidate]:
         _account, discovery = await self._account_and_discovery(account_token)
         servers = list(discovery.servers)
         if not servers:
@@ -252,7 +242,7 @@ class PlexCatalogService:
             ),
             return_exceptions=True,
         )
-        candidates: list[_Candidate] = []
+        candidates: list[ResumeCandidate] = []
         for result in mapped:
             if isinstance(result, asyncio.CancelledError):
                 raise result
@@ -262,20 +252,7 @@ class PlexCatalogService:
                 raise result
             if result is not None:
                 candidates.append(result)
-        merged = _merge_candidates(candidates)[:CONTINUE_RESOLUTION_MAX]
-        resolved = await asyncio.gather(
-            *(self._resume_item(item) for item in merged), return_exceptions=True
-        )
-        summaries: list[MediaSummary] = []
-        for result in resolved:
-            if isinstance(result, asyncio.CancelledError):
-                raise result
-            if isinstance(result, UpstreamError):
-                continue
-            if isinstance(result, BaseException):
-                raise result
-            summaries.append(result)
-        return summaries
+        return candidates
 
     async def _account_and_discovery(
         self, account_token: str
@@ -288,23 +265,6 @@ class PlexCatalogService:
             account.cancel()
             discovery.cancel()
             await asyncio.gather(account, discovery, return_exceptions=True)
-
-    async def _resume_item(self, item: _Candidate) -> MediaSummary:
-        if self._catalog is None:
-            raise RuntimeError("TMDB catalog is required for Continue Watching")
-        detail = await self._catalog.detail(item.media_type, item.tmdb_id)
-        return MediaSummary(
-            id=detail.id,
-            media_type=detail.media_type,
-            title=detail.title,
-            overview=detail.overview,
-            poster_path=detail.poster_path,
-            backdrop_path=detail.backdrop_path,
-            year=detail.year,
-            vote_average=detail.vote_average,
-            progress_percent=item.progress_percent,
-            context=item.context,
-        )
 
 
 class _MetadataResolver:
@@ -346,7 +306,7 @@ async def _canonical_candidate(
     timestamp: int | None,
     progress_percent: int | None = None,
     context: str | None = None,
-) -> _Candidate | None:
+) -> ResumeCandidate | None:
     if timestamp is None:
         return None
     if item.media_type == "movie":
@@ -367,11 +327,11 @@ async def _canonical_candidate(
         return None
     if tmdb_id is None:
         return None
-    return _Candidate(
+    return ResumeCandidate(
         media_type=media_type,
         tmdb_id=tmdb_id,
         timestamp=timestamp,
-        server_index=server_index,
+        source_rank=(0, server_index),
         progress_percent=progress_percent,
         context=context,
     )
@@ -418,27 +378,6 @@ def _episode_context(item: PlexPmsItem) -> str | None:
     ):
         return None
     return f"S{item.parent_index} E{item.index}"
-
-
-def _merge_candidates(items: list[_Candidate]) -> list[_Candidate]:
-    merged: dict[tuple[MediaType, int], _Candidate] = {}
-    for item in items:
-        key = (item.media_type, item.tmdb_id)
-        current = merged.get(key)
-        if current is None or (
-            item.timestamp,
-            item.progress_percent is not None,
-            -item.server_index,
-        ) > (
-            current.timestamp,
-            current.progress_percent is not None,
-            -current.server_index,
-        ):
-            merged[key] = item
-    return sorted(
-        merged.values(),
-        key=lambda item: (-item.timestamp, item.server_index, item.media_type, item.tmdb_id),
-    )
 
 
 def _remaining(deadline: float) -> float:

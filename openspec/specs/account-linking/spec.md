@@ -331,8 +331,9 @@ SHALL require a session, the same-origin check, and the authenticated mutation
 bucket. It SHALL first cancel and await that user's in-flight sync for the
 provider within its deadline, so no batch from it commits afterward, and SHALL
 hold the same per-user scheduling guard as reset until it commits, so no new
-sync can start in between; then delete the link and its credential; for a Plex link, clear the user's cached
-Continue Watching entry; for a Seerr link, set `users.seerr_unlinked_at`
+sync can start in between; then delete the link and its credential; for a Plex or
+Jellyfin link, clear the user's cached Continue Watching entry; for a Seerr link,
+set `users.seerr_unlinked_at`
 so sign-in auto-link no longer re-links Seerr; when
 `delete_history` is true it SHALL also delete that source's imported signals
 (`seed_request_history` for Seerr, `watched_plex` for Plex, `watched_jellyfin`
@@ -350,6 +351,12 @@ unlinked account. `is_admin` SHALL NOT change until the next sign-in.
 - **WHEN** a member unlinks Plex with `delete_history` false
 - **THEN** the link and token are gone, `watched_plex` signals remain, and no
   further Plex sync or Continue Watching read occurs
+
+#### Scenario: Unlink Jellyfin clears its Continue Watching
+
+- **WHEN** a member with Plex and Jellyfin links unlinks Jellyfin
+- **THEN** the cached Continue Watching entry is cleared and the next Home load
+  shows only Plex items
 
 #### Scenario: Unlink can delete history
 

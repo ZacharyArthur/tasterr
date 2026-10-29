@@ -35,9 +35,13 @@ the user id.
 For a user with a usable Jellyfin link (Jellyfin configured, link not dormant)
 and the `continue-watching` rail type enabled, Continue Watching SHALL include a
 Jellyfin contribution read live with the API key, scoped to that link's Jellyfin
-user id: up to 50 resumable movies and episodes, and up to 50 next-up episodes.
-The Jellyfin load SHALL have a ten-second wall-clock deadline and SHALL run
-concurrently with any Plex load.
+user id: up to 50 resumable movies and episodes, up to 50 next-up episodes, and
+one page of up to 100 most recently played episodes ordered by descending
+last-played time. The played-episode page SHALL be read concurrently with resume
+and next-up, without pagination, solely to establish next-up activity timestamps;
+it SHALL NOT contribute additional cards or imported signals. The Jellyfin source
+load SHALL have a ten-second wall-clock deadline and SHALL run concurrently with
+any Plex load.
 
 Progress SHALL equal `floor(100 * position / runtime)` from the item's playback
 position and runtime ticks when the position is non-negative and the runtime is
@@ -48,14 +52,21 @@ and SHALL be omitted otherwise. Movies SHALL map only from their own valid TMDB
 provider id. Episodes SHALL collapse to their series, whose TMDB id SHALL come
 from the batched series lookup; an episode's own TMDB id SHALL NOT be used. Items
 without a valid TMDB id SHALL be omitted. A resumable item SHALL be ordered by its
-last-played time. A next-up episode SHALL use its series' last-played time when
-present, and otherwise keep its server-provided position after dated items.
+last-played time. A next-up episode SHALL use the newest last-played time of a
+matching series' episode from the bounded played-episode page. If that page has no
+matching dated episode, it SHALL use the series' own last-played time when present,
+and otherwise keep its server-provided position after dated items. Activity
+outside the 100-episode window SHALL NOT trigger additional history reads.
 
 Plex and Jellyfin candidates SHALL merge per TMDB title: the newest activity
 wins, then non-null progress on an equal timestamp, then Plex before Jellyfin,
 then server order. At most 20 merged candidates SHALL enter TMDB resolution. The
 result SHALL share the caller's single five-minute Continue Watching cache entry
-with Plex. A failed or timed-out Jellyfin load SHALL contribute nothing; when no
+with Plex. Successfully linking or refreshing either media account SHALL clear
+that entry so the next Home load reads the current sources. Shared TMDB resolution
+SHALL have a separate ten-second deadline after source collection; expiry SHALL
+cancel resolution and cache an empty negative entry for five minutes, without
+serving stale cards. A failed or timed-out Jellyfin load SHALL contribute nothing; when no
 contributing source succeeds, the entry SHALL be an empty negative entry. No
 Jellyfin item, item id, position, or progress SHALL be persisted or appear in a
 browser response beyond the TMDB-backed summary, progress, and context.
@@ -94,6 +105,32 @@ browser response beyond the TMDB-backed summary, progress, and context.
 - **WHEN** Jellyfin is no longer configured and a member with a Jellyfin link
   loads Home
 - **THEN** no Jellyfin Continue Watching read runs
+
+#### Scenario: Next-up uses episode activity when the series date is absent
+
+- **WHEN** a next-up series has no own last-played date and a matching played
+  episode is present in the bounded activity page
+- **THEN** the card uses the newest matching episode date for merging and ordering
+
+#### Scenario: Activity outside the bounded window keeps the fallback
+
+- **WHEN** none of the 100 most recent played episodes supplies a date for a
+  next-up series and the series has no own date
+- **THEN** its card keeps server position after dated candidates without another
+  activity page request
+
+#### Scenario: Shared TMDB resolution times out
+
+- **WHEN** source collection finishes but shared TMDB resolution exceeds its own
+  ten-second deadline
+- **THEN** resolution is cancelled, the rail is omitted, and the empty result is
+  cached for five minutes without stale serving
+
+#### Scenario: Linking a media account refreshes a cached rail
+
+- **WHEN** a member with a positive or negative Continue Watching entry
+  successfully links or refreshes Plex or Jellyfin
+- **THEN** the entry is cleared and the next Home load reads the current sources
 
 #### Scenario: Nothing is persisted
 
