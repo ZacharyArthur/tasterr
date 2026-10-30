@@ -1,5 +1,10 @@
 # Unreleased
 
+- Admins can choose offered sign-in methods in Settings without disabling account
+  linking, history, Continue Watching, or requests. Settings previews affected
+  members and prevents self-lockout; Account warns stranded members. The optional
+  `TASTERR_SIGN_IN_METHODS` JSON allowlist locks the choice and recovers access.
+
 - `TASTERR_WATCH_HISTORY_DAYS` configures the first Plex/Jellyfin history sync
   lookback (1–3650 days, default 365). Later syncs and caps are unchanged; restart
   and use **Reset taste profile** to re-import existing links with the new window.

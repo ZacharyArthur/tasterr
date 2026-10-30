@@ -77,6 +77,25 @@ const USER = {
 	is_admin: false,
 };
 
+test("only Jellyfin renders when the sign-in allowlist hides Plex and Seerr", async () => {
+	stubFetch({
+		"GET /api/v1/auth/methods": () => ({
+			status: 200,
+			body: { plex: false, jellyfin: true, seerr: false },
+		}),
+	});
+	await renderLogin();
+	expect(
+		screen.getByRole("button", { name: "Continue with Jellyfin" }),
+	).toBeTruthy();
+	expect(
+		screen.queryByRole("button", { name: "Continue with Plex" }),
+	).toBeNull();
+	expect(
+		screen.queryByRole("button", { name: "Continue with Seerr" }),
+	).toBeNull();
+});
+
 test.each([
 	{ plex: true, jellyfin: false, seerr: false },
 	{ plex: false, jellyfin: true, seerr: false },

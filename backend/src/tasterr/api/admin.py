@@ -1,12 +1,15 @@
 """Admin-only runtime settings, catalog choices, and configured probes (M5)."""
 
+from collections import Counter
 from enum import StrEnum
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.auth import provider_configured, sign_in_offered
 from tasterr.api.catalog import CatalogDep
 from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.auth.deps import (
@@ -20,12 +23,15 @@ from tasterr.catalog.models import RegionOption, ServiceOption
 from tasterr.clients.errors import UpstreamError
 from tasterr.clients.seerr import SeerrClient
 from tasterr.clients.tmdb import CatalogNotConfigured, TmdbClient
+from tasterr.db.models import LinkedAccount, User
 from tasterr.db.runtime_settings import load_runtime_settings, save_runtime_settings
 from tasterr.runtime_settings import (
+    SIGN_IN_METHODS,
     DiscoverySetting,
     LanguageCode,
     RailTypeDescriptor,
     RuntimeSettings,
+    SignInMethod,
     rail_type_descriptors,
 )
 from tasterr.settings import Settings, get_settings
@@ -33,10 +39,48 @@ from tasterr.settings import Settings, get_settings
 router = APIRouter()
 
 
+class SignInLinkCount(BaseModel):
+    methods: list[SignInMethod]
+    count: int
+
+
 class SettingsResponse(BaseModel):
     settings: RuntimeSettings
     rail_types: list[RailTypeDescriptor]
     locked_fields: list[DiscoverySetting] = []
+    configured_sign_in_methods: list[SignInMethod]
+    sign_in_link_counts: list[SignInLinkCount]
+
+
+async def settings_response(
+    db: AsyncSession, settings: Settings, runtime: RuntimeSettings
+) -> SettingsResponse:
+    configured: list[SignInMethod] = [
+        method for method in SIGN_IN_METHODS if provider_configured(settings, method)
+    ]
+    links: dict[int, set[str]] = {}
+    for user_id, provider in await db.execute(
+        select(User.id, LinkedAccount.provider).outerjoin(
+            LinkedAccount,
+            and_(LinkedAccount.user_id == User.id, LinkedAccount.provider.in_(configured)),
+        )
+    ):
+        methods = links.setdefault(user_id, set())
+        if provider is not None:
+            methods.add(provider)
+    counts: Counter[tuple[SignInMethod, ...]] = Counter(
+        tuple(method for method in configured if method in linked) for linked in links.values()
+    )
+    return SettingsResponse(
+        settings=runtime,
+        rail_types=rail_type_descriptors(),
+        locked_fields=settings.locked_discovery_fields,
+        configured_sign_in_methods=configured,
+        sign_in_link_counts=[
+            SignInLinkCount(methods=list(methods), count=count)
+            for methods, count in sorted(counts.items())
+        ],
+    )
 
 
 class RegionsResponse(BaseModel):
@@ -72,12 +116,9 @@ async def get_admin_settings(
     runtime: RuntimeSettingsDep,
     _admin: Annotated[AuthedSession, Depends(require_admin)],
     settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SettingsResponse:
-    return SettingsResponse(
-        settings=runtime,
-        rail_types=rail_type_descriptors(),
-        locked_fields=settings.locked_discovery_fields,
-    )
+    return await settings_response(db, settings, runtime)
 
 
 @router.put(
@@ -91,17 +132,23 @@ async def put_admin_settings(
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> SettingsResponse:
+    await db.commit()
+    await db.execute(text("BEGIN IMMEDIATE"))
     stored = await load_runtime_settings(db)
     payload = payload.model_copy(
         update={field: getattr(stored, field) for field in settings.locked_discovery_fields}
     )
+    effective = settings.resolve_runtime(payload)
+    providers = await db.scalars(
+        select(LinkedAccount.provider).where(LinkedAccount.user_id == _admin.user.id)
+    )
+    if not any(sign_in_offered(settings, effective, provider) for provider in providers):
+        raise HTTPException(
+            status_code=409, detail="Keep at least one of your linked sign-in methods"
+        )
     saved = await save_runtime_settings(db, payload)
     await db.commit()
-    return SettingsResponse(
-        settings=settings.resolve_runtime(saved),
-        rail_types=rail_type_descriptors(),
-        locked_fields=settings.locked_discovery_fields,
-    )
+    return await settings_response(db, settings, settings.resolve_runtime(saved))
 
 
 @router.get("/regions", response_model=RegionsResponse)

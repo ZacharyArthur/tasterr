@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import build_jellyfin, build_seerr, schedule_history
 from tasterr.auth.cookies import clear_session_cookie, set_session_cookie
 from tasterr.auth.crypto import plex_client_identifier
@@ -33,6 +34,7 @@ from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexAuthClient
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
 from tasterr.db.models import Provider, User
+from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -118,7 +120,7 @@ def get_auth_context(
     )
 
 
-def provider_available(settings: Settings, provider: Provider) -> bool:
+def provider_configured(settings: Settings, provider: Provider) -> bool:
     return (
         settings.tasterr_secret_key is not None
         and (
@@ -131,12 +133,20 @@ def provider_available(settings: Settings, provider: Provider) -> bool:
     )
 
 
+def sign_in_offered(settings: Settings, runtime: RuntimeSettings, provider: Provider) -> bool:
+    return (
+        provider_configured(settings, provider) and provider not in runtime.disabled_sign_in_methods
+    )
+
+
 @router.get("/auth/methods", response_model=AuthMethodsResponse)
-def auth_methods(settings: Annotated[Settings, Depends(get_settings)]) -> AuthMethodsResponse:
+def auth_methods(
+    settings: Annotated[Settings, Depends(get_settings)], runtime: RuntimeSettingsDep
+) -> AuthMethodsResponse:
     return AuthMethodsResponse(
-        plex=provider_available(settings, "plex"),
-        jellyfin=provider_available(settings, "jellyfin"),
-        seerr=provider_available(settings, "seerr"),
+        plex=sign_in_offered(settings, runtime, "plex"),
+        jellyfin=sign_in_offered(settings, runtime, "jellyfin"),
+        seerr=sign_in_offered(settings, runtime, "seerr"),
     )
 
 
@@ -144,7 +154,7 @@ def get_seerr_auth_context(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AuthContext:
-    if not provider_available(settings, "seerr"):
+    if not provider_configured(settings, "seerr"):
         raise HTTPException(status_code=503, detail="Authentication unavailable")
     return ctx
 
@@ -153,7 +163,7 @@ def get_plex_auth_context(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AuthContext:
-    if not provider_available(settings, "plex"):
+    if not provider_configured(settings, "plex"):
         raise HTTPException(status_code=503, detail="Authentication unavailable")
     return ctx
 
@@ -162,9 +172,41 @@ def get_jellyfin_auth_context(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AuthContext:
-    if not provider_available(settings, "jellyfin"):
+    if not provider_configured(settings, "jellyfin"):
         raise HTTPException(status_code=503, detail="Authentication unavailable")
     return ctx
+
+
+def _require_sign_in_method(
+    ctx: AuthContext, settings: Settings, runtime: RuntimeSettings, provider: Provider
+) -> AuthContext:
+    if not sign_in_offered(settings, runtime, provider):
+        raise HTTPException(status_code=503, detail="Authentication unavailable")
+    return ctx
+
+
+def get_plex_sign_in_context(
+    ctx: Annotated[AuthContext, Depends(get_plex_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
+) -> AuthContext:
+    return _require_sign_in_method(ctx, settings, runtime, "plex")
+
+
+def get_jellyfin_sign_in_context(
+    ctx: Annotated[AuthContext, Depends(get_jellyfin_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
+) -> AuthContext:
+    return _require_sign_in_method(ctx, settings, runtime, "jellyfin")
+
+
+def get_seerr_sign_in_context(
+    ctx: Annotated[AuthContext, Depends(get_seerr_auth_context)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    runtime: RuntimeSettingsDep,
+) -> AuthContext:
+    return _require_sign_in_method(ctx, settings, runtime, "seerr")
 
 
 def login_rate_limit(request: Request) -> None:
@@ -183,7 +225,7 @@ def _set_cookie(request: Request, response: Response, token: str) -> None:
     dependencies=[Depends(require_same_origin), Depends(login_rate_limit)],
 )
 async def create_plex_pin(
-    ctx: Annotated[AuthContext, Depends(get_plex_auth_context)],
+    ctx: Annotated[AuthContext, Depends(get_plex_sign_in_context)],
 ) -> PinCreateResponse:
     try:
         pin = await ctx.plex.create_pin()
@@ -207,7 +249,7 @@ async def poll_plex_pin(
     payload: PinPollRequest,
     request: Request,
     response: Response,
-    ctx: Annotated[AuthContext, Depends(get_plex_auth_context)],
+    ctx: Annotated[AuthContext, Depends(get_plex_sign_in_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> PinPollResponse:
@@ -292,7 +334,7 @@ async def local_login(
     payload: LocalLoginRequest,
     request: Request,
     response: Response,
-    ctx: Annotated[AuthContext, Depends(get_seerr_auth_context)],
+    ctx: Annotated[AuthContext, Depends(get_seerr_sign_in_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:
@@ -335,7 +377,7 @@ async def jellyfin_login(
     payload: JellyfinLoginRequest,
     request: Request,
     response: Response,
-    ctx: Annotated[AuthContext, Depends(get_jellyfin_auth_context)],
+    ctx: Annotated[AuthContext, Depends(get_jellyfin_sign_in_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> UserResponse:

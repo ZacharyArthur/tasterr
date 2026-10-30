@@ -636,6 +636,8 @@ export interface components {
             provider: "plex" | "jellyfin" | "seerr";
             /** Available */
             available: boolean;
+            /** Sign In */
+            sign_in: boolean;
             /** Linked */
             linked: boolean;
             /** Display Name */
@@ -1220,6 +1222,11 @@ export interface components {
              * @default []
              */
             disabled_rail_types: components["schemas"]["RailType"][];
+            /**
+             * Disabled Sign In Methods
+             * @default []
+             */
+            disabled_sign_in_methods: ("plex" | "jellyfin" | "seerr")[];
             appearance?: components["schemas"]["Appearance"];
         };
         /** SearchResponse */
@@ -1291,7 +1298,18 @@ export interface components {
              * Locked Fields
              * @default []
              */
-            locked_fields: ("hide_library_items" | "hide_watched_items" | "excluded_service_ids")[];
+            locked_fields: ("hide_library_items" | "hide_watched_items" | "excluded_service_ids" | "disabled_sign_in_methods")[];
+            /** Configured Sign In Methods */
+            configured_sign_in_methods: ("plex" | "jellyfin" | "seerr")[];
+            /** Sign In Link Counts */
+            sign_in_link_counts: components["schemas"]["SignInLinkCount"][];
+        };
+        /** SignInLinkCount */
+        SignInLinkCount: {
+            /** Methods */
+            methods: ("plex" | "jellyfin" | "seerr")[];
+            /** Count */
+            count: number;
         };
         /** SignalBody */
         SignalBody: {

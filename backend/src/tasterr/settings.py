@@ -12,11 +12,14 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from tasterr.runtime_settings import (
     MAX_SELECTED_SERVICES,
+    SIGN_IN_METHODS,
     Appearance,
     DiscoverySetting,
     LanguageCode,
     RuntimeSettings,
+    SignInMethod,
     validate_service_ids,
+    validate_sign_in_methods,
 )
 
 
@@ -51,6 +54,22 @@ class Settings(BaseSettings):
     tasterr_excluded_service_ids: Annotated[list[StrictInt] | None, NoDecode] = Field(
         default=None, max_length=MAX_SELECTED_SERVICES, validate_default=False
     )
+    tasterr_sign_in_methods: Annotated[list[SignInMethod] | None, NoDecode] = Field(
+        default=None, min_length=1, max_length=3, validate_default=False
+    )
+
+    @field_validator("tasterr_sign_in_methods", mode="before")
+    @classmethod
+    def _sign_in_methods_input(cls, value: object) -> object:
+        decoded: object = loads(value) if isinstance(value, str) else value
+        if decoded is None:
+            raise ValueError("sign-in methods must be a JSON array, not null")
+        return decoded
+
+    @field_validator("tasterr_sign_in_methods")
+    @classmethod
+    def _sign_in_methods(cls, value: list[SignInMethod] | None) -> list[SignInMethod] | None:
+        return validate_sign_in_methods(value) if value is not None else None
 
     @field_validator("tasterr_excluded_service_ids", mode="before")
     @classmethod
@@ -76,14 +95,23 @@ class Settings(BaseSettings):
             fields.append("hide_watched_items")
         if self.tasterr_excluded_service_ids is not None:
             fields.append("excluded_service_ids")
+        if self.tasterr_sign_in_methods is not None:
+            fields.append("disabled_sign_in_methods")
         return fields
 
     def resolve_runtime(self, runtime: RuntimeSettings) -> RuntimeSettings:
-        return runtime.model_copy(
+        resolved = runtime.model_copy(
             update={
-                field: getattr(self, f"tasterr_{field}") for field in self.locked_discovery_fields
+                field: getattr(self, f"tasterr_{field}")
+                for field in self.locked_discovery_fields
+                if field != "disabled_sign_in_methods"
             }
         )
+        if self.tasterr_sign_in_methods is not None:
+            resolved.disabled_sign_in_methods = [
+                method for method in SIGN_IN_METHODS if method not in self.tasterr_sign_in_methods
+            ]
+        return resolved
 
     @field_validator("seerr_internal_url", "seerr_external_url")
     @classmethod

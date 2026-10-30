@@ -29,6 +29,7 @@ const SUMMARY: AccountResponse = {
 			provider: "plex",
 			linked: true,
 			available: true,
+			sign_in: true,
 			display_name: "Plex member",
 			linked_at: "2026-01-01",
 			can_unlink: true,
@@ -37,6 +38,7 @@ const SUMMARY: AccountResponse = {
 			provider: "seerr",
 			linked: true,
 			available: true,
+			sign_in: true,
 			display_name: "Seerr member",
 			linked_at: "2026-01-01",
 			can_unlink: true,
@@ -84,6 +86,30 @@ test("member sees providers, name, and deletion controls", async () => {
 });
 
 const sources: TasteSource[] = ["plex", "seerr", "jellyfin", "browsing"];
+test.each([
+	false,
+	true,
+])("Account warns only when no linked method is offered: %s", async (offeredLink) => {
+	setup({
+		providers: [
+			{ ...SUMMARY.providers[0], sign_in: false },
+			{ ...SUMMARY.providers[1], linked: offeredLink, sign_in: true },
+		],
+	});
+	await screen.findByText("Plex member");
+	expect(screen.getByText("Not used for sign-in")).toBeTruthy();
+	if (offeredLink) {
+		expect(screen.queryByText(/after this session ends/)).toBeNull();
+	} else {
+		expect(screen.getByRole("alert").textContent).toContain(
+			"after this session ends",
+		);
+		expect(screen.getByRole("alert").textContent).toContain(
+			"Link an offered method: Seerr.",
+		);
+		expect(screen.getByRole("button", { name: "Link Seerr" })).toBeTruthy();
+	}
+});
 const sourceLabels = {
 	plex: "Plex history",
 	seerr: "Seerr request history",
@@ -109,7 +135,9 @@ test.each([
 		[false, false],
 	]) {
 		const view = setup({
-			providers: [{ provider, available, linked, can_unlink: true }],
+			providers: [
+				{ provider, available, sign_in: available, linked, can_unlink: true },
+			],
 		});
 		const toggle = await screen.findByRole("switch", {
 			name: `Use ${sourceLabels[provider]} for recommendations`,
@@ -140,6 +168,7 @@ test.each(
 			{
 				provider: "jellyfin",
 				available: true,
+				sign_in: true,
 				linked: false,
 				can_unlink: false,
 			},
@@ -169,7 +198,13 @@ test.each(
 test("clearing a retained-history card restores focus when the card disappears", async () => {
 	const { fetch } = setup({
 		providers: [
-			{ provider: "plex", available: false, linked: false, can_unlink: false },
+			{
+				provider: "plex",
+				available: false,
+				sign_in: false,
+				linked: false,
+				can_unlink: false,
+			},
 		],
 	});
 	const trigger = await screen.findByRole("button", { name: clearNames.plex });
@@ -238,6 +273,7 @@ test.each(
 			{
 				provider: "jellyfin" as const,
 				available: true,
+				sign_in: true,
 				linked: false,
 				can_unlink: false,
 			},
@@ -310,7 +346,7 @@ test("late toggle failure cannot restore another member's account state", async 
 		json: async () => ({ detail: "failed" }),
 	} as Response);
 	await pending;
-	await screen.findByRole("alert");
+	await screen.findByText("Could not update taste source. Try again.");
 	expect(cache.getQueryData(["account"])).toEqual(nextAccount);
 });
 
@@ -320,6 +356,7 @@ test("Jellyfin card links with credentials and offers the history choice on unli
 			{
 				provider: "jellyfin",
 				available: true,
+				sign_in: true,
 				linked: false,
 				can_unlink: false,
 			},
@@ -349,8 +386,20 @@ test.each([
 ])("Seerr dialog offers Jellyfin only while available: %s", async (available) => {
 	const { fetch } = setup({
 		providers: [
-			{ provider: "seerr", available: true, linked: false, can_unlink: false },
-			{ provider: "jellyfin", available, linked: false, can_unlink: false },
+			{
+				provider: "seerr",
+				available: true,
+				sign_in: true,
+				linked: false,
+				can_unlink: false,
+			},
+			{
+				provider: "jellyfin",
+				available,
+				sign_in: available,
+				linked: false,
+				can_unlink: false,
+			},
 		],
 	});
 	fireEvent.click(await screen.findByRole("button", { name: "Link Seerr" }));
@@ -420,6 +469,7 @@ test("dormant Jellyfin card remains unlinkable and deletion names all upstreams"
 			{
 				provider: "jellyfin",
 				available: false,
+				sign_in: false,
 				linked: true,
 				display_name: "Jellyfin member",
 				can_unlink: true,
@@ -456,7 +506,7 @@ test("unlink starts with history unticked and forwards the choice", async () => 
 test("only remaining sign-in is disabled and dormant account remains unlinkable", async () => {
 	setup({
 		providers: [
-			{ ...SUMMARY.providers[0], available: false },
+			{ ...SUMMARY.providers[0], available: false, sign_in: false },
 			{ ...SUMMARY.providers[1], can_unlink: false },
 		],
 	});
@@ -482,6 +532,7 @@ test("Seerr connection shows conflict guidance and supports Escape", async () =>
 					provider: "seerr",
 					linked: false,
 					available: true,
+					sign_in: true,
 					can_unlink: false,
 				},
 			],

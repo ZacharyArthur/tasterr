@@ -103,6 +103,7 @@ test("admin settings replacement uses a typed JSON PUT with same-origin credenti
 		hide_watched_items: true,
 		excluded_service_ids: [],
 		disabled_rail_types: ["genres" as const],
+		disabled_sign_in_methods: [],
 		appearance: { theme: "light" as const, accent: "azure" as const },
 	};
 	const mock = stubFetch(200, { settings: body, rail_types: [] });

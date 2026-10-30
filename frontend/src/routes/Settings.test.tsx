@@ -17,11 +17,14 @@ afterEach(() => {
 });
 
 const SETTINGS = {
+	configured_sign_in_methods: ["plex", "jellyfin", "seerr"],
+	sign_in_link_counts: [],
 	settings: {
 		region: "US",
 		language: "en-US",
 		service_ids: [8],
 		disabled_rail_types: [],
+		disabled_sign_in_methods: [],
 		appearance: { theme: "dark", accent: "crimson" },
 		hide_library_items: false,
 		hide_watched_items: true,
@@ -129,6 +132,7 @@ test("initializes the complete draft and saves only the typed runtime document",
 		language: "en-US",
 		service_ids: [8, 9],
 		disabled_rail_types: ["popular"],
+		disabled_sign_in_methods: [],
 		appearance: { theme: "light", accent: "azure" },
 		hide_library_items: false,
 		hide_watched_items: true,
@@ -138,6 +142,65 @@ test("initializes the complete draft and saves only the typed runtime document",
 		expect(queryClient.getQueryState(key)?.isInvalidated ?? true).toBe(true);
 	}
 	expect(screen.queryByLabelText(/key|token|url|secret/i)).toBeNull();
+});
+
+test.each([
+	false,
+	true,
+])("sign-in methods respect configuration and lock: %s", async (locked) => {
+	const base = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/settings" && !init?.method)
+				return response({
+					...SETTINGS,
+					configured_sign_in_methods: ["plex", "jellyfin"],
+					locked_fields: locked ? ["disabled_sign_in_methods"] : [],
+					settings: {
+						...SETTINGS.settings,
+						disabled_sign_in_methods: ["plex"],
+					},
+					sign_in_link_counts: [
+						{ methods: ["plex"], count: 2 },
+						{ methods: ["jellyfin"], count: 1 },
+						{ methods: ["plex", "jellyfin"], count: 3 },
+						{ methods: [], count: 1 },
+					],
+				});
+			return base(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	const plex = await screen.findByRole("checkbox", { name: "Plex" });
+	const jellyfin = screen.getByRole("checkbox", { name: "Jellyfin" });
+	expect(
+		(
+			screen.getByRole("checkbox", {
+				name: "Seerr (Not configured)",
+			}) as HTMLInputElement
+		).disabled,
+	).toBe(true);
+	expect((jellyfin as HTMLInputElement).checked).toBe(true);
+	expect((jellyfin as HTMLInputElement).disabled).toBe(true);
+	expect((plex as HTMLInputElement).disabled).toBe(locked);
+	expect(screen.getByText(/3 members would have no way/)).toBeTruthy();
+	if (locked) {
+		expect(
+			screen.getByText(/controlled by TASTERR_SIGN_IN_METHODS/),
+		).toBeTruthy();
+	} else {
+		fireEvent.click(plex);
+		expect(screen.getByText(/1 member would have no way/)).toBeTruthy();
+		fireEvent.click(jellyfin);
+		expect((plex as HTMLInputElement).disabled).toBe(true);
+		expect(screen.getByText(/2 members would have no way/)).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+		await screen.findByText("Settings saved.");
+		const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+		expect(JSON.parse(String(put?.[1]?.body)).disabled_sign_in_methods).toEqual(
+			["jellyfin"],
+		);
+	}
 });
 
 test("changing region clears selections and loads region services", async () => {

@@ -107,6 +107,12 @@ services:
       # TASTERR_EXCLUDED_SERVICE_IDS: default unset (admin preference); JSON array
       # of up to eight unique positive TMDB IDs. [] clears/locks; empty is invalid.
       # TASTERR_EXCLUDED_SERVICE_IDS: ${TASTERR_EXCLUDED_SERVICE_IDS}
+      # TASTERR_SIGN_IN_METHODS: default unset; JSON allowlist of 1-3 unique
+      # plex/jellyfin/seerr names. Overrides and locks sign-in choices only;
+      # linking/history/requests remain configured. For lockout recovery include
+      # an existing linked method and recreate the container. Requires a later
+      # release than 2.3.1; empty, null, duplicate or unknown names fail boot.
+      # TASTERR_SIGN_IN_METHODS: ${TASTERR_SIGN_IN_METHODS}
     ports:
       # Optional TASTERR_HTTP_PORT: default 127.0.0.1:8000 (host loopback).
       # Set 8000 or a specific LAN IP:port only for intentional direct LAN access.

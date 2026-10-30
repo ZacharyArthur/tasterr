@@ -22,8 +22,10 @@ from tasterr.api.auth import (
     get_plex_auth_context,
     get_seerr_auth_context,
     login_rate_limit,
-    provider_available,
+    provider_configured,
+    sign_in_offered,
 )
+from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import (
     cancel_jellyfin_history,
     cancel_plex_history,
@@ -46,6 +48,7 @@ from tasterr.auth.ratelimit import mutation_rate_limit
 from tasterr.catalog.resume import continue_watching_key
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.db.models import LinkedAccount, Provider, Signal, User, utcnow
+from tasterr.db.runtime_settings import load_runtime_settings
 from tasterr.recommend import store
 from tasterr.recommend.signals import SOURCE_KINDS, TasteSource
 from tasterr.recommend.store import invalidate_profile
@@ -64,6 +67,7 @@ JellyfinAuth = Annotated[AuthContext, Depends(get_jellyfin_auth_context)]
 class AccountProvider(BaseModel):
     provider: Provider
     available: bool
+    sign_in: bool
     linked: bool
     display_name: str | None = None
     linked_at: datetime | None = None
@@ -143,7 +147,9 @@ async def clear_taste_source(source: TasteSource, authed: Member, db: Db, reques
 
 
 @router.get("/account", response_model=AccountResponse)
-async def account_summary(authed: Member, db: Db, settings: Config) -> AccountResponse:
+async def account_summary(
+    authed: Member, db: Db, settings: Config, runtime: RuntimeSettingsDep
+) -> AccountResponse:
     links = (
         await db.scalars(select(LinkedAccount).where(LinkedAccount.user_id == authed.user.id))
     ).all()
@@ -156,20 +162,22 @@ async def account_summary(authed: Member, db: Db, settings: Config) -> AccountRe
         providers=[
             AccountProvider(
                 provider=provider,
-                available=provider_available(settings, provider),
+                available=provider_configured(settings, provider),
+                sign_in=sign_in_offered(settings, runtime, provider),
                 linked=link is not None,
                 display_name=link.display_name if link else None,
                 linked_at=link.linked_at if link else None,
                 can_unlink=link is not None
                 and any(
-                    other.provider != provider and provider_available(settings, other.provider)
+                    other.provider != provider
+                    and sign_in_offered(settings, runtime, other.provider)
                     for other in links
                 ),
             )
             for provider in ("plex", "jellyfin", "seerr")
             if (link := next((item for item in links if item.provider == provider), None))
             is not None
-            or provider_available(settings, provider)
+            or provider_configured(settings, provider)
             or bool(SOURCE_KINDS[provider] & retained_kinds)
         ],
     )
@@ -294,7 +302,7 @@ async def link_seerr(
         if payload.method == "local":
             login = await ctx.seerr.login_local(payload.email, payload.password)
         elif payload.method == "jellyfin":
-            if not provider_available(settings, "jellyfin"):
+            if not provider_configured(settings, "jellyfin"):
                 raise HTTPException(status_code=503, detail="Authentication unavailable")
             if not payload.password and not settings.jellyfin_allow_empty_password:
                 raise UpstreamRejected(401)
@@ -370,6 +378,7 @@ async def unlink_account(
     async with history_guard(request, user_id):
         await cancel_source_history(request, user_id, provider)
         await db.execute(text("BEGIN IMMEDIATE"))
+        runtime = settings.resolve_runtime(await load_runtime_settings(db))
         links = (
             await db.scalars(select(LinkedAccount).where(LinkedAccount.user_id == user_id))
         ).all()
@@ -378,7 +387,7 @@ async def unlink_account(
             logger.info("account: unlink %s refused", provider)
             raise HTTPException(status_code=404, detail="Account is not linked")
         if not any(
-            item.provider != provider and provider_available(settings, item.provider)
+            item.provider != provider and sign_in_offered(settings, runtime, item.provider)
             for item in links
         ):
             logger.info("account: unlink %s refused", provider)

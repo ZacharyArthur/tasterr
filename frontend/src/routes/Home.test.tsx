@@ -276,12 +276,15 @@ test.each([
 			language: "en-US",
 			service_ids: [],
 			disabled_rail_types: [],
+			disabled_sign_in_methods: [],
 			hide_library_items: false,
 			hide_watched_items: true,
 			excluded_service_ids: [],
 			appearance: { theme: "dark", accent: "crimson" },
 		},
 		rail_types: [],
+		configured_sign_in_methods: ["plex", "jellyfin", "seerr"],
+		sign_in_link_counts: [],
 	};
 	let homeReads = 0;
 	let railsReads = 0;

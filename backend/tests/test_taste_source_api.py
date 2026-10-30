@@ -128,6 +128,7 @@ def test_unconfigured_unlinked_history_keeps_controls_card(
         assert retained == {
             "provider": source,
             "available": False,
+            "sign_in": False,
             "linked": False,
             "display_name": None,
             "linked_at": None,

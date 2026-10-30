@@ -1,6 +1,7 @@
 import pytest
 
 from tasterr.api.auth import auth_methods
+from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import PublicConfig, Settings
 
 
@@ -11,7 +12,7 @@ def test_methods_are_only_booleans(url: str | None, key: str | None, secret: str
     settings = Settings.model_validate(
         {"jellyfin_internal_url": url, "jellyfin_api_key": key, "tasterr_secret_key": secret}
     )
-    assert auth_methods(settings).model_dump() == {
+    assert auth_methods(settings, RuntimeSettings()).model_dump() == {
         "plex": False,
         "jellyfin": bool(url and key and secret),
         "seerr": False,

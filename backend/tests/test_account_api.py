@@ -129,6 +129,7 @@ def test_summary_link_refresh_unlink_and_credentials_survive_logout(tmp_path: Pa
         assert set(body["providers"][0]) == {
             "provider",
             "available",
+            "sign_in",
             "linked",
             "display_name",
             "linked_at",
@@ -471,12 +472,8 @@ def test_dormant_link_and_unconfigured_remaining_link(
         login(client)
         assert link_plex(client).status_code == 200
 
-        def available(_settings: object, provider: str) -> bool:
-            return provider == "seerr"
-
         monkeypatch.setattr(
-            "tasterr.api.account.provider_available",
-            available,
+            "tasterr.api.auth.Settings.plex_configured", property(lambda _self: False)
         )
         providers = client.get("/api/v1/account").json()["providers"]
         assert providers[0]["available"] is False and providers[0]["can_unlink"] is True

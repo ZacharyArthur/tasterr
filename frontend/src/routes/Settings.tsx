@@ -84,6 +84,20 @@ export function Settings() {
 	const libraryLocked = lockedFields.includes("hide_library_items");
 	const watchedLocked = lockedFields.includes("hide_watched_items");
 	const servicesLocked = lockedFields.includes("excluded_service_ids");
+	const signInLocked = lockedFields.includes("disabled_sign_in_methods");
+	const configuredMethods = settings.data.configured_sign_in_methods;
+	const disabledMethods = draft.disabled_sign_in_methods ?? [];
+	const offeredMethods = configuredMethods.filter(
+		(method) => !disabledMethods.includes(method),
+	);
+	const strandedMembers = settings.data.sign_in_link_counts.reduce(
+		(total, group) =>
+			total +
+			(group.methods.some((method) => offeredMethods.includes(method))
+				? 0
+				: group.count),
+		0,
+	);
 	const excludedIds = draft.excluded_service_ids ?? [];
 	const exclusionServices = [
 		...(services.data?.services ?? []),
@@ -118,6 +132,63 @@ export function Settings() {
 				Household-wide discovery and appearance controls.
 			</p>
 			<form className="mt-8 flex flex-col gap-8" onSubmit={submit}>
+				<SettingsSection title="Sign-in methods">
+					<p className="mb-4 text-sm text-app-subtle">
+						Choose which configured methods appear at sign-in. Linking, history,
+						Continue Watching, and requests stay available.
+					</p>
+					{(["plex", "jellyfin", "seerr"] as const).map((method) => {
+						const configured = configuredMethods.includes(method);
+						const checked = offeredMethods.includes(method);
+						const name = { plex: "Plex", jellyfin: "Jellyfin", seerr: "Seerr" }[
+							method
+						];
+						return (
+							<label
+								key={method}
+								className="flex min-h-11 items-center gap-3 text-app-text"
+							>
+								<input
+									type="checkbox"
+									checked={checked}
+									disabled={
+										pending ||
+										signInLocked ||
+										!configured ||
+										(checked && offeredMethods.length === 1)
+									}
+									onChange={() =>
+										setDraft({
+											...draft,
+											disabled_sign_in_methods: checked
+												? [...disabledMethods, method]
+												: disabledMethods.filter((id) => id !== method),
+										})
+									}
+									className="h-5 w-5 accent-app-accent"
+								/>
+								{name}
+								{!configured && " (Not configured)"}
+							</label>
+						);
+					})}
+					<p className="mt-2 text-sm text-app-subtle">
+						Keep at least one configured method selected.
+					</p>
+					{signInLocked && (
+						<p className="mt-2 text-sm text-app-subtle">
+							Sign-in methods are controlled by TASTERR_SIGN_IN_METHODS.
+						</p>
+					)}
+					<output
+						className="mt-3 block text-sm text-status-warning"
+						aria-live="polite"
+					>
+						{strandedMembers} member{strandedMembers === 1 ? "" : "s"} would
+						have no way to sign in. Existing sessions continue; affected members
+						should link an offered method from Account.
+					</output>
+				</SettingsSection>
 				<SettingsSection title="Catalog">
 					<RegionServicePicker
 						region={draft.region}
@@ -416,7 +487,9 @@ export function Settings() {
 					)}
 					{save.isError && (
 						<p role="alert" className="text-status-error">
-							Could not save settings.
+							{save.error instanceof ApiError
+								? save.error.message
+								: "Could not save settings."}
 						</p>
 					)}
 				</div>

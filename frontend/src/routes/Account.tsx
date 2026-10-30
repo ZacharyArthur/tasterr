@@ -178,6 +178,23 @@ export function Account({ user }: { user: User }) {
 			</h2>
 			{account.isPending && <p>Loading accounts…</p>}
 			{account.isError && <p role="alert">Could not load accounts.</p>}
+			{account.data &&
+				!account.data.providers.some(
+					(provider) => provider.linked && provider.sign_in,
+				) && (
+					<p
+						role="alert"
+						className="rounded border border-status-warning p-4 text-status-warning"
+					>
+						You will not be able to sign in again after this session ends.
+						{account.data.providers.some((provider) => provider.sign_in)
+							? ` Link an offered method: ${account.data.providers
+									.filter((provider) => provider.sign_in)
+									.map((provider) => providerNames[provider.provider])
+									.join(", ")}.`
+							: " Ask your administrator to offer a configured sign-in method."}
+					</p>
+				)}
 			{account.data?.providers.map((provider) => (
 				<section
 					key={provider.provider}
@@ -189,6 +206,9 @@ export function Account({ user }: { user: User }) {
 					)}
 					{!provider.available && provider.linked && (
 						<p>No longer available on this server</p>
+					)}
+					{provider.available && provider.linked && !provider.sign_in && (
+						<p>Not used for sign-in</p>
 					)}
 					{provider.linked ? (
 						<>

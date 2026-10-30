@@ -168,12 +168,14 @@ def test_locked_settings_preserve_underlying_values(tmp_path: Path) -> None:
             ).status_code
             == 200
         )
-        overrides = Settings(
-            tasterr_hide_library_items=False,
-            tasterr_hide_watched_items=False,
-            tasterr_excluded_service_ids=[],
-        )
         original = app.dependency_overrides[get_settings]
+        overrides = cast(Settings, original()).model_copy(
+            update={
+                "tasterr_hide_library_items": False,
+                "tasterr_hide_watched_items": False,
+                "tasterr_excluded_service_ids": [],
+            }
+        )
         app.dependency_overrides[get_settings] = lambda: overrides
         locked = client.get("/api/v1/settings").json()
         assert locked["locked_fields"] == [

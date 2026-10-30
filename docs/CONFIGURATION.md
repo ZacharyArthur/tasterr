@@ -65,6 +65,7 @@ empty volume. Keep the existing `.env` rather than replacing it with placeholder
 | `TASTERR_HIDE_LIBRARY_ITEMS` | No | unset | Override household library hiding with `true` or `false`; locks the admin control. |
 | `TASTERR_HIDE_WATCHED_ITEMS` | No | unset | Override household watched-title hiding (on by default) with `true` or `false`; locks the admin control. |
 | `TASTERR_EXCLUDED_SERVICE_IDS` | No | unset | Override subscription-service exclusions with a JSON array of up to eight unique positive TMDB provider IDs, e.g. `[8]`; `[]` explicitly clears exclusions and locks the control. |
+| `TASTERR_SIGN_IN_METHODS` | No | unset | Override and lock sign-in choices with a JSON array of 1–3 unique names: `plex`, `jellyfin`, `seerr`, e.g. `["jellyfin"]`. Empty arrays/strings, JSON `null`, unknown names and duplicates fail boot. |
 
 Missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
 An explicitly empty or malformed `PLEX_SERVER_ID` fails boot; omit it to use the
@@ -223,6 +224,30 @@ enabled. Any user with a Plex link reuses its encrypted account token, including
 after local sign-in. Users without a Plex link perform no live Plex read.
 `TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
 bounded server-side discovery and is never exposed to the browser.
+
+### Sign-in methods and lockout recovery
+
+Settings lets admins choose which configured methods are offered for sign-in.
+Every configured method is offered by default. Hiding a method removes its login
+button and makes its sign-in endpoints return the same generic 503 as an
+unconfigured integration. Configuration still controls linking, dormancy, history,
+Continue Watching, and requests; hiding a method does not disable these features
+or change Seerr auto-linking. Hidden linked accounts say **Not used for sign-in**.
+
+A save cannot remove the saving admin's last linked, offered method. Before
+saving, Settings previews the number of members left without an offered linked
+method. Existing sessions continue within their normal 30/90-day limits; affected
+members see an Account warning naming offered methods to link before signing out.
+Unlinking also requires another linked method currently offered for sign-in.
+
+If locked out, set `TASTERR_SIGN_IN_METHODS` to include a **configured method
+already linked to your account**, for example `'["plex"]'`, and restart/recreate
+the container. Sign in with that method, then remove the variable and restart to
+edit Settings again. The variable locks all method checkboxes and overrides,
+without replacing, the stored denylist. Removing it restores the previous choice;
+keep your session open and correct that choice before signing out. Omit the
+variable entirely to leave Settings editable. This setting requires a release
+after the example's pinned `2.3.1` image.
 
 ## Member accounts and taste sources
 
