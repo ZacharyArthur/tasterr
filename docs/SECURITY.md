@@ -12,7 +12,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - **Exposure:** LAN today, internet via Cloudflare tunnel tomorrow. Write every endpoint as
   if it's already internet-facing.
 - **What we protect:** TMDB/Seerr/Jellyfin API keys, internal URLs, per-user Plex tokens and
-  Seerr session cookies, Tasterr session tokens, and household viewing behavior (privacy).
+  Seerr session cookies, Trakt access/refresh tokens, Tasterr session tokens,
+  and household viewing behavior (privacy).
 - **Adversaries:** internet scanners hitting exposed endpoints; a malicious or compromised
   browser inside the household; XSS smuggled through third-party metadata (TMDB text is
   untrusted input); supply-chain compromise of a dependency.
@@ -23,7 +24,7 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 1. Secrets never reach the client — `PublicConfig` regression test.
 2. Only `clients/` performs outbound HTTP — import-linter contract.
-3. Session tokens stored **hashed**; Plex tokens and Seerr cookies **encrypted**
+3. Session tokens stored **hashed**; Plex/Trakt tokens and Seerr cookies **encrypted**
    at rest on linked accounts, never on sessions.
 4. Lockfiles committed; `just audit` before releases.
 5. Forwarded client/scheme headers are accepted only from an explicit literal-IP/CIDR
@@ -127,6 +128,18 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - [ ] Unconfigured Jellyfin blocks new links and Seerr's Jellyfin method with 503;
       dormant links perform no reads, and unlinking remains available.
 
+#### Trakt
+
+- [ ] Only fixed `auth.trakt.tv` OAuth and `api.trakt.tv` API hosts; TLS verified,
+      redirects refused, ten-second call timeouts, and an 8 MiB streamed cap.
+- [ ] Client values, device codes, and tokens stay out of URLs, logs, browser
+      responses, and sessions. Only the short user code and session-bound opaque
+      handle leave the server; the activation link is fixed.
+- [ ] Token JSON is Fernet-encrypted on links. Refresh runs in its own task and
+      DB session; repeated sync cancellation waits for rotated tokens to commit.
+- [ ] Trakt is link-only, with no admin, identity, Seerr, or sign-in role.
+      Unlink/delete cancel history, commit locally, then revoke best-effort.
+
 ### Frontend
 
 - [ ] No `dangerouslySetInnerHTML`; render TMDB/Seerr text as text, always.
@@ -159,7 +172,9 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       integrity check, preserve runtime ownership, and treat backups as sensitive.
 
 Migration `0007` forces one re-sign-in and stores no old session credentials on
-new links. Revisions `0008`–`0009` add Jellyfin signals and taste-source preferences.
+new links. Revisions `0008`–`0010` add Jellyfin/Trakt signals and taste-source preferences.
+Downgrading `0010` deletes Trakt links/history and strips Trakt source preferences,
+while retaining users and their other links.
 An image-only rollback across these revisions is unsupported; `0008` downgrade
 deletes Jellyfin history/links and Jellyfin-only users, while `0007` downgrade
 deletes users without Seerr links and every session. Follow the stopped-writer,

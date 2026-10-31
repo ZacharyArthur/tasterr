@@ -1,12 +1,11 @@
-# trakt-personalization Specification (delta)
+# trakt-personalization Specification
 
 ## Purpose
-
 Optional Trakt integration: configuration, the client boundary, link-only
 device-code linking, token lifecycle, and bounded all-time watch-history
 synchronization into taste signals.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Trakt is configured from the environment
 
@@ -48,7 +47,7 @@ upstream headers/bodies downstream. Every call SHALL send `trakt-api-version: 2`
 `trakt-api-key` header and, where Trakt's OAuth endpoints require it, in OAuth
 request bodies. The token-refresh body SHALL carry `refresh_token`,
 `client_id`, `grant_type=refresh_token`, and `redirect_uri` set to
-`urn:ietf:wg:oauth:2.0:oob` (the value the operator registers for the app), as
+`http://localhost` (the value the operator registers for the app), as
 Trakt's contract requires. The client secret, when configured, SHALL be sent only in the
 bodies of the token-refresh and revoke requests. The device code and refresh
 token SHALL be sent only in OAuth request bodies. The access token SHALL be sent
@@ -86,7 +85,7 @@ other write SHALL be made.
 
 - **WHEN** Tasterr refreshes a member's token with a client secret configured
 - **THEN** the request body carries the refresh token, client id,
-  `grant_type=refresh_token`, `redirect_uri=urn:ietf:wg:oauth:2.0:oob`, and the
+  `grant_type=refresh_token`, `redirect_uri=http://localhost`, and the
   client secret, and no token or secret is in the URL or any other header
 
 ### Requirement: Members link Trakt with the device-code flow

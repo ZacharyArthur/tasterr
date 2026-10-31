@@ -35,7 +35,7 @@ from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexAuthClient
 from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrLoginSupport
 from tasterr.db.models import Provider, User
-from tasterr.runtime_settings import RuntimeSettings
+from tasterr.runtime_settings import RuntimeSettings, SignInMethod
 from tasterr.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ class AuthContext:
     secret_key: str
     plex: PlexAuthClient
     seerr: SeerrAuthClient | None
-    pins: PinStore
+    pins: PinStore[int]
     seerr_read: SeerrClient | None = None
     jellyfin: JellyfinClient | None = None
 
@@ -116,7 +116,7 @@ def get_auth_context(
         seerr=SeerrAuthClient(request.app.state.http, settings.seerr_internal_url)
         if settings.seerr_configured and settings.seerr_internal_url is not None
         else None,
-        pins=cast("PinStore", request.app.state.pin_store),
+        pins=cast("PinStore[int]", request.app.state.pin_store),
         seerr_read=build_seerr(request, settings),
         jellyfin=build_jellyfin(request, settings),
     )
@@ -130,6 +130,7 @@ def provider_configured(settings: Settings, provider: Provider) -> bool:
                 "plex": settings.plex_configured,
                 "jellyfin": settings.jellyfin_configured,
                 "seerr": settings.seerr_configured,
+                "trakt": settings.trakt_configured,
             }[provider]
         )
     )
@@ -149,7 +150,7 @@ async def seerr_login_support(request: Request, settings: Settings) -> SeerrLogi
     return public.login_support
 
 
-def sign_in_offered(settings: Settings, runtime: RuntimeSettings, provider: Provider) -> bool:
+def sign_in_offered(settings: Settings, runtime: RuntimeSettings, provider: SignInMethod) -> bool:
     return (
         provider_configured(settings, provider) and provider not in runtime.disabled_sign_in_methods
     )
@@ -194,7 +195,7 @@ def get_jellyfin_auth_context(
 
 
 def _require_sign_in_method(
-    ctx: AuthContext, settings: Settings, runtime: RuntimeSettings, provider: Provider
+    ctx: AuthContext, settings: Settings, runtime: RuntimeSettings, provider: SignInMethod
 ) -> AuthContext:
     if not sign_in_offered(settings, runtime, provider):
         raise HTTPException(status_code=503, detail="Authentication unavailable")

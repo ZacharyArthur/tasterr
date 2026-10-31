@@ -24,7 +24,13 @@ const USER = {
 };
 const SUMMARY: AccountResponse = {
 	seerr_accepts: { plex: true, jellyfin: true, local: true },
-	taste_sources: { plex: true, seerr: true, jellyfin: true, browsing: true },
+	taste_sources: {
+		plex: true,
+		seerr: true,
+		jellyfin: true,
+		trakt: true,
+		browsing: true,
+	},
 	providers: [
 		{
 			provider: "plex",
@@ -43,6 +49,15 @@ const SUMMARY: AccountResponse = {
 			display_name: "Seerr member",
 			linked_at: "2026-01-01",
 			can_unlink: true,
+		},
+		{
+			provider: "trakt",
+			linked: false,
+			available: true,
+			sign_in: false,
+			display_name: null,
+			linked_at: null,
+			can_unlink: false,
 		},
 	],
 };
@@ -86,7 +101,38 @@ test("member sees providers, name, and deletion controls", async () => {
 	).toBeTruthy();
 });
 
-const sources: TasteSource[] = ["plex", "seerr", "jellyfin", "browsing"];
+test("Trakt unlink remains available without an offered sign-in and deletion names revocation", async () => {
+	setup({
+		providers: [
+			{
+				provider: "trakt",
+				linked: true,
+				available: true,
+				sign_in: false,
+				display_name: "Trakt member",
+				linked_at: null,
+				can_unlink: true,
+			},
+		],
+	});
+	await screen.findByText("Trakt member");
+	expect(
+		screen.getByRole<HTMLButtonElement>("button", { name: "Unlink Trakt" })
+			.disabled,
+	).toBe(false);
+	fireEvent.click(
+		screen.getByRole("button", { name: "Delete my Tasterr account" }),
+	);
+	expect(screen.getByText(/Your Trakt connection is revoked/)).toBeTruthy();
+});
+
+const sources: TasteSource[] = [
+	"plex",
+	"seerr",
+	"jellyfin",
+	"trakt",
+	"browsing",
+];
 test.each([
 	false,
 	true,
@@ -112,12 +158,14 @@ test.each([
 	}
 });
 const sourceLabels = {
+	trakt: "Trakt history",
 	plex: "Plex history",
 	seerr: "Seerr request history",
 	jellyfin: "Jellyfin history",
 	browsing: "Browsing activity",
 };
 const clearNames = {
+	trakt: "Clear imported history from Trakt",
 	plex: "Clear imported history from Plex",
 	seerr: "Clear imported history from Seerr",
 	jellyfin: "Clear imported history from Jellyfin",
@@ -128,6 +176,7 @@ test.each([
 	"plex",
 	"seerr",
 	"jellyfin",
+	"trakt",
 ] as const)("%s controls stay on configured, dormant, and retained-history cards", async (provider) => {
 	for (const [available, linked] of [
 		[true, true],
@@ -486,7 +535,7 @@ test("dormant Jellyfin card remains unlinkable and deletion names all upstreams"
 	fireEvent.click(
 		screen.getByRole("button", { name: "Delete my Tasterr account" }),
 	);
-	expect(screen.getByText(/Plex, Jellyfin, or Seerr/)).toBeTruthy();
+	expect(screen.getByText(/Plex, Jellyfin, Seerr, or Trakt/)).toBeTruthy();
 });
 test("unlink starts with history unticked and forwards the choice", async () => {
 	const { fetch } = setup();
@@ -561,7 +610,7 @@ test("deletion requires the name, sends it, and clears the session", async () =>
 	}) as HTMLButtonElement;
 	expect(button.disabled).toBe(true);
 	expect(
-		screen.getByText(/Nothing is deleted in Plex, Jellyfin, or Seerr/),
+		screen.getByText(/Nothing is deleted in Plex, Jellyfin, Seerr, or Trakt/),
 	).toBeTruthy();
 	fireEvent.change(screen.getByLabelText("Type House Member to confirm"), {
 		target: { value: USER.display_name },

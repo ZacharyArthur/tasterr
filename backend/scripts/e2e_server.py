@@ -11,6 +11,7 @@ small local fixtures mounted under a test-only API prefix.
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Literal
@@ -20,8 +21,9 @@ from fastapi import APIRouter, FastAPI, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, SecretStr
 
-from tasterr.clients import tmdb
+from tasterr.clients import tmdb, trakt
 from tasterr.clients.seerr import SeerrPermission
+from tasterr.db.models import utcnow
 from tasterr.main import create_app
 from tasterr.settings import Settings
 
@@ -82,7 +84,7 @@ def _page(media_type: Literal["movie", "tv"] = "movie") -> dict[str, object]:
     return {
         "page": 1,
         "total_pages": 1,
-        "results": [_summary(tmdb_id, media_type) for tmdb_id in range(101, 107)],
+        "results": [_summary(tmdb_id, media_type) for tmdb_id in range(101, 108)],
     }
 
 
@@ -143,6 +145,44 @@ def _detail(tmdb_id: int, media_type: Literal["movie", "tv"]) -> dict[str, objec
 def build_fixture_router() -> APIRouter:
     router = APIRouter(prefix=FIXTURE_PREFIX, include_in_schema=False)
     states: dict[tuple[str, int], dict[str, int]] = {}
+
+    @router.post("/trakt/oauth/device/code")
+    async def _trakt_device() -> dict[str, object]:
+        return {
+            "device_code": "e2e-device",
+            "user_code": "TEST1234",
+            "interval": 1,
+            "expires_in": 600,
+            "verification_url": "https://untrusted.invalid",
+        }
+
+    @router.post("/trakt/oauth/device/token")
+    async def _trakt_token() -> dict[str, object]:
+        return {
+            "access_token": "e2e-access",
+            "refresh_token": "e2e-refresh",
+            "created_at": int(utcnow().replace(tzinfo=UTC).timestamp()),
+            "expires_in": 3600,
+        }
+
+    @router.get("/trakt/users/settings")
+    async def _trakt_user() -> dict[str, object]:
+        return {"user": {"username": "Fixture Trakt member", "ids": {"uuid": "e2e-trakt-uuid"}}}
+
+    @router.get("/trakt/sync/history/{kind}")
+    async def _trakt_history(kind: str) -> JSONResponse:
+        items = (
+            [{"movie": {"ids": {"tmdb": 105}}, "watched_at": utcnow().isoformat() + "Z"}]
+            if kind == "movies"
+            else []
+        )
+        return JSONResponse(
+            items, headers={"X-Pagination-Page-Count": "1", "X-Pagination-Limit": "250"}
+        )
+
+    @router.get("/trakt/sync/last_activities")
+    async def _trakt_activities() -> dict[str, object]:
+        return {}
 
     @router.get("/seerr/api/v1/user/{user_id}")
     async def _user(user_id: int) -> dict[str, int]:
@@ -264,6 +304,7 @@ def e2e_harness(static_dir: Path | None = None) -> Generator[E2EHarness]:
     """Build the normal app around disposable state, then remove all state."""
     compiled_spa = static_dir or Path(__file__).resolve().parents[2] / "frontend" / "dist"
     original_tmdb_base = tmdb.BASE
+    original_trakt_auth, original_trakt_api = trakt.AUTH_BASE, trakt.API_BASE
     with TemporaryDirectory(prefix="tasterr-e2e-") as temporary:
         root = Path(temporary)
         settings = Settings(
@@ -271,16 +312,19 @@ def e2e_harness(static_dir: Path | None = None) -> Generator[E2EHarness]:
             seerr_internal_url=SEERR_BASE,
             seerr_api_key=SecretStr("e2e-seerr-placeholder"),
             tasterr_secret_key=SecretStr("e2e-session-placeholder"),
+            trakt_client_id=SecretStr("e2e-trakt-placeholder"),
             database_path=root / "tasterr.db",
             static_dir=compiled_spa,
         )
         tmdb.BASE = TMDB_BASE
+        trakt.AUTH_BASE = trakt.API_BASE = f"{ORIGIN}{FIXTURE_PREFIX}/trakt"
         try:
             app = create_app(settings)
             app.include_router(build_fixture_router())
             yield E2EHarness(app=app, root=root, settings=settings)
         finally:
             tmdb.BASE = original_tmdb_base
+            trakt.AUTH_BASE, trakt.API_BASE = original_trakt_auth, original_trakt_api
 
 
 def main() -> None:

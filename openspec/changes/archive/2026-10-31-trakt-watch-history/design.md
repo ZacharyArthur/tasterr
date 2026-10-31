@@ -52,6 +52,20 @@ behind):
     none; the device-token request needs only `code` and `client_id`.
   - Creating a Trakt app already needs a verified GitHub account, and from
     2027-01-01 every existing app needs one too, or its users are logged out.
+  - The registration portal observed on 2026-10-30 offers development apps;
+    production registration is unavailable without contacting Trakt support.
+    Development apps allow the owner and explicitly added members to authorize,
+    and require loopback redirect URIs. Each operator registers their own app
+    and adds household members in Trakt before they link from Tasterr.
+  - The operator reports a free-plan allowance of five developer apps and a
+    member limit of 16. These limits are supplied by Trakt's server, not fixed
+    client constants. The current portal counts the owner toward member seats,
+    so a displayed limit of 16 means the owner plus 15 added members; confirm
+    the displayed allowance during setup. These are separate from the limit on
+    community apps a member can connect. See Trakt's
+    [developer profile schema](https://github.com/trakt/trakt-api/blob/master/projects/developer/src/lib/features/apps/developerProfileSchema.ts),
+    [member loading](https://github.com/trakt/trakt-api/blob/master/projects/developer/src/lib/features/apps/listMembers.ts),
+    and [member seat counting](https://github.com/trakt/trakt-api/blob/master/projects/developer/src/lib/features/apps/MembersPanel.svelte).
   - Free Trakt accounts can connect only a small number of community apps, and
     Trakt has changed the number during 2026 (one from July, two from
     2026-09-18 per discussion #943), so the docs don't state a number. Official
@@ -96,8 +110,9 @@ behind):
    `User-Agent: Tasterr/<version>` (the package version). The client id goes in
    `trakt-api-key` and, where Trakt's OAuth endpoints require it, in OAuth bodies;
    the refresh body is `refresh_token`, `client_id`, `grant_type=refresh_token`,
-   and `redirect_uri=urn:ietf:wg:oauth:2.0:oob` (the registered value; a module
-   constant, since the device flow never redirects);
+   and `redirect_uri=http://localhost` (the registered value; a module
+   constant, since development apps allow only localhost redirects and the
+   device flow never redirects);
    the client secret, when configured, only in the refresh and revoke bodies; the
    device code and refresh token only in OAuth bodies; the access token in
    `Authorization`, except in the revoke body. Nothing secret goes in a URL.
@@ -176,8 +191,8 @@ behind):
 5. **Link-only rules in one place.** Trakt is excluded from sign-in
    (`/auth/methods`, sign-in dependencies), admin derivation, display identity,
    Seerr linking/re-auth, the unlink rule's count, and `sign_in_link_counts`.
-   `trakt` joins the link `Provider` literal (`db/models.py`), and a new
-   `SignInMethod = Literal["plex", "jellyfin", "seerr"]` takes over every place
+   `trakt` joins the link `Provider` literal (`db/models.py`), and the existing
+   `SignInMethod = Literal["plex", "jellyfin", "seerr"]` is reused in every place
    that means "a way to sign in": the allowlist's `disabled_sign_in_methods` and
    `TASTERR_SIGN_IN_METHODS`, `/auth/methods`, and `sign_in_offered`.
    `provider_configured` covers all four providers (it backs the account summary,
@@ -243,6 +258,10 @@ behind):
 
 ## Risks / Trade-offs
 
+- [Development-app admission and capacity] → the operator must add household
+  members to their Trakt app, within the portal's current member allowance.
+  Production registration and long-term development-app policy are controlled
+  by Trakt; documentation must not promise unrestricted authorization.
 - [Trakt changes token lifetimes or API shape] → strict parsing turns drift into
   a failed sync, never bad data; refresh is driven by the stored `expires_at`,
   not an assumed lifetime. Trakt's announced 2027 changes (auth host, GitHub
@@ -259,7 +278,7 @@ behind):
   GitHub under Trakt's My Apps; an unverified app's grants stop working, and
   syncs fail generically until fixed.
 - [Refresh requires the app's registered redirect URI] → docs require the app to
-  be registered with exactly `urn:ietf:wg:oauth:2.0:oob`, the constant Tasterr
+  be registered with exactly `http://localhost`, the constant Tasterr
   sends; a mismatch makes refresh fail after the first token expires.
 - [A member is at Trakt's community-app limit] → authorization fails on Trakt's
   side (420 maps to denied; if Trakt instead lets the code lapse, expired); the

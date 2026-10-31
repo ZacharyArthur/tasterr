@@ -19,6 +19,7 @@ from tasterr.api.taste import (
     cancel_jellyfin_history,
     cancel_plex_history,
     cancel_seed,
+    cancel_trakt_history,
     history_guard,
     schedule_history,
 )
@@ -191,6 +192,7 @@ async def reset_profile(
         await cancel_seed(request, user_id)
         await cancel_plex_history(request, user_id)
         await cancel_jellyfin_history(request, user_id)
+        await cancel_trakt_history(request, user_id)
         await store.delete_user_taste(db, user_id)
         await db.execute(
             update(LinkedAccount)

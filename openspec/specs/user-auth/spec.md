@@ -142,7 +142,10 @@ stored encrypted with Fernet keyed from `TASTERR_SECRET_KEY`. The Seerr cookie
 MAY be decrypted only to create the member's own Seerr requests. The Plex token
 MAY be decrypted only for silent Seerr re-authentication, Seerr linking with the
 `plex` method, admin and display identity checks, or the owning user's bounded Plex account/resource/PMS reads and
-history task. Credentials SHALL survive logout and session expiry and SHALL be
+history task. The Trakt token set (Trakt link) SHALL be stored encrypted the
+same way and MAY be decrypted only for the owning user's Trakt history task,
+token refresh, and best-effort revocation on unlink or account deletion.
+Credentials SHALL survive logout and session expiry and SHALL be
 deleted when their link is unlinked or the user is deleted. Plex resource access
 tokens discovered for PMS communication SHALL be call-local and SHALL NOT be
 persisted.
@@ -152,6 +155,12 @@ persisted.
 - **WHEN** a Plex sign-in completes and the linked-account rows are inspected
 - **THEN** the Plex token and Seerr cookie columns hold only Fernet ciphertext,
   and the session row holds neither
+
+#### Scenario: No plaintext Trakt token at rest
+
+- **WHEN** a Trakt link completes and the linked-account row is inspected
+- **THEN** its credential column holds only Fernet ciphertext and no session row
+  holds a Trakt token
 
 #### Scenario: Local session has no Plex token
 

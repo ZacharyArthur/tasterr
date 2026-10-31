@@ -59,7 +59,7 @@ async def test_upgrade_defaults_and_downgrade_invalidates_only_affected_profiles
                 )
             )
             await conn.commit()
-        await upgrade_to_head(engine)
+            await conn.run_sync(_upgrade, "0009")
         maker = async_sessionmaker(engine, expire_on_commit=False)
         async with maker() as db:
             user = await db.get(User, 1)

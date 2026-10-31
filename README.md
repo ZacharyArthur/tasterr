@@ -46,17 +46,23 @@ Only the Jellyfin user id is retained; the sign-in token is immediately logged o
 Jellyfin administrators also administer Tasterr. All member avatars render as
 initials. Jellyfin playback links and avatars remain unsupported.
 
+Optional Trakt links import all-time watch history across services: the newest
+500 movies and 500 shows within ten history pages per type. Trakt is a taste
+source, never a sign-in or Continue Watching source. Set `TRAKT_CLIENT_ID` for
+your own app; `TRAKT_CLIENT_SECRET` is optional. See the
+[Trakt setup instructions](docs/CONFIGURATION.md#trakt-watch-history).
+
 Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
 history or playback progress, persist household groups, or run more than one process.
 
 Members use `/account` to link/unlink providers, delete their local account, and
-choose whether Seerr request history, Plex/Jellyfin watch history, and browsing
+choose whether Seerr request history, Plex/Jellyfin/Trakt watch history, and browsing
 activity shape their taste. All sources start on. Turning one off stops collection
 and removes its influence without deleting stored history; clearing history is a
 separate action. Explicit requests, My List/onboarding picks, and Not interested
 always count. Sessions slide for 30 days and expire at a 90-day absolute cap.
 
-Upgrades apply migrations `0007`–`0009` automatically and require one forced
+Upgrades apply migrations `0007`–`0009` and `0010` automatically and require one forced
 re-sign-in. Back up first: rollback across these revisions requires a downgrade or
 restoring the matching backup, and can delete accounts/history. See the
 [upgrade and rollback reference](docs/CONFIGURATION.md#upgrade-and-rollback).

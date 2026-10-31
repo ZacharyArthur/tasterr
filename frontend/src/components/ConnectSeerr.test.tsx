@@ -111,7 +111,13 @@ test.each([
 }) => {
 	const account: AccountResponse = {
 		seerr_accepts: accepts,
-		taste_sources: { plex: true, jellyfin: true, seerr: true, browsing: true },
+		taste_sources: {
+			plex: true,
+			jellyfin: true,
+			seerr: true,
+			trakt: true,
+			browsing: true,
+		},
 		providers: [
 			{
 				provider: "plex",

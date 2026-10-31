@@ -178,7 +178,7 @@ async def test_source_switch_filters_and_restores_profile(
     assert await taste.profile_vector(user_id) == pytest.approx(full)
 
 
-@pytest.mark.parametrize("kind", ["watched_plex", "watched_jellyfin"])
+@pytest.mark.parametrize("kind", ["watched_plex", "watched_jellyfin", "watched_trakt"])
 async def test_disabled_watches_still_exclude_watched_titles(
     db: AsyncSession, kind: SignalKind
 ) -> None:
@@ -187,12 +187,18 @@ async def test_disabled_watches_still_exclude_watched_titles(
     catalog.trending_items = [_summary(2), _summary(3)]
     await store.record_signal(db, user_id, "movie", 1, "watchlist")
     await store.record_signal(db, user_id, "movie", 2, kind)
-    source: TasteSource = "plex" if kind == "watched_plex" else "jellyfin"
+    source: TasteSource = (
+        "trakt" if kind == "watched_trakt" else "plex" if kind == "watched_plex" else "jellyfin"
+    )
     await store.set_source_enabled(db, user_id, source, False)
     assert [item.id for item in await _service(db, catalog).recommended_for_you(user_id)] == [3]
 
 
-async def test_disabled_sources_never_seed_candidates_or_watch_labels(db: AsyncSession) -> None:
+@pytest.mark.parametrize("kind", ["watched_plex", "watched_trakt"])
+async def test_disabled_sources_never_seed_candidates_or_watch_labels(
+    db: AsyncSession,
+    kind: SignalKind,
+) -> None:
     alice = await _user(db)
     bob = await user_with_links(db, seerr_user_id=2, display_name="bob", auth_type="local")
     await db.flush()
@@ -200,10 +206,10 @@ async def test_disabled_sources_never_seed_candidates_or_watch_labels(db: AsyncS
     taste = _service(db, catalog)
     await store.record_signal(db, alice, "movie", 1, "watchlist")
     await store.record_signal(db, bob.id, "movie", 3, "watchlist")
-    await store.record_signal(db, alice, "movie", 2, "watched_plex")
-    await store.record_signal(db, alice, "movie", 1, "watched_plex")
+    await store.record_signal(db, alice, "movie", 2, kind)
+    await store.record_signal(db, alice, "movie", 1, kind)
     catalog.genres_by_title[("movie", 2)] = ["Comedy"]
-    await store.set_source_enabled(db, alice, "plex", False)
+    await store.set_source_enabled(db, alice, "trakt" if kind == "watched_trakt" else "plex", False)
     catalog.details[("movie", 1)] = _detail(1, [_summary(10)])
     catalog.details[("movie", 2)] = _detail(2, [_summary(20)])
     catalog.details[("movie", 3)] = _detail(3, [_summary(30)])
@@ -723,7 +729,7 @@ async def test_more_like_ranks_the_sources_related_titles(db: AsyncSession) -> N
     assert [item.id for item in items] == [2]  # source + hidden excluded
 
 
-@pytest.mark.parametrize("kind", ["watched_plex", "watched_jellyfin"])
+@pytest.mark.parametrize("kind", ["watched_plex", "watched_jellyfin", "watched_trakt"])
 async def test_more_like_uses_watch_label(db: AsyncSession, kind: SignalKind) -> None:
     user_id = await _user(db)
     await store.record_signal(db, user_id, "movie", 2, kind)

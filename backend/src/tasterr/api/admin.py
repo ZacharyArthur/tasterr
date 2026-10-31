@@ -188,7 +188,10 @@ async def put_admin_settings(
     providers = await db.scalars(
         select(LinkedAccount.provider).where(LinkedAccount.user_id == _admin.user.id)
     )
-    if not any(sign_in_offered(settings, effective, provider) for provider in providers):
+    if not any(
+        provider != "trakt" and sign_in_offered(settings, effective, provider)
+        for provider in providers
+    ):
         raise HTTPException(
             status_code=409, detail="Keep at least one of your linked sign-in methods"
         )

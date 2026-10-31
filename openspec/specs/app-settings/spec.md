@@ -11,7 +11,8 @@ preferences, with validated defaults, explicit overrides and safe public respons
 Application deployment settings SHALL be loaded via a pydantic-settings model.
 Secrets and connection values (`TMDB_API_KEY`, `SEERR_INTERNAL_URL`,
 `SEERR_EXTERNAL_URL`, `SEERR_API_KEY`, `PLEX_SERVER_ID`, `JELLYFIN_INTERNAL_URL`,
-`JELLYFIN_API_KEY`, `JELLYFIN_ALLOW_EMPTY_PASSWORD`, `TASTERR_SECRET_KEY`,
+`JELLYFIN_API_KEY`, `JELLYFIN_ALLOW_EMPTY_PASSWORD`, `TRAKT_CLIENT_ID`,
+`TRAKT_CLIENT_SECRET`, `TASTERR_SECRET_KEY`,
 `DATABASE_PATH`, bind
 host/port) SHALL come from the environment only — never from the database, never
 editable via any API. The separate DB-backed runtime preferences SHALL contain no

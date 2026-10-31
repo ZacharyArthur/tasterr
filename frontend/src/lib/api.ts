@@ -7,6 +7,8 @@ export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
 export type JellyfinCredentials = components["schemas"]["JellyfinLoginRequest"];
 export type AccountResponse = components["schemas"]["AccountResponse"];
 export type AccountProvider = components["schemas"]["AccountProvider"];
+export type TraktDeviceResponse = components["schemas"]["TraktDeviceResponse"];
+export type TraktPollResponse = components["schemas"]["TraktPollResponse"];
 export type TasteSourceBody = components["schemas"]["TasteSourceBody"];
 export type TasteSource = TasteSourceBody["source"];
 export type SeerrLinkBody = Pick<
@@ -171,6 +173,12 @@ export function pollLinkPlexPin(
 }
 export function linkSeerr(body: SeerrLinkBody): Promise<void> {
 	return postJson<void>("/api/v1/account/links/seerr", body);
+}
+export function createTraktDevice(): Promise<TraktDeviceResponse> {
+	return postJson("/api/v1/account/links/trakt/device");
+}
+export function pollTraktDevice(handle: string): Promise<TraktPollResponse> {
+	return postJson("/api/v1/account/links/trakt/device/poll", { handle });
 }
 export function unlinkAccount(
 	provider: AccountProvider["provider"],

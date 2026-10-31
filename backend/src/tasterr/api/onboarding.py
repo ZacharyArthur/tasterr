@@ -51,6 +51,7 @@ async def get_taste_onboarding(
         authed.user.id in seeding
         or authed.user.id in request.app.state.plex_history_tasks
         or authed.user.id in request.app.state.jellyfin_history_tasks
+        or authed.user.id in request.app.state.trakt_history_tasks
     )
     return TasteOnboardingStateResponse(state="pending" if pending else "show")
 

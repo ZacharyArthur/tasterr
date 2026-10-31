@@ -52,9 +52,11 @@ empty volume. Keep the existing `.env` rather than replacing it with placeholder
 | `JELLYFIN_INTERNAL_URL` | For Jellyfin integration | unset | Server-only HTTP(S) base URL with a host and no embedded credentials, query, or fragment. Invalid values leave Jellyfin unconfigured. |
 | `JELLYFIN_API_KEY` | For Jellyfin integration | unset | Secret server-admin API key used only for user-scoped reads. Create one in Jellyfin Dashboard → Advanced → API Keys. |
 | `JELLYFIN_ALLOW_EMPTY_PASSWORD` | No | `false` | Explicitly allow passwordless Jellyfin accounts for sign-in and linking. |
+| `TRAKT_CLIENT_ID` | For Trakt history | unset | Operator-owned Trakt app client id. Requires `TASTERR_SECRET_KEY`; server-side only. |
+| `TRAKT_CLIENT_SECRET` | No | unset | Optional app secret used only for refresh and revoke. Newer apps issue none. |
 | `SEERR_EXTERNAL_URL` | No | unset | Browser-visible HTTP(S) base URL for fallback “Request in Seerr” links. Embedded credentials are rejected. |
 | `SEERR_API_KEY` | For Seerr reads | unset | Server-only Seerr API key. User-attributed request writes use the member's Seerr session instead. |
-| `TASTERR_SECRET_KEY` | For sign-in/requests | unset | Random secret used to encrypt linked Plex tokens and Seerr cookies. Keep it stable across upgrades. |
+| `TASTERR_SECRET_KEY` | For sign-in/requests | unset | Random secret used to encrypt linked Plex tokens, Seerr cookies, and Trakt tokens. Keep it stable across upgrades. |
 | `DATABASE_PATH` | No | `data/tasterr.db` | SQLite path. The image sets `/data/tasterr.db` on its named volume. |
 | `STATIC_DIR` | No | `static` | Compiled SPA directory. The image sets `/app/static`. |
 | `TASTERR_HOST` | No | `0.0.0.0` | Uvicorn bind address. |
@@ -256,12 +258,14 @@ PIN, Jellyfin via username/password, or Seerr via Plex, local credentials, or
 Jellyfin credentials. Prove links before switching sign-in methods: there is no
 email matching or account merge. Explicitly unlinking Seerr prevents automatic
 reconnection until manually linked again. Unlink requires another usable sign-in
-method; imported history is retained unless its deletion is selected. Deleting a
-Tasterr account removes its local data and sessions, leaving upstream accounts alone.
+method, except that Trakt can always be unlinked and never counts as sign-in;
+imported history is retained unless its deletion is selected. Deleting a Tasterr
+account removes its local data and sessions, leaving upstream accounts alone
+except for best-effort revocation of its Trakt connection.
 Display names follow Seerr → Plex → Jellyfin priority; avatars render as initials.
 
-All four taste sources start on: Seerr request history, Plex watch history,
-Jellyfin watch history, and browsing activity. Turning a source off cancels its
+All five taste sources start on: Seerr request history, Plex watch history,
+Jellyfin watch history, Trakt watch history, and browsing activity. Turning a source off cancels its
 import, stops collection, and excludes retained signals from the profile and rail
 anchors. Turning it back on restores influence and resets that link's sync times
 for a full bounded re-import. Requests made in Tasterr, My List/onboarding picks,
@@ -284,6 +288,49 @@ the new window, or switch the affected source off and back on. Reset deletes all
 taste signals as described above. Caps stay unchanged: Plex reads at most 500
 rows per server with 500 total metadata resolutions; Jellyfin reads at most 500
 rows per item type. Both retain the six-hour throttle and 30-second deadline.
+
+## Trakt watch history
+
+Register an operator-owned app at [Trakt My Apps](https://developer.trakt.tv/apps).
+Link a verified GitHub account in its Developer panel: Trakt requires verification
+to create an app, and for every existing app from 2027-01-01. Choose Development,
+set the Redirect URI to exactly `http://localhost`, and leave allowed origins
+empty. Device authorization needs no callback listener, but token refresh sends
+that registered URI. Set `TRAKT_CLIENT_ID` plus the stable `TASTERR_SECRET_KEY`;
+set `TRAKT_CLIENT_SECRET` only if Trakt issued one. Partial configuration leaves
+Trakt off without preventing startup.
+
+Add household members as testers in the app's Members panel before they connect.
+Development apps admit only the owner and added members. The portal currently
+reports five apps and 16 member seats on the operator's free account; its seat
+counter includes the owner (15 added members). These are observations from
+2026-10-30, not fixed guarantees; use the allowances shown in your portal.
+Production app registration is currently unavailable without contacting Trakt
+support. App/member allowances are separate from the number of community apps
+a free Trakt account can connect. A member at that connection limit must remove
+an app in Trakt's connected-app settings before authorizing another; Trakt
+changes that limit, so no fixed number is assumed here.
+
+From Tasterr's **Account**, choose **Link Trakt**, enter the short code at
+[Trakt Activate](https://auth.trakt.tv/activate), and approve your app. Trakt is
+link-only: it never provides sign-in, admin rights, display identity, Seerr
+requests, or Continue Watching. Unconfiguring Trakt leaves its links dormant.
+
+The first sync reads all time, independent of `TASTERR_WATCH_HISTORY_DAYS`,
+importing at most the newest 500 unique movies and 500 unique shows within ten
+history pages per type. Episode plays count toward their show. Syncs run in the
+background at most every six hours after Seerr history, with a 30-second read
+deadline. Later syncs use a 24-hour overlap. Backdated watches added later need
+a taste reset or switching Trakt off and back on to re-import full bounded
+history. Clearing keeps the watermark, so history older than the overlap stays
+cleared. Across enabled Plex, Jellyfin, and Trakt sources, each title contributes
+one watch to the profile, decayed from its newest watch; source rows stay separate
+for switches and clearing.
+
+Unlinking Trakt or deleting the local account commits locally, then revokes the
+stored access token best-effort within five seconds. No upstream viewing data is
+deleted. An expired token may make revocation a no-op; Tasterr does not refresh
+just to revoke. Remove the connection in Trakt's connected-app settings if needed.
 
 ## Plex-aware operation
 
@@ -388,6 +435,7 @@ own media-server and local-login toggles decide which credentials it accepts.
 | Media requests | A linked Seerr account with Seerr request permissions |
 | Learned watch history | An enabled taste source and its corresponding linked account |
 | Continue Watching | A Plex or Jellyfin link; one merged rail when both are linked |
+| Trakt history | Configured operator-owned app, an admitted Trakt member, and a linked account with its taste source on; no sign-in or requests |
 
 - **Plex + Plex-backed Seerr:** Plex sign-in can silently link Seerr when its
   media-server login is enabled. Local Seerr linking works when local login is on.
@@ -476,6 +524,14 @@ Keep backups encrypted and access-controlled: they contain identities, taste
 signals, session material, and household viewing behavior.
 
 ## Upgrade and rollback
+
+Migration `0010` adds `watched_trakt` uniqueness and deletes rebuildable profile
+caches so one-watch-per-title scoring applies immediately. To roll back across
+it, stop the writer, back up and validate the database, then use the current
+image's Alembic downgrade to `0009` before starting the older image. This
+**deletes Trakt links and imported Trakt history**, removes Trakt source
+preferences, and invalidates affected profiles; users and their other links
+remain. An image-only rollback across `0010` is unsupported.
 
 Migration `0009` adds per-user taste-source preferences, with every source on by
 default. To roll back across it, stop the writer and back up/validate the database,

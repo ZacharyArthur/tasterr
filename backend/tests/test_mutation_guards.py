@@ -14,6 +14,15 @@ from tasterr.settings import Settings
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 READ_ONLY_POSTS = {("POST", "/api/v1/availability")}
 EXPECTED_GUARDS = {
+    ("POST", "/api/v1/account/links/trakt/device"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+        "login_rate_limit",
+    },
+    ("POST", "/api/v1/account/links/trakt/device/poll"): {
+        "require_same_origin",
+        "mutation_rate_limit",
+    },
     ("POST", "/api/v1/account/taste-sources"): {"require_same_origin", "mutation_rate_limit"},
     ("POST", "/api/v1/account/taste-sources/{source}/clear"): {
         "require_same_origin",

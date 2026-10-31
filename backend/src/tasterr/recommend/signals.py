@@ -1,6 +1,6 @@
 """Signal kinds and weights (SPEC §8) — shared vocabulary for the taste engine.
 
-`request`, `seed_request_history`, and both watch kinds are server-recorded only;
+`request`, `seed_request_history`, and watch kinds are server-recorded only;
 the client may record (and, for the toggles, retract) the rest. Weights are written onto each
 signal row at record time, so history keeps the weight it earned even if these
 constants are retuned later.
@@ -22,6 +22,7 @@ SignalKind = Literal[
     "seed_request_history",
     "watched_plex",
     "watched_jellyfin",
+    "watched_trakt",
 ]
 # The only kinds POST /signals accepts — strong kinds are unrepresentable there.
 ClientSignalKind = Literal["detail_open", "watchlist", "not_interested"]
@@ -32,13 +33,16 @@ SIGNAL_WEIGHTS: dict[SignalKind, float] = {
     "seed_request_history": 2.0,
     "watched_plex": 2.5,
     "watched_jellyfin": 2.5,
+    "watched_trakt": 2.5,
     "detail_open": 0.3,
     "not_interested": -3.0,
 }
 
 # Kinds with on/off semantics: adding is idempotent, retracting deletes.
 TOGGLE_KINDS: frozenset[SignalKind] = frozenset(("watchlist", "not_interested"))
-WATCHED_KINDS: frozenset[SignalKind] = frozenset(("watched_plex", "watched_jellyfin"))
+WATCHED_KINDS: frozenset[SignalKind] = frozenset(
+    ("watched_plex", "watched_jellyfin", "watched_trakt")
+)
 # Kinds with at most one row per user+title. Imported rows are deduped so
 # overlapping history imports cannot double a
 # title's influence — idempotence instead of cross-request locking.
@@ -52,11 +56,12 @@ STRONG_POSITIVE_KINDS: frozenset[SignalKind] = (
 
 ALL_KINDS: frozenset[SignalKind] = frozenset(get_args(SignalKind))
 
-TasteSource = Literal["seerr", "plex", "jellyfin", "browsing"]
+TasteSource = Literal["seerr", "plex", "jellyfin", "trakt", "browsing"]
 SOURCE_KINDS: dict[TasteSource, frozenset[SignalKind]] = {
     "seerr": frozenset(("seed_request_history",)),
     "plex": frozenset(("watched_plex",)),
     "jellyfin": frozenset(("watched_jellyfin",)),
+    "trakt": frozenset(("watched_trakt",)),
     "browsing": frozenset(("detail_open",)),
 }
 

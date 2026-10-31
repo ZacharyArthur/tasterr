@@ -276,6 +276,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/links/trakt/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Trakt Device */
+        post: operations["create_trakt_device_api_v1_account_links_trakt_device_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/trakt/device/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll Trakt Device */
+        post: operations["poll_trakt_device_api_v1_account_links_trakt_device_poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account/links/{provider}/unlink": {
         parameters: {
             query?: never;
@@ -650,7 +684,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "plex" | "jellyfin" | "seerr";
+            provider: "plex" | "jellyfin" | "seerr" | "trakt";
             /** Available */
             available: boolean;
             /** Sign In */
@@ -1445,7 +1479,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "seerr" | "plex" | "jellyfin" | "browsing";
+            source: "seerr" | "plex" | "jellyfin" | "trakt" | "browsing";
             /** Enabled */
             enabled: boolean;
         };
@@ -1454,6 +1488,33 @@ export interface components {
          * @enum {string}
          */
         Theme: "dark" | "light";
+        /** TraktDeviceResponse */
+        TraktDeviceResponse: {
+            /** Handle */
+            handle: string;
+            /** User Code */
+            user_code: string;
+            /** Interval */
+            interval: number;
+            /** Expires In */
+            expires_in: number;
+        };
+        /** TraktPollBody */
+        TraktPollBody: {
+            /** Handle */
+            handle: string;
+        };
+        /** TraktPollResponse */
+        TraktPollResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "expired" | "denied" | "linked";
+            /** Interval */
+            interval?: number | null;
+            account?: components["schemas"]["AccountResponse"] | null;
+        };
         /** UnlinkBody */
         UnlinkBody: {
             /**
@@ -1784,7 +1845,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                source: "seerr" | "plex" | "jellyfin" | "browsing";
+                source: "seerr" | "plex" | "jellyfin" | "trakt" | "browsing";
             };
             cookie?: never;
         };
@@ -1943,12 +2004,65 @@ export interface operations {
             };
         };
     };
+    create_trakt_device_api_v1_account_links_trakt_device_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraktDeviceResponse"];
+                };
+            };
+        };
+    };
+    poll_trakt_device_api_v1_account_links_trakt_device_poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TraktPollBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraktPollResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     unlink_account_api_v1_account_links__provider__unlink_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                provider: "plex" | "jellyfin" | "seerr";
+                provider: "plex" | "jellyfin" | "seerr" | "trakt";
             };
             cookie?: never;
         };

@@ -35,6 +35,7 @@ services:
       TMDB_API_KEY: ${TMDB_API_KEY:?set TMDB_API_KEY in .env}
       # TASTERR_SECRET_KEY: random stable secret, required for sign-in/requests;
       # encrypts linked Plex tokens AND Seerr cookies. Rotation requires re-linking.
+      # Also encrypts Trakt token sets when that integration is configured.
       TASTERR_SECRET_KEY: ${TASTERR_SECRET_KEY:?set TASTERR_SECRET_KEY in .env}
 
       # Sign-in providers: 2.3.1 requires Seerr. Direct Plex/Jellyfin sign-in below
@@ -72,6 +73,14 @@ services:
       # Jellyfin password sign-in from Tasterr's address (local-network rules do
       # not apply); repeated wrong passwords can lock accounts (10/min/client IP).
       # JELLYFIN_ALLOW_EMPTY_PASSWORD: ${JELLYFIN_ALLOW_EMPTY_PASSWORD:-false}
+
+      # Trakt: optional link-only history, never sign-in. Requires post-2.3.1.
+      # TRAKT_CLIENT_ID: default unset; requires TASTERR_SECRET_KEY.
+      # Register your own app with Redirect URI http://localhost; add testers.
+      # Keep client values server-side in .env, never inline.
+      # TRAKT_CLIENT_ID: ${TRAKT_CLIENT_ID}
+      # TRAKT_CLIENT_SECRET: optional, default unset; newer apps issue none.
+      # TRAKT_CLIENT_SECRET: ${TRAKT_CLIENT_SECRET}
 
       # Networking and proxy (all optional).
       # TASTERR_HOST: bind address, default 0.0.0.0 inside the container.

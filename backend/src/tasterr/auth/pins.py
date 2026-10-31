@@ -17,18 +17,21 @@ MAX_PENDING = 128
 
 
 @dataclass
-class _Pending:
-    plex_pin_id: int
+class _Pending[T]:
+    payload: T
     created: float
+    expires: float
     session_hash: str | None = None
 
 
-class PinStore:
+class PinStore[T = int]:
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
-        self._pending: dict[str, _Pending] = {}
+        self._pending: dict[str, _Pending[T]] = {}
 
-    def create(self, plex_pin_id: int, *, session_hash: str | None = None) -> str:
+    def create(
+        self, payload: T, *, session_hash: str | None = None, ttl: float = TTL_SECONDS
+    ) -> str:
         now = self._clock()
         self._prune(now)
         if len(self._pending) >= MAX_PENDING:
@@ -36,34 +39,34 @@ class PinStore:
             del self._pending[oldest]
         handle = secrets.token_urlsafe(32)
         self._pending[handle] = _Pending(
-            plex_pin_id=plex_pin_id, created=now, session_hash=session_hash
+            payload=payload, created=now, expires=now + ttl, session_hash=session_hash
         )
         return handle
 
-    def get(self, handle: str, *, session_hash: str | None = None) -> int | None:
+    def get(self, handle: str, *, session_hash: str | None = None) -> T | None:
         """Look up without consuming — polling repeats until the PIN is claimed."""
         pending = self._pending.get(handle)
         if pending is None or pending.session_hash != session_hash:
             return None
-        if self._clock() - pending.created >= TTL_SECONDS:
+        if self._clock() >= pending.expires:
             del self._pending[handle]
             return None
-        return pending.plex_pin_id
+        return pending.payload
 
-    def pop(self, handle: str, *, session_hash: str | None = None) -> int | None:
+    def pop(self, handle: str, *, session_hash: str | None = None) -> T | None:
         """Atomically take the handle — the single-use step once the PIN is
         claimed. Being synchronous, it cannot interleave with another request's
         pop between awaits, so overlapping polls yield exactly one winner."""
         if self.get(handle, session_hash=session_hash) is None:
             return None
         pending = self._pending.pop(handle)
-        if self._clock() - pending.created >= TTL_SECONDS:
+        if self._clock() >= pending.expires:
             return None
-        return pending.plex_pin_id
+        return pending.payload
 
     def consume(self, handle: str) -> None:
         self._pending.pop(handle, None)
 
     def _prune(self, now: float) -> None:
-        for handle in [h for h, p in self._pending.items() if now - p.created >= TTL_SECONDS]:
+        for handle in [h for h, p in self._pending.items() if now >= p.expires]:
             del self._pending[handle]

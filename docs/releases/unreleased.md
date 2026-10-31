@@ -1,5 +1,16 @@
 # Unreleased
 
+- Members can link an operator-owned Trakt app through device authorization and
+  import all-time history, bounded to the newest 500 movies and 500 shows within
+  ten pages per type. Trakt is a taste source, never sign-in, admin, Seerr, or
+  Continue Watching. One title contributes its newest watch across enabled
+  sources. Unlink/delete revokes the Trakt connection best-effort. Development
+  apps require adding household testers; see the configuration guide.
+- Migration `0010` rebuilds profiles and adds Trakt signal uniqueness. Downgrade
+  to `0009` deletes Trakt links/history and source preferences, retaining users
+  and other links. Stop, back up, and validate first; image-only rollback is
+  unsupported.
+
 - Admins can choose offered sign-in methods in Settings without disabling account
   linking, history, Continue Watching, or requests. Settings previews affected
   members and prevents self-lockout; Account warns stranded members. The optional
@@ -50,7 +61,7 @@
   bypassing Jellyfin's local-network rules. Wrong passwords can lock accounts
   (10 attempts/minute/client IP). `JELLYFIN_ALLOW_EMPTY_PASSWORD` defaults false;
   enabling it permits passwordless sign-in and either Jellyfin linking path.
-- Account has per-member switches for Seerr request history, Plex/Jellyfin watch
+- Account has per-member switches for Seerr request history, Plex/Jellyfin/Trakt watch
   history, and browsing activity, all initially on. Off stops collection and
   removes influence/rail anchors without deleting signals; on restores influence
   and resets link sync times for bounded re-import. Deliberate requests, My List,
@@ -59,9 +70,10 @@
   and watermark. The 24-hour overlap can re-import recent history; a never-synced
   source can re-import its full window. Watched titles remain excluded from
   Recommended for You while their signals exist, even with their source off.
-- Unlink requires another usable sign-in method and optionally deletes imported
+- Unlink, except for Trakt, requires another usable sign-in method and optionally deletes imported
   history. Delete account removes local data and all sessions, leaving upstream
-  accounts untouched. Request controls can connect Seerr inline and retry once.
+  accounts untouched except for revoking the Trakt connection best-effort.
+  Request controls can connect Seerr inline and retry once.
 - Downgrade requires a database migration or restoring the stopped pre-upgrade
   backup. An image-only rollback across `0007` is unsupported. Downgrade removes
   users without a Seerr link and their local data and signs everyone out.

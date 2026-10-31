@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     jellyfin_internal_url: str | None = Field(default=None, repr=False)
     jellyfin_api_key: SecretStr | None = None
     jellyfin_allow_empty_password: bool = False
+    trakt_client_id: SecretStr | None = None
+    trakt_client_secret: SecretStr | None = None
     tasterr_secret_key: SecretStr | None = None
 
     database_path: Path = Path("data/tasterr.db")
@@ -178,6 +180,10 @@ class Settings(BaseSettings):
     @property
     def jellyfin_configured(self) -> bool:
         return self.jellyfin_internal_url is not None and self.jellyfin_api_key is not None
+
+    @property
+    def trakt_configured(self) -> bool:
+        return self.trakt_client_id is not None and self.tasterr_secret_key is not None
 
     @property
     def tmdb_configured(self) -> bool:

@@ -70,6 +70,7 @@ def test_clear_is_scoped_and_preserves_preferences_and_watermark(
                 "seed_request_history",
                 "watched_plex",
                 "watched_jellyfin",
+                "watched_trakt",
                 "detail_open",
                 "watchlist",
                 "request",
@@ -80,7 +81,7 @@ def test_clear_is_scoped_and_preserves_preferences_and_watermark(
         await store.set_source_enabled(db, user_id, source, False)
         # Clearing must invalidate a profile independently of a preceding toggle.
         await store.save_profile(db, user_id, {"genre:drama": 1})
-        for name in ("plex", "jellyfin"):
+        for name in ("plex", "jellyfin", "trakt"):
             db.add(
                 LinkedAccount(
                     user_id=user_id, provider=name, external_id=name, display_name="Viewer"
@@ -98,9 +99,9 @@ def test_clear_is_scoped_and_preserves_preferences_and_watermark(
 
     async def verify(db: AsyncSession) -> None:
         remaining = await store.load_signals(db, user_id)
-        assert len(remaining) == 6
+        assert len(remaining) == 7
         assert all(row.kind not in SOURCE_KINDS[source] for row in remaining)
-        assert len(await store.load_signals(db, 2)) == 7
+        assert len(await store.load_signals(db, 2)) == 8
         assert await db.get(Profile, user_id) is None
         assert await db.get(Profile, 2) is not None
         other = await db.get(User, 2)
@@ -111,7 +112,7 @@ def test_clear_is_scoped_and_preserves_preferences_and_watermark(
     db_call(path, verify)
 
 
-@pytest.mark.parametrize("source", ["plex", "jellyfin"])
+@pytest.mark.parametrize("source", ["plex", "jellyfin", "trakt"])
 def test_unconfigured_unlinked_history_keeps_controls_card(
     tmp_path: Path, source: TasteSource
 ) -> None:

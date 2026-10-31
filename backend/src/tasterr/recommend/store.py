@@ -205,7 +205,10 @@ async def load_taste_signals(db: AsyncSession, user_id: int) -> list[Signal]:
 async def load_profile_inputs(db: AsyncSession, user_id: int) -> list[SignalInput]:
     return [
         SignalInput(
-            ("tv" if row.media_type == "tv" else "movie", row.tmdb_id), row.weight, row.created_at
+            ("tv" if row.media_type == "tv" else "movie", row.tmdb_id),
+            row.weight,
+            row.created_at,
+            cast("SignalKind", row.kind),
         )
         for row in await load_taste_signals(db, user_id)
     ]

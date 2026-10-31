@@ -33,10 +33,10 @@ class TasteSources(TypeDecorator[list[TasteSource]]):
         return []
 
 
-Provider = Literal["plex", "jellyfin", "seerr"]
+Provider = Literal["plex", "jellyfin", "seerr", "trakt"]
 SIGNAL_UNIQUE_INDEX_WHERE = text(
     "kind IN ('watchlist', 'not_interested', 'seed_request_history', "
-    "'watched_plex', 'watched_jellyfin')"
+    "'watched_plex', 'watched_jellyfin', 'watched_trakt')"
 )
 
 
@@ -129,7 +129,7 @@ class Signal(Base):
     tmdb_id: Mapped[int]
     media_type: Mapped[str] = mapped_column(String(8))  # 'movie' | 'tv'
     # 'request' | 'watchlist' | 'detail_open' | 'not_interested' |
-    # 'seed_request_history' | 'watched_plex' | 'watched_jellyfin'
+    # 'seed_request_history' | 'watched_plex' | 'watched_jellyfin' | 'watched_trakt'
     kind: Mapped[str] = mapped_column(String(24))
     weight: Mapped[float]
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)

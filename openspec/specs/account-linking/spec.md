@@ -10,7 +10,8 @@ how admin and display identity derive from links, and the member account page.
 ### Requirement: Users are Tasterr-owned and hold linked accounts
 
 A Tasterr user SHALL be identified only by its local id. External identities
-SHALL be stored as linked accounts: a provider (`plex`, `jellyfin`, or `seerr`), the
+SHALL be stored as linked accounts: a provider (`plex`, `jellyfin`, `seerr`, or
+`trakt`; `trakt` is a link-only provider, see `trakt-personalization`), the
 provider's stable account id, a display name, an optional avatar URL, an
 optional Fernet-encrypted credential, sync attempt/success timestamps, and a
 link time. A user SHALL hold at most one linked account per provider, and a
@@ -196,8 +197,15 @@ errors only on an outage (transport error, timeout, or HTTP 502, 503, or 504);
 any other failure, including a 404 for a deleted upstream user or a 401 for a
 revoked token, completes without a grant. A provider's check exists only while that
 provider is configured: a link to a provider the operator has since unconfigured
-neither grants admin nor counts as an error. Admin SHALL NOT be re-derived on link, unlink, or between
+neither grants admin nor counts as an error. A Trakt link SHALL have no admin
+check: it never grants admin and never counts as an error. Admin SHALL NOT be re-derived on link, unlink, or between
 sign-ins.
+
+#### Scenario: Trakt link never grants admin
+
+- **WHEN** a member whose only other link is a shared Plex account signs in with a
+  Trakt link present
+- **THEN** no Trakt call is made for admin derivation and `is_admin` is false
 
 #### Scenario: Seerr admin bit grants admin
 
@@ -270,13 +278,14 @@ the user's initials, not an avatar image, for every user.
 `GET /api/v1/account` SHALL require the shared session dependency and return,
 for each provider configured on this server (a provider is configured when its
 integration is set up: Plex when `PLEX_SERVER_ID` is set or Seerr is configured,
-Jellyfin when its URL and API key are set, Seerr when Seerr is configured, each
+Jellyfin when its URL and API key are set, Seerr when Seerr is configured, Trakt
+when its client id is set (its client secret is optional), each
 also requiring `TASTERR_SECRET_KEY`; the admin sign-in allowlist does not affect
 whether a provider is configured), whether the caller has
 it linked and
 that link's display name and link time, whether unlinking is allowed, and
 whether the provider is currently available for sign-in (`sign_in`, as defined in
-`user-auth`). A
+`user-auth`; always false for Trakt). A
 provider the caller has linked but that is no longer configured SHALL also be
 returned, flagged `available: false`. A provider that is neither configured nor
 linked but for which the caller still has imported signals SHALL also be
@@ -295,11 +304,12 @@ caller's stored Plex token; 409 when the caller has no Plex link), `jellyfin` (J
 forwarded once to Seerr's Jellyfin login), offered and accepted only while Jellyfin is
 configured (otherwise 503), or `local` (email and password forwarded
 once to
-Seerr). A link-creation endpoint for a provider that is not configured SHALL
+Seerr); Trakt via the device-code flow defined in `trakt-personalization`. A link-creation endpoint for a provider that is not configured SHALL
 return 503 and store nothing; linking a configured provider SHALL NOT depend on
 whether it is offered for sign-in; unlinking is never blocked by availability. A
-link SHALL be created only when the account would pass that provider's sign-in
-admission checks at that moment, regardless of the sign-in allowlist (for Plex,
+Plex, Jellyfin, or Seerr link SHALL be created only when the account would pass that provider's sign-in
+admission checks at that moment (Trakt has no sign-in, so a Trakt link needs only
+a completed device authorization), regardless of the sign-in allowlist (for Plex,
 the active Plex sign-in gate: Seerr accepting
 the token when `PLEX_SERVER_ID` is unset); otherwise the attempt SHALL fail with a
 generic 403 and store nothing. When the admission check cannot complete
@@ -342,6 +352,11 @@ the link poll SHALL refuse sign-in handles the same way. Failures SHALL be gener
 - **THEN** the link is created, Plex history and Continue Watching work, and the
   summary reports Plex with `available: true` and `sign_in: false`
 
+#### Scenario: Trakt appears as a link-only provider
+
+- **WHEN** Trakt is configured and a member requests `/account`
+- **THEN** the summary includes Trakt with its linked state and `sign_in: false`
+
 #### Scenario: Plex account the gate would refuse cannot be linked
 
 - **WHEN** a member links a Plex account that Plex sign-in would currently refuse
@@ -362,13 +377,15 @@ hold the same per-user scheduling guard as reset until it commits, so no new
 sync can start in between; then delete the link and its credential; for a Plex or
 Jellyfin link, clear the user's cached Continue Watching entry; for a Seerr link,
 set `users.seerr_unlinked_at`
-so sign-in auto-link no longer re-links Seerr; when
+so sign-in auto-link no longer re-links Seerr; for a Trakt link, revoke its
+token at Trakt after the local commit as defined in `trakt-personalization`; when
 `delete_history` is true it SHALL also delete that source's imported signals
 (`seed_request_history` for Seerr, `watched_plex` for Plex, `watched_jellyfin`
-for Jellyfin) and invalidate the
-profile. It SHALL refuse with 409 when no other remaining link belongs to a sign-in method
+for Jellyfin, `watched_trakt` for Trakt) and invalidate the
+profile. Except for a Trakt link, it SHALL refuse with 409 when no other remaining link belongs to a sign-in method
 that is currently available (as `/auth/methods` would report it), so a member
-cannot strand themselves after a configuration change; the check and the delete
+cannot strand themselves after a configuration change; a Trakt link never counts
+as such a link and unlinking one is never refused by this rule; the check and the delete
 SHALL be one atomic operation so concurrent unlinks
 cannot remove every link. Tasterr
 sessions SHALL stay valid after unlinking, including one signed in with the
@@ -391,6 +408,12 @@ unlinked account. `is_admin` SHALL NOT change until the next sign-in.
 - **WHEN** a member unlinks Plex with `delete_history` true
 - **THEN** their `watched_plex` signals are deleted and their profile is
   invalidated
+
+#### Scenario: Unlink Trakt can delete its history
+
+- **WHEN** a member unlinks Trakt with `delete_history` true
+- **THEN** the link and tokens are gone, their `watched_trakt` signals are deleted,
+  the profile is invalidated, and the token is revoked at Trakt best-effort
 
 #### Scenario: Last link cannot be removed
 
@@ -426,13 +449,21 @@ cleared; sessions, links, credentials,
 signals, and profile SHALL be removed by cascade. The response SHALL NOT set,
 clear, or refresh the session cookie: the old cookie no longer authenticates,
 and a delayed deletion response SHALL NOT overwrite a newer sign-in's cookie.
-Nothing SHALL be deleted in any upstream service.
+Nothing SHALL be deleted in any upstream service; the only upstream effect SHALL
+be the best-effort revocation of a Trakt link's token after the local commit, as
+defined in `trakt-personalization`.
 
 #### Scenario: Deletion removes everything local
 
 - **WHEN** a member confirms deletion with their display name
 - **THEN** their user, sessions, links, signals, and profile are gone and the
   old session cookie returns 401
+
+#### Scenario: Deletion revokes Trakt without waiting on it
+
+- **WHEN** a member with a Trakt link deletes their account while Trakt is
+  unreachable
+- **THEN** everything local is deleted and the response succeeds
 
 #### Scenario: Wrong confirmation deletes nothing
 
@@ -463,8 +494,13 @@ its taste-source controls, and a linked provider that is no longer configured SH
 available on this server" with Unlink. Unlink SHALL confirm
 with an unticked "Also delete history imported from this account" option and
 SHALL be disabled with "This is your only way to sign in" when no other link can
-currently sign in. Deletion SHALL require
-typing the display name and SHALL state that nothing is deleted in Plex, Jellyfin, or Seerr.
+currently sign in, except on the Trakt card, whose Unlink is never disabled by
+that rule. The Trakt card's Link SHALL open the device-code dialog: the user code,
+a fixed link to `https://auth.trakt.tv/activate` opening in a new tab, a waiting
+state that polls at the returned interval, expired and denied messages with a way
+to start again, and Cancel. Deletion SHALL require
+typing the display name and SHALL state that nothing is deleted in Plex, Jellyfin, Seerr, or Trakt
+(a Trakt connection is revoked).
 A link conflict SHALL show the resolution steps without naming the other user:
 sign in with each account, keep the one you want, delete the other Tasterr
 account from its account page, then link again.
@@ -473,6 +509,12 @@ account from its account page, then link again.
 
 - **WHEN** a non-admin chooses Account from the avatar menu
 - **THEN** `/account` shows their connected accounts and the danger zone
+
+#### Scenario: Member links Trakt from the account page
+
+- **WHEN** a member chooses Link on the Trakt card
+- **THEN** the dialog shows the user code and the trakt.tv activation link, and
+  the card shows Trakt as linked once the member approves on Trakt
 
 #### Scenario: Last link unlink is disabled
 
