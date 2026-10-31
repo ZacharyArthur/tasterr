@@ -19,6 +19,27 @@ ITEM = {
 }
 
 
+@pytest.mark.parametrize(
+    "body",
+    [{"Version": "10.10.0", "ServerName": "private"}, {}, {"Version": 10}, {"Version": ""}, []],
+)
+async def test_public_info_is_strict_and_keyless(body: object) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/System/Info/Public"
+        assert "Token=" not in request.headers["Authorization"]
+        assert KEY not in str(request.url) and KEY not in str(request.headers)
+        assert request.extensions["timeout"]["read"] == 5.0
+        return httpx.Response(200, json=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        client = JellyfinClient(http, "http://jellyfin:8096", KEY, "device")
+        if body == {"Version": "10.10.0", "ServerName": "private"}:
+            assert (await client.public_info()).model_dump() == {"version": "10.10.0"}
+        else:
+            with pytest.raises(UpstreamRejected):
+                await client.public_info()
+
+
 async def test_header_only_scoped_reads_auth_logout_and_shapes() -> None:
     requests: list[httpx.Request] = []
 

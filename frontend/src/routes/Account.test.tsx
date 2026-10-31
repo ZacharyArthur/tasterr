@@ -23,6 +23,7 @@ const USER = {
 	is_admin: false,
 };
 const SUMMARY: AccountResponse = {
+	seerr_accepts: { plex: true, jellyfin: true, local: true },
 	taste_sources: { plex: true, seerr: true, jellyfin: true, browsing: true },
 	providers: [
 		{

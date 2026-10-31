@@ -16,7 +16,15 @@ from enum import IntFlag
 from typing import Literal
 
 import httpx
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+)
 
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 
@@ -197,13 +205,47 @@ class _SeerrStatus(BaseModel):
     version: str
 
 
-class SeerrRequestSettings(BaseModel):
+MediaServer = Literal["plex", "jellyfin", "emby", "none", "unknown"]
+
+
+@dataclass(frozen=True)
+class SeerrLoginSupport:
+    plex: bool | None = None
+    jellyfin: bool | None = None
+    local: bool | None = None
+    media_server: MediaServer = "unknown"
+
+
+class SeerrPublicSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     enable_special_episodes: bool = Field(default=False, alias="enableSpecialEpisodes", strict=True)
     partial_requests_enabled: bool = Field(
         default=False, alias="partialRequestsEnabled", strict=True
     )
+    media_server_type: int | None = Field(default=None, alias="mediaServerType", strict=True)
+    media_server_login: bool | None = Field(default=None, alias="mediaServerLogin", strict=True)
+    local_login: bool | None = Field(default=None, alias="localLogin", strict=True)
+
+    @field_validator("media_server_type", "media_server_login", "local_login", mode="wrap")
+    @classmethod
+    def optional_login_field(cls, value: object, handler: ValidatorFunctionWrapHandler) -> object:
+        try:
+            return handler(value)
+        except ValidationError:
+            return None
+
+    @property
+    def login_support(self) -> SeerrLoginSupport:
+        servers: dict[int, MediaServer] = {1: "plex", 2: "jellyfin", 3: "emby", 4: "none"}
+        server = servers.get(self.media_server_type or 0, "unknown")
+        known = server != "unknown" and self.media_server_login is not None
+        return SeerrLoginSupport(
+            plex=server == "plex" and self.media_server_login is True if known else None,
+            jellyfin=server == "jellyfin" and self.media_server_login is True if known else None,
+            local=self.local_login,
+            media_server=server,
+        )
 
 
 class _SeerrRequestResult(BaseModel):
@@ -353,8 +395,8 @@ class SeerrClient:
             raise UpstreamRejected(200)
         return user
 
-    async def request_settings(self) -> SeerrRequestSettings:
-        """Read only the public season-request policy; drop all other settings."""
+    async def request_settings(self) -> SeerrPublicSettings:
+        """Read public season-request and login settings; drop unrelated fields."""
         try:
             response = await self._http.get(
                 f"{self._base}/api/v1/settings/public",
@@ -366,7 +408,7 @@ class SeerrClient:
         if response.status_code >= 400:
             raise UpstreamUnavailable("seerr settings read failed")
         try:
-            return SeerrRequestSettings.model_validate(response.json())
+            return SeerrPublicSettings.model_validate(response.json())
         except ValueError as error:
             raise UpstreamUnavailable("unexpected seerr response shape") from error
 

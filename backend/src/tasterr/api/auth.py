@@ -28,11 +28,12 @@ from tasterr.auth.login import (
 from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket, mutation_rate_limit
 from tasterr.auth.sessions import revoke_session
+from tasterr.cache import Cache, CacheOpts
 from tasterr.catalog.resume import continue_watching_key
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexAuthClient
-from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
+from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrLoginSupport
 from tasterr.db.models import Provider, User
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings, get_settings
@@ -43,6 +44,7 @@ router = APIRouter()
 
 PIN_NOT_FOUND = "Unknown or expired sign-in attempt"
 UPSTREAM_DOWN = "Sign-in service unavailable"
+SEERR_LOGIN_SUPPORT_KEY = "seerr-login-support"
 
 
 class UserResponse(BaseModel):
@@ -131,6 +133,20 @@ def provider_configured(settings: Settings, provider: Provider) -> bool:
             }[provider]
         )
     )
+
+
+async def seerr_login_support(request: Request, settings: Settings) -> SeerrLoginSupport:
+    client = build_seerr(request, settings)
+    if client is None:
+        return SeerrLoginSupport()
+    cache = cast("Cache", request.app.state.seerr_settings_cache)
+    try:
+        public = await cache.cached(
+            SEERR_LOGIN_SUPPORT_KEY, CacheOpts(ttl=300, stale=3600), client.request_settings
+        )
+    except UpstreamUnavailable:
+        return SeerrLoginSupport()
+    return public.login_support
 
 
 def sign_in_offered(settings: Settings, runtime: RuntimeSettings, provider: Provider) -> bool:
@@ -292,6 +308,8 @@ async def poll_plex_pin(
     seerr_unavailable = False
     try:
         if ctx.seerr is not None:
+            if (await seerr_login_support(request, settings)).plex is False:
+                raise UpstreamRejected(401)
             login = await ctx.seerr.login_plex(plex_token)
     except UpstreamRejected as error:  # Seerr refused this Plex account
         logger.info("auth: plex login rejected by seerr")
@@ -397,7 +415,10 @@ async def jellyfin_login(
         raise HTTPException(status_code=502, detail=UPSTREAM_DOWN) from error
     login = None
     seerr_unavailable = False
-    if ctx.seerr is not None:
+    if (
+        ctx.seerr is not None
+        and (await seerr_login_support(request, settings)).jellyfin is not False
+    ):
         try:
             login = await ctx.seerr.login_jellyfin(payload.username, payload.password)
         except UpstreamRejected:

@@ -23,6 +23,7 @@ from tasterr.api.auth import (
     get_seerr_auth_context,
     login_rate_limit,
     provider_configured,
+    seerr_login_support,
     sign_in_offered,
 )
 from tasterr.api.runtime_settings import RuntimeSettingsDep
@@ -74,9 +75,16 @@ class AccountProvider(BaseModel):
     can_unlink: bool = False
 
 
+class SeerrAccepts(BaseModel):
+    plex: bool
+    jellyfin: bool
+    local: bool
+
+
 class AccountResponse(BaseModel):
     providers: list[AccountProvider]
     taste_sources: dict[TasteSource, bool]
+    seerr_accepts: SeerrAccepts
 
 
 class LinkPollResponse(BaseModel):
@@ -148,7 +156,7 @@ async def clear_taste_source(source: TasteSource, authed: Member, db: Db, reques
 
 @router.get("/account", response_model=AccountResponse)
 async def account_summary(
-    authed: Member, db: Db, settings: Config, runtime: RuntimeSettingsDep
+    authed: Member, db: Db, settings: Config, runtime: RuntimeSettingsDep, request: Request
 ) -> AccountResponse:
     links = (
         await db.scalars(select(LinkedAccount).where(LinkedAccount.user_id == authed.user.id))
@@ -157,7 +165,13 @@ async def account_summary(
         await db.scalars(select(Signal.kind).where(Signal.user_id == authed.user.id).distinct())
     )
     excluded = await store.excluded_sources(db, authed.user.id)
+    support = await seerr_login_support(request, settings)
     return AccountResponse(
+        seerr_accepts=SeerrAccepts(
+            plex=support.plex is not False,
+            jellyfin=support.jellyfin is not False,
+            local=support.local is not False,
+        ),
         taste_sources={source: source not in excluded for source in SOURCE_KINDS},
         providers=[
             AccountProvider(
@@ -269,6 +283,8 @@ async def poll_link_pin(
                 raise HTTPException(status_code=403, detail="Account cannot be linked")
         else:
             assert ctx.seerr is not None
+            if (await seerr_login_support(request, settings)).plex is False:
+                raise UpstreamRejected(403)
             await ctx.seerr.login_plex(token)
     except UpstreamRejected as error:
         logger.info("account: link plex refused")
@@ -298,14 +314,23 @@ async def link_seerr(
     request: Request,
 ) -> None:
     assert ctx.seerr is not None
+    if payload.method == "jellyfin" and not provider_configured(settings, "jellyfin"):
+        raise HTTPException(status_code=503, detail="Authentication unavailable")
     try:
+        if (
+            payload.method == "jellyfin"
+            and not payload.password
+            and not settings.jellyfin_allow_empty_password
+        ):
+            raise UpstreamRejected(401)
+        support = await seerr_login_support(request, settings)
+        if {"plex": support.plex, "jellyfin": support.jellyfin, "local": support.local}[
+            payload.method
+        ] is False:
+            raise HTTPException(status_code=409, detail="Seerr does not accept this sign-in method")
         if payload.method == "local":
             login = await ctx.seerr.login_local(payload.email, payload.password)
         elif payload.method == "jellyfin":
-            if not provider_configured(settings, "jellyfin"):
-                raise HTTPException(status_code=503, detail="Authentication unavailable")
-            if not payload.password and not settings.jellyfin_allow_empty_password:
-                raise UpstreamRejected(401)
             login = await ctx.seerr.login_jellyfin(payload.username, payload.password)
         else:
             plex = await get_link(db, authed.user.id, "plex")

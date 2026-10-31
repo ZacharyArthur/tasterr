@@ -154,8 +154,14 @@ def build_fixture_router() -> APIRouter:
         }
 
     @router.get("/seerr/api/v1/settings/public")
-    async def _public_settings() -> dict[str, bool]:
-        return {"enableSpecialEpisodes": True, "partialRequestsEnabled": True}
+    async def _public_settings() -> dict[str, bool | int]:
+        return {
+            "enableSpecialEpisodes": True,
+            "partialRequestsEnabled": True,
+            "mediaServerType": 1,
+            "mediaServerLogin": True,
+            "localLogin": True,
+        }
 
     @router.get("/seerr/api/v1/service/{service}")
     async def _servers(service: Literal["radarr", "sonarr"]) -> list[dict[str, object]]:

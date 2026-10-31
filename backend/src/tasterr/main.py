@@ -130,6 +130,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # A separate bounded cache for short-TTL Seerr availability reads, so they
     # never evict the longer-lived TMDB entries (and vice versa).
     app.state.seerr_cache = Cache()
+    # Availability churn must not evict settings retained through an outage.
+    app.state.seerr_settings_cache = Cache(maxsize=1)
     # Seerr history sync uses per-user single-flight and strong task references
     # so background imports aren't garbage-collected mid-flight.
     app.state.seeding = set()

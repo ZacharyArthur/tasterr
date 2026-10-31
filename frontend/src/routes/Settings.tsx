@@ -5,6 +5,7 @@ import {
 } from "../components/RegionServicePicker";
 import {
 	useConnectionTest,
+	useIntegrations,
 	useLanguages,
 	useRegions,
 	useSaveSettings,
@@ -19,6 +20,12 @@ import {
 } from "../lib/api";
 
 const DEFAULT_APPEARANCE: Appearance = { theme: "dark", accent: "crimson" };
+const CONNECTION_LABELS: Record<ConnectionTarget, string> = {
+	tmdb: "TMDB",
+	seerr: "Seerr",
+	plex: "Plex",
+	jellyfin: "Jellyfin",
+};
 const ACCENTS: { id: Appearance["accent"]; label: string }[] = [
 	{ id: "crimson", label: "Crimson" },
 	{ id: "azure", label: "Azure" },
@@ -33,6 +40,10 @@ export function Settings() {
 	const languages = useLanguages();
 	const save = useSaveSettings();
 	const probe = useConnectionTest();
+	const integrations = useIntegrations();
+	const integration = integrations.data;
+	const loginLabel = (value: boolean | null) =>
+		value === null ? "Unknown" : value ? "On" : "Off";
 	const [draft, setDraft] = useState<RuntimeSettings | null>(null);
 	const [saved, setSaved] = useState(false);
 	const services = useServices(draft?.region ?? "", draft !== null);
@@ -445,32 +456,70 @@ export function Settings() {
 						here.
 					</p>
 					<div className="mt-3 flex flex-wrap gap-3">
-						{(["tmdb", "seerr"] as ConnectionTarget[]).map((target) => (
-							<button
-								key={target}
-								type="button"
-								disabled={probe.isPending || pending}
-								onClick={() => probe.mutate(target)}
-								className="min-h-11 rounded border border-app-border px-4 font-medium text-app-text hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60"
-							>
-								Test {target.toUpperCase()}
-							</button>
-						))}
+						{(Object.keys(CONNECTION_LABELS) as ConnectionTarget[]).map(
+							(target) => (
+								<button
+									key={target}
+									type="button"
+									disabled={probe.isPending || pending}
+									onClick={() => probe.mutate(target)}
+									className="min-h-11 rounded border border-app-border px-4 font-medium text-app-text hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60"
+								>
+									Test {CONNECTION_LABELS[target]}
+								</button>
+							),
+						)}
 					</div>
 					{probe.data?.ok && (
 						<output className="mt-3 block text-status-success">
-							{probe.data.target.toUpperCase()}: {probe.data.detail}
+							{CONNECTION_LABELS[probe.data.target]}: {probe.data.detail}
 						</output>
 					)}
 					{probe.data && !probe.data.ok && (
 						<p role="alert" className="mt-3 text-status-error">
-							{probe.data.target.toUpperCase()}: {probe.data.detail}
+							{CONNECTION_LABELS[probe.data.target]}: {probe.data.detail}
 						</p>
 					)}
 					{probe.isError && (
 						<p role="alert" className="mt-3 text-status-error">
 							Connection test could not run.
 						</p>
+					)}
+					{integration?.seerr && (
+						<div className="mt-5 space-y-2">
+							<h3 className="font-semibold">Seerr integration</h3>
+							<p>
+								Seerr:{" "}
+								{integration.seerr.configured ? "Configured" : "Not configured"}
+							</p>
+							<p>Media server: {integration.seerr.media_server}</p>
+							<p>
+								Plex login: {loginLabel(integration.seerr.plex)}; Jellyfin
+								login: {loginLabel(integration.seerr.jellyfin)}; Local login:{" "}
+								{loginLabel(integration.seerr.local)}
+							</p>
+							{!integration.plex_server_pinned &&
+								integration.seerr.plex === false && (
+									<p role="alert">
+										Plex sign-in and Plex linking will fail. Set PLEX_SERVER_ID.
+									</p>
+								)}
+							{integration.jellyfin_configured &&
+								integration.seerr.jellyfin === false && (
+									<>
+										<p role="alert">
+											Members who only use Jellyfin need a Seerr local account
+											{integration.seerr.plex === true ? " or a Plex link" : ""}{" "}
+											before they can request.
+										</p>
+										{integration.seerr.local === false && (
+											<p role="alert">
+												These members cannot request unless they link Plex.
+											</p>
+										)}
+									</>
+								)}
+						</div>
 					)}
 				</SettingsSection>
 

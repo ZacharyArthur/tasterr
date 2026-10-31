@@ -333,7 +333,7 @@ def test_admin_openapi_models_are_secret_free(tmp_path: Path) -> None:
 
 def test_every_admin_route_declares_an_explicit_response_model() -> None:
     routes = [route for route in admin_router.routes if isinstance(route, APIRoute)]
-    assert len(routes) == 6
+    assert len(routes) == 7
     assert all(route.response_model is not None for route in routes)
 
 

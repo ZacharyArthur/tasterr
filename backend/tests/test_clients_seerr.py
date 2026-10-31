@@ -5,7 +5,13 @@ import httpx
 import pytest
 
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
-from tasterr.clients.seerr import MediaType, SeerrAuthClient, SeerrClient, SeerrUser
+from tasterr.clients.seerr import (
+    MediaType,
+    SeerrAuthClient,
+    SeerrClient,
+    SeerrLoginSupport,
+    SeerrUser,
+)
 
 SERVER_LIST_FIXTURE: list[dict[str, object]] = [
     {
@@ -736,6 +742,9 @@ async def test_request_settings_reads_only_strict_booleans_with_read_auth(
     assert policy.model_dump() == {
         "enable_special_episodes": specials,
         "partial_requests_enabled": partial,
+        "media_server_type": None,
+        "media_server_login": None,
+        "local_login": None,
     }
 
 
@@ -744,6 +753,81 @@ async def test_missing_request_settings_are_disabled(body: dict[str, object]) ->
     policy = await _media_client(lambda _: httpx.Response(200, json=body)).request_settings()
     assert not policy.enable_special_episodes
     assert not policy.partial_requests_enabled
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        (
+            {"mediaServerType": 1, "mediaServerLogin": True, "localLogin": True},
+            SeerrLoginSupport(True, False, True, "plex"),
+        ),
+        (
+            {"mediaServerType": 2, "mediaServerLogin": True, "localLogin": False},
+            SeerrLoginSupport(False, True, False, "jellyfin"),
+        ),
+        (
+            {"mediaServerType": 3, "mediaServerLogin": True},
+            SeerrLoginSupport(False, False, None, "emby"),
+        ),
+        (
+            {"mediaServerType": 4, "mediaServerLogin": True},
+            SeerrLoginSupport(False, False, None, "none"),
+        ),
+        (
+            {"mediaServerType": 1, "mediaServerLogin": False, "localLogin": False},
+            SeerrLoginSupport(False, False, False, "plex"),
+        ),
+        (
+            {"mediaServerType": 2, "mediaServerLogin": False},
+            SeerrLoginSupport(False, False, None, "jellyfin"),
+        ),
+        ({}, SeerrLoginSupport()),
+        ({"mediaServerType": 1}, SeerrLoginSupport(media_server="plex")),
+        ({"mediaServerLogin": False}, SeerrLoginSupport()),
+        ({"mediaServerType": 99, "mediaServerLogin": False}, SeerrLoginSupport()),
+    ],
+)
+async def test_public_settings_login_support(
+    body: dict[str, object], expected: SeerrLoginSupport
+) -> None:
+    policy = await _media_client(lambda _: httpx.Response(200, json=body)).request_settings()
+    assert policy.login_support == expected
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"mediaServerType": "1"},
+        {"mediaServerType": True},
+        {"mediaServerType": 1.0},
+        {"mediaServerLogin": "true"},
+        {"mediaServerLogin": 1},
+        {"localLogin": "false"},
+        {"localLogin": 0},
+    ],
+)
+async def test_public_settings_wrong_login_types_preserve_season_policy(
+    body: dict[str, object],
+) -> None:
+    payload = {**body, "enableSpecialEpisodes": True, "partialRequestsEnabled": True}
+    policy = await _media_client(lambda _: httpx.Response(200, json=payload)).request_settings()
+    assert policy.login_support == SeerrLoginSupport()
+    assert policy.enable_special_episodes and policy.partial_requests_enabled
+
+
+async def test_malformed_login_field_does_not_coerce_or_erase_valid_fields() -> None:
+    policy = await _media_client(
+        lambda _: httpx.Response(
+            200,
+            json={
+                "mediaServerType": 1,
+                "mediaServerLogin": True,
+                "localLogin": "false",
+            },
+        )
+    ).request_settings()
+    assert policy.login_support == SeerrLoginSupport(True, False, None, "plex")
 
 
 @pytest.mark.parametrize(

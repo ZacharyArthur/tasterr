@@ -375,7 +375,44 @@ by YouTube trailers without disclosing household paths or search queries. HSTS i
 emitted only for effective HTTPS requests from a trusted proxy. The proxy may add the
 same headers as defense-in-depth but must not weaken them.
 
+## Mixed setups
+
+Tasterr can link both Plex and Jellyfin, but Seerr uses one media server. Seerr's
+own media-server and local-login toggles decide which credentials it accepts.
+
+| Feature | Requirement |
+| --- | --- |
+| Catalog browsing | TMDB configured; no media-server link required |
+| Plex sign-in and linking | Plex server membership with `PLEX_SERVER_ID`, or Seerr accepting Plex |
+| Jellyfin sign-in and linking | Jellyfin configured and credentials accepted by Jellyfin |
+| Media requests | A linked Seerr account with Seerr request permissions |
+| Learned watch history | An enabled taste source and its corresponding linked account |
+| Continue Watching | A Plex or Jellyfin link; one merged rail when both are linked |
+
+- **Plex + Plex-backed Seerr:** Plex sign-in can silently link Seerr when its
+  media-server login is enabled. Local Seerr linking works when local login is on.
+- **Jellyfin + Jellyfin-backed Seerr:** Jellyfin sign-in can silently link Seerr
+  when its media-server login is enabled; otherwise use a Seerr local account.
+- **Plex + Jellyfin + Plex-backed Seerr:** Jellyfin still provides sign-in,
+  history, and Continue Watching, but its credentials cannot link Seerr. A member
+  using only Jellyfin can ask the household admin for a Seerr local account, or
+  link Plex and use that link to connect Seerr. If local login is off, a usable
+  Plex link is required for requests.
+- **No Seerr:** browsing, history, and Continue Watching work with the configured
+  providers. Requests are disabled; Plex sign-in needs `PLEX_SERVER_ID`.
+
+Settings → Connections shows the detected Seerr integration and checks for mixed
+setup problems. Test Plex uses the admin's own linked Plex account. Test Jellyfin
+verifies the API key through the admin's linked Jellyfin user; without that link,
+it checks public reachability only and asks the admin to link Jellyfin.
+
+Detection can lag Seerr changes by five minutes. Test Seerr clears that cache so
+the next read refreshes it. A bounded outage can use the last known settings;
+without cached settings, unknown methods remain offered as before.
+
 ## Degraded modes
+
+For provider combinations and request-link options, see [Mixed setups](#mixed-setups).
 
 - TMDB unset or unavailable: health still responds, but catalog browsing reports a
   generic unavailable state until TMDB recovers or is configured.

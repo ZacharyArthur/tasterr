@@ -134,14 +134,16 @@ def _harness(
     )
     original_lifespan = harness.app.router.lifespan_context
 
-    async def block_plex_reads(request: httpx.Request) -> None:
+    async def block_unmocked_reads(request: httpx.Request) -> None:
         if request.url.host == "plex.tv":
             raise httpx.ConnectError("Plex reads are unavailable in this local fixture")
+        if request.url.path == "/api/v1/settings/public":
+            raise httpx.ConnectError("Seerr settings are unavailable in this local fixture")
 
     @asynccontextmanager
     async def isolated_lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with original_lifespan(app):
-            app.state.http.event_hooks["request"].append(block_plex_reads)
+            app.state.http.event_hooks["request"].append(block_unmocked_reads)
             yield
 
     harness.app.router.lifespan_context = isolated_lifespan

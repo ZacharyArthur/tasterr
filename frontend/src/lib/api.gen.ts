@@ -310,6 +310,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Integrations */
+        get: operations["get_integrations_api_v1_integrations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -658,6 +675,7 @@ export interface components {
             taste_sources: {
                 [key: string]: boolean;
             };
+            seerr_accepts: components["schemas"]["SeerrAccepts"];
         };
         /** Appearance */
         Appearance: {
@@ -724,7 +742,7 @@ export interface components {
          * ConnectionTarget
          * @enum {string}
          */
-        ConnectionTarget: "tmdb" | "seerr";
+        ConnectionTarget: "tmdb" | "seerr" | "plex" | "jellyfin";
         /** ConnectionTestRequest */
         ConnectionTestRequest: {
             target: components["schemas"]["ConnectionTarget"];
@@ -834,6 +852,14 @@ export interface components {
             avatar_url: string | null;
             /** Has Taste Signals */
             has_taste_signals: boolean;
+        };
+        /** IntegrationsResponse */
+        IntegrationsResponse: {
+            seerr: components["schemas"]["SeerrIntegration"];
+            /** Plex Server Pinned */
+            plex_server_pinned: boolean;
+            /** Jellyfin Configured */
+            jellyfin_configured: boolean;
         };
         /** JellyfinLoginRequest */
         JellyfinLoginRequest: {
@@ -1247,6 +1273,31 @@ export interface components {
             episode_count: number;
             /** Air Date */
             air_date: string | null;
+        };
+        /** SeerrAccepts */
+        SeerrAccepts: {
+            /** Plex */
+            plex: boolean;
+            /** Jellyfin */
+            jellyfin: boolean;
+            /** Local */
+            local: boolean;
+        };
+        /** SeerrIntegration */
+        SeerrIntegration: {
+            /** Configured */
+            configured: boolean;
+            /**
+             * Media Server
+             * @enum {string}
+             */
+            media_server: "plex" | "jellyfin" | "emby" | "none" | "unknown";
+            /** Plex */
+            plex: boolean | null;
+            /** Jellyfin */
+            jellyfin: boolean | null;
+            /** Local */
+            local: boolean | null;
         };
         /** SeerrLinkBody */
         SeerrLinkBody: {
@@ -1952,6 +2003,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_integrations_api_v1_integrations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationsResponse"];
                 };
             };
         };

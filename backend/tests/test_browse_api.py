@@ -674,7 +674,7 @@ def test_home_passes_configured_plex_connection_probe_limit(
         async def discover_servers(self, _account_token: str) -> PlexServerDiscovery:
             return PlexServerDiscovery((), complete=True)
 
-    monkeypatch.setattr("tasterr.api.home.PlexMediaClient", RecordingPlexClient)
+    monkeypatch.setattr("tasterr.api.taste.PlexMediaClient", RecordingPlexClient)
 
     def ignore_schedule(*_args: object) -> None:
         pass

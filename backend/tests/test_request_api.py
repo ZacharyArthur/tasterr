@@ -137,6 +137,43 @@ def _body(media_type: str = "movie", tmdb_id: int = 42) -> dict[str, object]:
     return {"media_type": media_type, "tmdb_id": tmdb_id}
 
 
+@pytest.mark.parametrize(
+    "login_metadata",
+    [
+        {"mediaServerType": "1"},
+        {"mediaServerLogin": 1},
+        {"localLogin": "false"},
+    ],
+)
+def test_malformed_login_metadata_preserves_explicit_season_requests(
+    tmp_path: Path, login_metadata: dict[str, object]
+) -> None:
+    writes: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(
+                200,
+                json={
+                    "enableSpecialEpisodes": True,
+                    "partialRequestsEnabled": True,
+                    **login_metadata,
+                },
+            )
+        assert request.method == "POST" and request.url.path == "/api/v1/request"
+        writes.append(json.loads(request.read()))
+        return httpx.Response(201, json={"media": {"status": 2}})
+
+    app = _app(tmp_path)
+    _override_ctx(app, handler, settings=False)
+    token = _seed_session(tmp_path / "tasterr.db")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json={**_body("tv", 7), "seasons": [0, 1]})
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert writes == [{"mediaType": "tv", "mediaId": 7, "seasons": [0, 1]}]
+
+
 # ── Gating (session + CSRF) ──────────────────────────────────────────────────
 
 

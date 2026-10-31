@@ -135,6 +135,15 @@ def build_seerr(request: Request, settings: Settings) -> SeerrClient | None:
     )
 
 
+def build_plex_media(request: Request, settings: Settings, secret_key: str) -> PlexMediaClient:
+    return PlexMediaClient(
+        request.app.state.http,
+        plex_client_identifier(secret_key),
+        max_connection_probes=settings.tasterr_plex_max_connection_probes,
+        server_id=settings.plex_server_id,
+    )
+
+
 def build_jellyfin(request: Request, settings: Settings) -> JellyfinClient | None:
     if (
         not settings.jellyfin_configured
@@ -238,16 +247,11 @@ def schedule_plex_history(
     maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
     seeding = cast("set[int]", state.seeding)
     secret_key = secret.get_secret_value()
+    plex = build_plex_media(request, settings, secret_key)
 
     async def run() -> None:
         while user_id in seeding:
             await asyncio.sleep(0.05)
-        plex = PlexMediaClient(
-            state.http,
-            plex_client_identifier(secret_key),
-            max_connection_probes=settings.tasterr_plex_max_connection_probes,
-            server_id=settings.plex_server_id,
-        )
         history = PlexCatalogService(plex, None, cast("Cache", state.catalog_cache))
         await import_plex_history(
             maker,

@@ -300,6 +300,9 @@ async def test_public_request_settings_contract() -> None:
         policy = await SeerrClient(http, URL, API_KEY).request_settings()
         assert isinstance(policy.enable_special_episodes, bool)
         assert isinstance(policy.partial_requests_enabled, bool)
+        assert policy.media_server_type in (1, 2, 3, 4)
+        assert isinstance(policy.media_server_login, bool)
+        assert isinstance(policy.local_login, bool)
 
 
 @requires_availability

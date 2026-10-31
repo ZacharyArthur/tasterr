@@ -18,13 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.api.availability import AvailabilityDep
 from tasterr.api.catalog import CatalogDep
 from tasterr.api.runtime_settings import RuntimeSettingsDep
-from tasterr.api.taste import build_jellyfin, schedule_history
-from tasterr.auth.crypto import decrypt_token, plex_client_identifier
+from tasterr.api.taste import build_jellyfin, build_plex_media, schedule_history
+from tasterr.auth.crypto import decrypt_token
 from tasterr.auth.deps import AuthedSession, get_db, require_session
 from tasterr.auth.login import get_link
 from tasterr.catalog.models import HomeFeed, RailsPage
 from tasterr.catalog.plex import PlexCatalogService
-from tasterr.clients.plex import PlexMediaClient
 from tasterr.rails.composer import build_extra_rails, build_home
 from tasterr.rails.registry import RailContext
 from tasterr.recommend.service import TasteService
@@ -63,12 +62,7 @@ async def get_home(
             pass
         else:
             plex = PlexCatalogService(
-                PlexMediaClient(
-                    request.app.state.http,
-                    plex_client_identifier(secret_key),
-                    max_connection_probes=settings.tasterr_plex_max_connection_probes,
-                    server_id=settings.plex_server_id,
-                ),
+                build_plex_media(request, settings, secret_key),
                 catalog,
                 request.app.state.catalog_cache,
             )

@@ -58,6 +58,8 @@ export type LanguagesResponse = components["schemas"]["LanguagesResponse"];
 export type ServiceOption = components["schemas"]["ServiceOption"];
 export type ServicesResponse = components["schemas"]["ServicesResponse"];
 export type ConnectionTarget = components["schemas"]["ConnectionTarget"];
+export type IntegrationsResponse =
+	components["schemas"]["IntegrationsResponse"];
 export type ConnectionTestResponse =
 	components["schemas"]["ConnectionTestResponse"];
 
@@ -214,6 +216,10 @@ export function getDestinations(
 
 export function getSettings(): Promise<SettingsResponse> {
 	return request<SettingsResponse>("/api/v1/settings");
+}
+
+export function getIntegrations(): Promise<IntegrationsResponse> {
+	return request<IntegrationsResponse>("/api/v1/integrations");
 }
 
 export function saveSettings(

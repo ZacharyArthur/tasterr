@@ -5,6 +5,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import {
+	getIntegrations,
 	getLanguages,
 	getRegions,
 	getServices,
@@ -104,5 +105,21 @@ export function useSaveSettings() {
 }
 
 export function useConnectionTest() {
-	return useMutation({ mutationFn: testConnection });
+	const cache = useQueryClient();
+	return useMutation({
+		mutationFn: testConnection,
+		onMutate: () => captureSession(cache),
+		onSuccess: (_result, target, epoch) => {
+			if (target !== "seerr" || !isSessionCurrent(cache, epoch)) return;
+			void cache.invalidateQueries({ queryKey: ["admin", "integrations"] });
+			void cache.invalidateQueries({ queryKey: ["account"] });
+		},
+	});
+}
+
+export function useIntegrations() {
+	return useQuery({
+		queryKey: ["admin", "integrations"],
+		queryFn: getIntegrations,
+	});
 }

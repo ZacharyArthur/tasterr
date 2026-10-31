@@ -48,8 +48,10 @@ See proposal.md for motivation. Current state:
 2. **Cached read in one API helper.** A helper next to `provider_available`
    (renamed `provider_configured` by `sign-in-method-allowlist`; use whichever
    name exists when this lands) in `api/auth.py` returns `SeerrLoginSupport` (all `None` when Seerr is
-   unconfigured or the read fails), using `seerr_cache.cached` with
-   `CacheOpts(ttl=300, stale=3600)` under one fixed key. The call site catches
+   unconfigured or the read fails), using a dedicated one-entry
+   `seerr_settings_cache.cached` with `CacheOpts(ttl=300, stale=3600)` under
+   one fixed key. This isolates the last good settings from per-title
+   availability churn, preserving the bounded stale window. The call site catches
    `UpstreamUnavailable` and returns all-`None`. `api/account.py` already imports
    from `api/auth.py`; `api/admin.py` gains that import. The season-request path
    keeps its uncached call. The Seerr connection test invalidates the key, so an

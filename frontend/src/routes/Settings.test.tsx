@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, test, vi } from "vitest";
+import type { IntegrationsResponse } from "../lib/api";
 import { setConfirmedSession } from "../lib/auth";
 import { Settings } from "./Settings";
 
@@ -90,6 +91,18 @@ function routeAdminFetch() {
 			return response({ ...SETTINGS, settings: JSON.parse(String(init.body)) });
 		}
 		if (url === "/api/v1/settings") return response(SETTINGS);
+		if (url === "/api/v1/integrations")
+			return response({
+				seerr: {
+					configured: true,
+					media_server: "unknown",
+					plex: null,
+					jellyfin: null,
+					local: null,
+				},
+				plex_server_pinned: false,
+				jellyfin_configured: true,
+			});
 		if (url === "/api/v1/regions") return response(REGIONS);
 		if (url === "/api/v1/languages")
 			return response({ languages: ["en-US", "es-ES"] });
@@ -107,6 +120,115 @@ function routeAdminFetch() {
 		return response({});
 	});
 }
+
+test("all four connection checks render readable labels and returned details", async () => {
+	const base = routeAdminFetch();
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === "/api/v1/connection-test") {
+				const { target } = JSON.parse(String(init?.body)) as { target: string };
+				return response({
+					target,
+					ok: target !== "jellyfin",
+					detail: "Returned detail",
+				});
+			}
+			return base(input, init);
+		},
+	);
+	renderSettings(fetchMock);
+	for (const label of ["TMDB", "Seerr", "Plex", "Jellyfin"]) {
+		fireEvent.click(
+			await screen.findByRole("button", { name: `Test ${label}` }),
+		);
+		expect(await screen.findByText(`${label}: Returned detail`)).toBeTruthy();
+	}
+});
+
+test.each([
+	{
+		server: "jellyfin",
+		plex: false,
+		jellyfin: true,
+		local: true,
+		pinned: false,
+		configured: true,
+		warnings: [true, false, false],
+	},
+	{
+		server: "plex",
+		plex: true,
+		jellyfin: false,
+		local: true,
+		pinned: true,
+		configured: true,
+		warnings: [false, true, false],
+	},
+	{
+		server: "plex",
+		plex: true,
+		jellyfin: false,
+		local: false,
+		pinned: true,
+		configured: true,
+		warnings: [false, true, true],
+	},
+	{
+		server: "unknown",
+		plex: null,
+		jellyfin: null,
+		local: null,
+		pinned: false,
+		configured: true,
+		warnings: [false, false, false],
+	},
+	{
+		server: "plex",
+		plex: true,
+		jellyfin: false,
+		local: false,
+		pinned: true,
+		configured: false,
+		warnings: [false, false, false],
+	},
+] as const)("Seerr integration warnings: $server / local $local", async (values) => {
+	const summary: IntegrationsResponse = {
+		seerr: {
+			configured: true,
+			media_server: values.server,
+			plex: values.plex,
+			jellyfin: values.jellyfin,
+			local: values.local,
+		},
+		plex_server_pinned: values.pinned,
+		jellyfin_configured: values.configured,
+	};
+	const base = routeAdminFetch();
+	renderSettings(
+		vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+			String(input) === "/api/v1/integrations"
+				? response(summary)
+				: base(input, init),
+		),
+	);
+	expect(
+		await screen.findByRole("heading", { name: "Seerr integration" }),
+	).toBeTruthy();
+	expect(screen.getByText(`Media server: ${values.server}`)).toBeTruthy();
+	for (const [index, text] of [
+		/Plex sign-in and Plex linking will fail/,
+		/Members who only use Jellyfin need/,
+		/These members cannot request unless/,
+	].entries()) {
+		expect(!!screen.queryByText(text)).toBe(values.warnings[index]);
+	}
+	if (values.server === "unknown")
+		expect(
+			screen.getByText(
+				/Plex login: Unknown; Jellyfin login: Unknown; Local login: Unknown/,
+			),
+		).toBeTruthy();
+});
 
 test("initializes the complete draft and saves only the typed runtime document", async () => {
 	const fetchMock = routeAdminFetch();

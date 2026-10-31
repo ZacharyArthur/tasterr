@@ -12,6 +12,12 @@ JELLYFIN_TIMEOUT_SECONDS = 5.0
 JELLYFIN_PAGE_SIZE = 100
 
 
+class JellyfinPublicInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    version: str = Field(alias="Version", min_length=1, max_length=256)
+
+
 class JellyfinPolicy(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -118,6 +124,13 @@ class JellyfinClient:
 
     async def logout(self, token: str) -> None:
         await self._request("POST", "/Sessions/Logout", token=token)
+
+    async def public_info(self) -> JellyfinPublicInfo:
+        response = await self._request("GET", "/System/Info/Public")
+        try:
+            return JellyfinPublicInfo.model_validate_json(response.content)
+        except ValueError:
+            raise UpstreamRejected(200) from None
 
     async def user(self, user_id: str) -> JellyfinUser:
         response = await self._request("GET", "/Users/" + user_id, token=self._key)
