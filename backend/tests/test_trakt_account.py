@@ -162,7 +162,7 @@ async def test_foreign_session_preserves_handle_and_server_ttl(tmp_path: Path, e
         fixture.client.cookies.set("tasterr_session", original)
         pins = cast("PinStore[DeviceAttempt]", fixture.app.state.trakt_pin_store)
         pending = pins._pending[handle]  # pyright: ignore[reportPrivateUsage]
-        assert pending.expires - pending.created == min(expiry, 600)
+        assert pending.expires == pending.created + min(expiry, 600)
         assert (await fixture.poll(handle)).status_code == 200
 
 
@@ -411,7 +411,7 @@ async def test_session_flow_isolation_expiry_and_guards(tmp_path: Path) -> None:
         # The original session retains its attempt after an unauthenticated poll.
         pins = cast("PinStore[DeviceAttempt]", fixture.app.state.trakt_pin_store)
         pending = pins._pending[handle]  # pyright: ignore[reportPrivateUsage]
-        assert pending.expires - pending.created == 600
+        assert pending.expires == pending.created + 600
         pending.expires = time.monotonic() - 1
         assert (await fixture.poll(handle)).status_code == 404
         fixture.settings.trakt_client_id = None

@@ -1,7 +1,7 @@
 # cmd.exe understands `cd x && cmd` like sh does; recipes stay cross-platform.
 set windows-shell := ["cmd.exe", "/c"]
 
-# Full quality gate — identical for humans, agents, and CI.
+# Full quality gate — identical locally and in CI.
 check: check-backend check-types-fresh check-frontend
 
 check-backend:
@@ -21,6 +21,11 @@ check-frontend:
 e2e:
     cd frontend && npm run build
     cd frontend && npm run e2e
+
+# Opt-in documentation captures from disposable local fixtures.
+screenshots:
+    cd frontend && npm run build
+    cd frontend && npx playwright test --config=playwright.screenshots.config.ts
 
 # Native production-image and named-volume contract; owns all disposable resources.
 container-smoke:

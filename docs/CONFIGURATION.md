@@ -33,8 +33,9 @@ Use `$$` for a literal dollar sign inline, and single-quote literal dollars in
 Compose file. See [Docker's substitution reference](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/).
 Never share rendered Compose configuration: it includes secrets.
 
-The example pins `2.3.1`; the linked-account, direct Plex/Jellyfin sign-in, and
-taste-source features in the current source are unreleased. Use a release
+The example pins `2.3.1`; the account work, metadata language, discovery exclusions,
+Jellyfin Continue Watching, sign-in choices, Seerr setup awareness, and Trakt history
+in the current source are unreleased. Use a release
 containing them once available; no version bump is implied by this reference.
 The pinned release requires Seerr and ignores `PLEX_SERVER_ID` and `JELLYFIN_*`;
 in particular, setting `PLEX_SERVER_ID` on `2.3.1` does not restrict sign-in.
@@ -105,7 +106,7 @@ docker run --rm python:3.13-slim python -c "import secrets; print(secrets.token_
 ```
 
 Store the result only in `.env` or your secret manager. Rotating it makes previously
-stored Plex tokens and Seerr cookies unreadable, so affected members must sign in
+stored Plex tokens, Seerr cookies, and Trakt tokens unreadable, so affected members must sign in
 or reconnect the affected accounts. Obtain TMDB, Seerr, and Jellyfin API keys from
 their respective settings pages; do not place them in browser code, Compose build args,
 or image layers.
@@ -149,6 +150,7 @@ Administrators manage these non-secret values in the Settings screen:
 - up to eight streaming service identifiers;
 - library hiding and up to eight excluded subscription-service identifiers (both off by default);
 - watched-title hiding (on by default, using each member's own history);
+- offered sign-in methods (every configured method by default; recovery below);
 - enabled/disabled rail types;
 - dark/light theme and crimson, azure, violet, emerald, or amber accent.
 
@@ -222,8 +224,11 @@ and are evaluated in the new region.
 
 The rail list includes independent switches for **Continue Watching**, **Picks You
 Wouldn't Usually Watch**, and **Something for Everyone Tonight**. All three default
-enabled. Any user with a Plex link reuses its encrypted account token, including
-after local sign-in. Users without a Plex link perform no live Plex read.
+enabled. Continue Watching uses linked Plex and/or Jellyfin accounts, independently
+of sign-in choice and taste toggles. Plex reuses its encrypted account token;
+Jellyfin uses API-key reads scoped to the linked user id. Users without a Plex
+link perform no live Plex read. Household blends require at least two members
+with taste signals, including the caller; a Plex link is not required.
 `TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
 bounded server-side discovery and is never exposed to the browser.
 
@@ -254,8 +259,10 @@ after the example's pinned `2.3.1` image.
 ## Member accounts and taste sources
 
 Every member can open **Account** (`/account`) from the avatar menu. Link Plex via
-PIN, Jellyfin via username/password, or Seerr via Plex, local credentials, or
-Jellyfin credentials. Prove links before switching sign-in methods: there is no
+PIN, Jellyfin via username/password, Trakt via device authorization, or Seerr via
+the Plex, local, or Jellyfin methods its setup accepts. The Seerr dialog names the
+active credentials and offers a form toggle only when both credential forms are
+accepted; known-refused methods are hidden. Prove links before switching sign-in methods: there is no
 email matching or account merge. Explicitly unlinking Seerr prevents automatic
 reconnection until manually linked again. Unlink requires another usable sign-in
 method, except that Trakt can always be unlinked and never counts as sign-in;
@@ -430,11 +437,11 @@ own media-server and local-login toggles decide which credentials it accepts.
 | Feature | Requirement |
 | --- | --- |
 | Catalog browsing | TMDB configured; no media-server link required |
-| Plex sign-in and linking | Plex server membership with `PLEX_SERVER_ID`, or Seerr accepting Plex |
-| Jellyfin sign-in and linking | Jellyfin configured and credentials accepted by Jellyfin |
+| Plex sign-in and linking | Plex server membership with `PLEX_SERVER_ID`, or Seerr accepting Plex; sign-in additionally requires the method to be offered |
+| Jellyfin sign-in and linking | Jellyfin configured and credentials accepted by Jellyfin; sign-in additionally requires the method to be offered |
 | Media requests | A linked Seerr account with Seerr request permissions |
 | Learned watch history | An enabled taste source and its corresponding linked account |
-| Continue Watching | A Plex or Jellyfin link; one merged rail when both are linked |
+| Continue Watching | A configured Plex or Jellyfin integration and the member's link, with the rail enabled; one merged rail when both contribute, independent of taste toggles |
 | Trakt history | Configured operator-owned app, an admitted Trakt member, and a linked account with its taste source on; no sign-in or requests |
 
 - **Plex + Plex-backed Seerr:** Plex sign-in can silently link Seerr when its
@@ -488,6 +495,9 @@ For provider combinations and request-link options, see [Mixed setups](#mixed-se
   Jellyfin sign-in/linking returns a generic upstream error.
 - Plex media without a canonical TMDB GUID: only that item is omitted; repair its
   library metadata as described above.
+- Trakt unavailable or refresh rejected: browsing continues and the link remains;
+  sync retries after the six-hour attempt throttle. Relink a revoked connection
+  from Account. Unlink/delete still completes if remote revocation fails.
 
 ## Backup and restore
 

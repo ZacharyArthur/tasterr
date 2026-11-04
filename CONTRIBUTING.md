@@ -64,6 +64,40 @@ Use Conventional Commit subjects (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`
   backend OpenAPI schema rather than maintained separately.
 - Add or update tests for changed behavior.
 
+## Versioning
+
+Tasterr uses SemVer (`MAJOR.MINOR.PATCH`) for its configuration, API, and upgrade
+contracts:
+
+- **MAJOR:** breaking configuration/environment, API, or upgrade contracts, or a
+  required manual migration step.
+- **MINOR:** backward-compatible features or opt-in/opt-out behavior changes.
+- **PATCH:** fixes only.
+
+Automatic startup migrations can accompany a feature release; a destructive
+downgrade still needs an explicit warning. The historical [release
+records](docs/releases/) include feature releases such as `2.2.0` and `2.3.0`
+and the sign-in fix in `2.3.1`.
+
+Accumulate user-facing changes and upgrade warnings in
+[`docs/releases/unreleased.md`](docs/releases/unreleased.md) between releases.
+During release readiness, choose the version, rename that file to `vX.Y.Z.md`,
+and complete its verification evidence. Synchronize package versions, image pins,
+and release references together using the [release procedure](docs/RELEASING.md).
+Documentation refreshes do not assign a new release version.
+
+## Documentation screenshots
+
+Run `just screenshots` inside the devcontainer to rebuild the SPA and replace
+the five JPEGs in `docs/screenshots/`: Home, detail, search, Account, and household
+picks. Captures use the default dark theme at 1440×900; Account uses a full-page
+capture from the top so all five taste-source controls are visible together.
+Install Chromium first using the command under Pull requests if needed. The opt-in
+Playwright configuration uses `backend/scripts/e2e_server.py`, disposable state,
+invented catalog data, and locally generated artwork; it refuses external browser
+requests. It is excluded from `just check` and ordinary `just e2e` runs. Open all
+five images and review them for private data before staging.
+
 ## Pull requests
 
 Before opening a pull request:

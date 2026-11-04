@@ -4,7 +4,7 @@
 """Hermetic real-backend server for the Playwright smoke journey.
 
 The normal application serves the compiled SPA and uses its normal database,
-session, catalog, and request paths. Only the two upstreams are replaced with
+session, catalog, and request paths. The upstream services are replaced with
 small local fixtures mounted under a test-only API prefix.
 """
 
@@ -12,23 +12,27 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC
+from os import environ
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Literal
 
 import uvicorn
-from fastapi import APIRouter, FastAPI, Header
+from fastapi import APIRouter, Depends, FastAPI, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, SecretStr
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.auth.deps import AuthedSession, get_db, require_session
 from tasterr.clients import tmdb, trakt
 from tasterr.clients.seerr import SeerrPermission
-from tasterr.db.models import utcnow
+from tasterr.db.models import LinkedAccount, User, utcnow
 from tasterr.main import create_app
+from tasterr.recommend.store import record_signal
 from tasterr.settings import Settings
 
 HOST = "127.0.0.1"
-PORT = 8765
+PORT = int(environ.get("TASTERR_E2E_PORT", "8765"))
 ORIGIN = f"http://{HOST}:{PORT}"
 FIXTURE_PREFIX = "/api/_e2e"
 TMDB_BASE = f"{ORIGIN}{FIXTURE_PREFIX}/tmdb/3"
@@ -36,6 +40,8 @@ SEERR_BASE = f"{ORIGIN}{FIXTURE_PREFIX}/seerr"
 E2E_EMAIL = "viewer@example.invalid"
 E2E_PASSWORD = "placeholder-password"
 E2E_SEERR_COOKIE = "connect.sid=e2e-session"
+SCREENSHOTS = environ.get("TASTERR_E2E_SCREENSHOTS") == "1"
+JELLYFIN_USER_ID = f"{1:032x}"
 
 
 class LocalLoginBody(BaseModel):
@@ -66,8 +72,8 @@ def _summary(tmdb_id: int, media_type: Literal["movie", "tv"] = "movie") -> dict
         "id": tmdb_id,
         "media_type": media_type,
         "overview": "Invented catalog data used only by the local browser smoke.",
-        "poster_path": None,
-        "backdrop_path": None,
+        "poster_path": f"/fixture-poster-{tmdb_id}.svg" if SCREENSHOTS else None,
+        "backdrop_path": f"/fixture-backdrop-{tmdb_id}.svg" if SCREENSHOTS else None,
         "vote_average": 8.1,
         "popularity": 100.0 - tmdb_id % 10,
         "genre_ids": [28],
@@ -84,7 +90,9 @@ def _page(media_type: Literal["movie", "tv"] = "movie") -> dict[str, object]:
     return {
         "page": 1,
         "total_pages": 1,
-        "results": [_summary(tmdb_id, media_type) for tmdb_id in range(101, 108)],
+        "results": [
+            _summary(tmdb_id, media_type) for tmdb_id in range(101, 129 if SCREENSHOTS else 108)
+        ],
     }
 
 
@@ -108,8 +116,8 @@ def _detail(tmdb_id: int, media_type: Literal["movie", "tv"]) -> dict[str, objec
     detail: dict[str, object] = {
         "id": tmdb_id,
         "overview": "Invented detail data served by the local E2E fixture.",
-        "poster_path": None,
-        "backdrop_path": None,
+        "poster_path": f"/fixture-poster-{tmdb_id}.svg" if SCREENSHOTS else None,
+        "backdrop_path": f"/fixture-backdrop-{tmdb_id}.svg" if SCREENSHOTS else None,
         "vote_average": 8.1,
         "vote_count": 500,
         "popularity": 90.0,
@@ -145,6 +153,56 @@ def _detail(tmdb_id: int, media_type: Literal["movie", "tv"]) -> dict[str, objec
 def build_fixture_router() -> APIRouter:
     router = APIRouter(prefix=FIXTURE_PREFIX, include_in_schema=False)
     states: dict[tuple[str, int], dict[str, int]] = {}
+
+    if SCREENSHOTS:
+
+        @router.post("/screenshots/seed", status_code=204)
+        async def _seed_screenshots(
+            db: Annotated[AsyncSession, Depends(get_db)],
+            authed: Annotated[AuthedSession, Depends(require_session)],
+        ) -> None:
+            guest = User(display_name="Demo guest", taste_onboarding_seen=True)
+            db.add(guest)
+            await db.flush()
+            db.add(
+                LinkedAccount(
+                    user_id=authed.user.id,
+                    provider="jellyfin",
+                    external_id=JELLYFIN_USER_ID,
+                    display_name="Demo Jellyfin member",
+                    sync_attempted_at=utcnow(),
+                    sync_synced_at=utcnow(),
+                )
+            )
+            for tmdb_id in (200, 201):
+                await record_signal(db, authed.user.id, "movie", tmdb_id, "watched_jellyfin")
+            for tmdb_id in (202, 203):
+                await record_signal(db, guest.id, "movie", tmdb_id, "request")
+            await db.commit()
+
+        @router.get("/jellyfin/UserItems/Resume")
+        async def _resume() -> dict[str, object]:
+            return {
+                "Items": [
+                    {
+                        "Id": f"{tmdb_id:032x}",
+                        "Type": "Movie",
+                        "ProviderIds": {"Tmdb": str(tmdb_id)},
+                        "RunTimeTicks": 10000,
+                        "UserData": {
+                            "LastPlayedDate": "2026-10-30T18:00:00Z",
+                            "PlaybackPositionTicks": (tmdb_id - 100) * 1500,
+                        },
+                    }
+                    for tmdb_id in range(101, 105)
+                ],
+                "TotalRecordCount": 4,
+            }
+
+        @router.get("/jellyfin/Shows/NextUp")
+        @router.get("/jellyfin/Items")
+        async def _empty_jellyfin_items() -> dict[str, object]:
+            return {"Items": [], "TotalRecordCount": 0}
 
     @router.post("/trakt/oauth/device/code")
     async def _trakt_device() -> dict[str, object]:
@@ -292,6 +350,10 @@ def build_fixture_router() -> APIRouter:
     async def _discover(media_type: Literal["movie", "tv"]) -> dict[str, object]:
         return _page(media_type)
 
+    @router.get("/tmdb/3/search/multi")
+    async def _search() -> dict[str, object]:
+        return _page()
+
     @router.get("/tmdb/3/{media_type}/{tmdb_id}")
     async def _title_detail(media_type: Literal["movie", "tv"], tmdb_id: int) -> dict[str, object]:
         return _detail(tmdb_id, media_type)
@@ -313,6 +375,8 @@ def e2e_harness(static_dir: Path | None = None) -> Generator[E2EHarness]:
             seerr_api_key=SecretStr("e2e-seerr-placeholder"),
             tasterr_secret_key=SecretStr("e2e-session-placeholder"),
             trakt_client_id=SecretStr("e2e-trakt-placeholder"),
+            jellyfin_internal_url=f"{ORIGIN}{FIXTURE_PREFIX}/jellyfin" if SCREENSHOTS else None,
+            jellyfin_api_key=SecretStr("e2e-jellyfin-placeholder") if SCREENSHOTS else None,
             database_path=root / "tasterr.db",
             static_dir=compiled_spa,
         )
