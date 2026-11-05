@@ -9,6 +9,9 @@ preferences, with validated defaults, explicit overrides and safe public respons
 ### Requirement: Settings load from environment only
 
 Application deployment settings SHALL be loaded via a pydantic-settings model.
+
+#### Details
+
 Secrets and connection values (`TMDB_API_KEY`, `SEERR_INTERNAL_URL`,
 `SEERR_EXTERNAL_URL`, `SEERR_API_KEY`, `PLEX_SERVER_ID`, `JELLYFIN_INTERNAL_URL`,
 `JELLYFIN_API_KEY`, `JELLYFIN_ALLOW_EMPTY_PASSWORD`, `TRAKT_CLIENT_ID`,
@@ -40,7 +43,11 @@ field.
 ### Requirement: PublicConfig projection contains no secrets
 
 The system SHALL define a `PublicConfig` model as the only settings shape ever
-serialized toward ordinary authenticated clients. It SHALL be built as an
+serialized toward ordinary authenticated clients.
+
+#### Details
+
+It SHALL be built as an
 explicit allowlist from integration-configured booleans, the resolved
 allowlisted appearance enums, and the resolved metadata language code. A
 regression test MUST assert that no secret field (API keys, internal URLs, secret
@@ -85,7 +92,11 @@ The system SHALL resolve one global runtime-settings document containing a
 two-letter upper-case region, a TMDB metadata language in `ll-CC` form (two
 lower-case letters, a hyphen, two upper-case letters), up to eight unique positive
 TMDB service ids, a set of disabled server-known rail types, and allowlisted
-theme/accent appearance. The document SHALL be stored as non-secret JSON in the
+theme/accent appearance.
+
+#### Details
+
+The document SHALL be stored as non-secret JSON in the
 `settings` table under one global key. An absent or invalid stored document SHALL
 resolve to documented code-owned defaults (`US`, `en-US`, no selected services,
 all rail types enabled, and the default dark appearance); an existing document
@@ -150,6 +161,9 @@ limit. A normal authenticated client SHALL never receive or mutate admin setting
 `GET /api/v1/regions` SHALL return typed TMDB watch-provider regions and `GET
 /api/v1/services?region=` SHALL return the de-duplicated, display-priority-ordered
 union of movie and TV flatrate providers for a validated two-letter region.
+
+#### Details
+
 `POST /api/v1/connection-test` SHALL accept only `tmdb`, `seerr`, `plex`, or
 `jellyfin` and probe the already configured integration. All three SHALL require
 the admin dependency; the POST SHALL also require same-origin and admin-mutation
@@ -221,7 +235,11 @@ connection coordinates, or account names.
 ### Requirement: Forwarded-header trust is env-only and narrowly validated
 
 The deployment settings SHALL expose `TASTERR_FORWARDED_ALLOW_IPS` as an env-only,
-comma-separated allowlist of literal proxy-peer IP addresses or CIDR networks. It
+comma-separated allowlist of literal proxy-peer IP addresses or CIDR networks.
+
+#### Details
+
+It
 SHALL default to loopback only. Empty entries, hostnames, URLs, malformed IP/CIDR
 values, and wildcard trust (`*`) MUST fail settings validation rather than broaden
 trust. The normalized allowlist SHALL be passed only to the production server and
@@ -253,7 +271,11 @@ MUST NOT be stored in the database, editable through an API, or included in
 The server-owned rail type registry SHALL add `continue-watching`,
 `unexpected-picks`, and `household-blend` with the user-facing labels **Continue
 Watching**, **Picks You Wouldn't Usually Watch**, and **Something for Everyone
-Tonight**. Each type SHALL be absent from the default disabled set and therefore
+Tonight**.
+
+#### Details
+
+Each type SHALL be absent from the default disabled set and therefore
 enabled for existing/fresh settings until an admin disables it. Disablement SHALL
 gate the corresponding provider/member/blend work before any Plex, Jellyfin,
 profile, or catalog fetch. Existing stored settings SHALL remain valid without a
@@ -278,7 +300,11 @@ migration or bootstrap rewrite.
 
 ### Requirement: Discovery preferences with explicit environment overrides
 
-The household runtime document SHALL include `hide_library_items` (false by default), `hide_watched_items` (true by default), and `excluded_service_ids` (empty by default, at most eight unique positive IDs). Existing documents SHALL gain those defaults without migration. Optional environment variables `TASTERR_HIDE_LIBRARY_ITEMS`, `TASTERR_HIDE_WATCHED_ITEMS`, and `TASTERR_EXCLUDED_SERVICE_IDS` SHALL override those preferences only when explicitly set; false and the empty JSON array SHALL be valid explicit overrides. Invalid environment values SHALL fail validation. Admin GET/PUT SHALL return effective values and allowlisted lock metadata; saving SHALL preserve stored preferences beneath locks. PublicConfig SHALL remain unchanged.
+The household runtime document SHALL include `hide_library_items` (false by default), `hide_watched_items` (true by default), and `excluded_service_ids` (empty by default, at most eight unique positive IDs).
+
+#### Details
+
+Existing documents SHALL gain those defaults without migration. Optional environment variables `TASTERR_HIDE_LIBRARY_ITEMS`, `TASTERR_HIDE_WATCHED_ITEMS`, and `TASTERR_EXCLUDED_SERVICE_IDS` SHALL override those preferences only when explicitly set; false and the empty JSON array SHALL be valid explicit overrides. Invalid environment values SHALL fail validation. Admin GET/PUT SHALL return effective values and allowlisted lock metadata; saving SHALL preserve stored preferences beneath locks. PublicConfig SHALL remain unchanged.
 
 #### Scenario: Missing fields preserve default browsing
 - **WHEN** an existing or fresh settings document has no exclusion fields
@@ -303,7 +329,11 @@ The household runtime document SHALL include `hide_library_items` (false by defa
 
 ### Requirement: Exclusion controls follow region and explain precedence
 
-The admin screen SHALL provide labelled library hiding, labelled watched-title hiding ("Hide titles members have watched", explaining that each member's own watched titles are hidden from their discovery and that Not interested always hides), and a separate excluded-service selector using regional service options, visible environment locks, best-effort semantics, and an explanation that exclusions win over inclusion. Changing region SHALL clear editable exclusions while retaining environment-controlled IDs for evaluation in the new region.
+The admin screen SHALL provide labelled library hiding, labelled watched-title hiding ("Hide titles members have watched", explaining that each member's own watched titles are hidden from their discovery and that Not interested always hides), and a separate excluded-service selector using regional service options, visible environment locks, best-effort semantics, and an explanation that exclusions win over inclusion.
+
+#### Details
+
+Changing region SHALL clear editable exclusions while retaining environment-controlled IDs for evaluation in the new region.
 
 #### Scenario: Watched hiding control reflects its lock
 - **WHEN** `TASTERR_HIDE_WATCHED_ITEMS` is set and an admin opens Settings
@@ -325,7 +355,11 @@ The admin screen SHALL provide labelled library hiding, labelled watched-title h
 
 `GET /api/v1/languages` SHALL require the admin dependency and return TMDB's
 primary translations as validated `ll-CC` codes, deduplicated and sorted, read
-through `clients/` with the catalog's bounded stale-on-error caching. Codes that
+through `clients/` with the catalog's bounded stale-on-error caching.
+
+#### Details
+
+Codes that
 fail validation SHALL be dropped. When TMDB is unconfigured or unavailable with
 nothing cached, it SHALL return the generic catalog-unavailable response. The
 Settings screen SHALL offer the language beside the region, labelled with the
@@ -349,7 +383,11 @@ whenever the code is well-formed; it is not checked against TMDB at save time.
 
 The optional environment variable `TASTERR_WATCH_HISTORY_DAYS` SHALL set the
 initial watch-history window in days for a link's first Plex or Jellyfin
-history sync: an integer from 1 to 3650, defaulting to 365 when unset. Valid
+history sync: an integer from 1 to 3650, defaulting to 365 when unset.
+
+#### Details
+
+Valid
 decimal strings from the environment (for example `730`) SHALL be accepted. A
 value that is not an integer in that range, including explicit JSON `null`, an
 empty string, a fractional number, or a boolean, SHALL fail boot validation. Changing it SHALL
@@ -381,7 +419,11 @@ re-import. It SHALL NOT appear in `PublicConfig` or the runtime document.
 
 The household runtime document SHALL include `disabled_sign_in_methods`, a
 unique subset of `plex`, `jellyfin`, and `seerr`, empty by default, so existing
-documents remain valid without migration and offer every configured method. The
+documents remain valid without migration and offer every configured method.
+
+#### Details
+
+The
 optional environment variable `TASTERR_SIGN_IN_METHODS` SHALL, when set, be a
 JSON array of one to three unique known method names that are the only offered
 methods, overriding and locking the stored value. An empty array, JSON `null`,
@@ -447,7 +489,11 @@ mutation, and return: whether Seerr is configured; Seerr's media server as one
 of `plex`, `jellyfin`, `emby`, `none`, or `unknown`; the three Seerr login method
 booleans as derived in `account-linking`, each reported as `true`, `false`, or
 `null` for unknown; whether `PLEX_SERVER_ID` is set (a boolean, never the id);
-and whether Jellyfin is configured. It SHALL return no URL, key, server id,
+and whether Jellyfin is configured.
+
+#### Details
+
+It SHALL return no URL, key, server id,
 server name, or upstream body, and a Seerr outage SHALL yield `unknown`/`null`
 values rather than an error.
 

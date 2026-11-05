@@ -29,7 +29,11 @@ a no-op, not an error.
 ### Requirement: Plex personalization persists only canonical taste and sync timestamps
 
 Each linked account SHALL carry nullable naive-UTC `sync_attempted_at` and
-`sync_synced_at` columns. The attempted timestamp SHALL gate retry cadence; the
+`sync_synced_at` columns.
+
+#### Details
+
+The attempted timestamp SHALL gate retry cadence; the
 success timestamp SHALL define the next history window. The signals partial
 unique index SHALL include `watched_plex` so one user/title has at most one Plex
 watched fact. No table/column SHALL persist raw Plex history, Continue Watching,
@@ -64,6 +68,12 @@ account token SHALL be stored only Fernet-encrypted on the Plex link.
   already free of v2 ids is treated as compatible and does not fail the downgrade
 
 ### Requirement: Linked-account migration forces one re-sign-in
+
+Migration `0007` SHALL replace session-bound upstream identity with linked
+accounts, force one re-sign-in, preserve retained data, and enforce the documented
+destructive downgrade limits.
+
+#### Details
 
 Migration `0007` SHALL create the `linked_accounts` table with unique
 `(provider, external_id)` and `(user_id, provider)` constraints and a cascading
@@ -122,6 +132,9 @@ delete every session, drop `users.seerr_unlinked_at`, and drop `linked_accounts`
 
 Migration `0008` SHALL extend the signals partial unique index to include
 `watched_jellyfin`, so one user/title has at most one Jellyfin watched fact.
+
+#### Details
+
 Jellyfin links SHALL store the Jellyfin user id, display name, and sync
 timestamps only, with no credential and no avatar URL. No table or column SHALL
 persist raw Jellyfin items, item ids, play data, access tokens, or the API key.
@@ -179,7 +192,11 @@ Migration `0010` SHALL rebuild the signals partial unique index
 (`ux_signals_unique_per_title`, whose predicate the ORM mirrors as
 `SIGNAL_UNIQUE_INDEX_WHERE`) to include `watched_trakt`, so one user/title has at
 most one Trakt watched fact, and SHALL delete every materialized profile so profiles rebuild
-under the one-watch-per-title rule. Trakt links SHALL store the Trakt user uuid,
+under the one-watch-per-title rule.
+
+#### Details
+
+Trakt links SHALL store the Trakt user uuid,
 the Trakt username as display name, the Fernet-encrypted token set, and sync
 timestamps, with no avatar URL. No table or column SHALL persist raw Trakt
 history entries, slugs, device codes, or the client id or secret. The downgrade

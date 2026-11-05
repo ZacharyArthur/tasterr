@@ -42,23 +42,22 @@ test("ordinary cards have no progress UI", () => {
 	expect(screen.queryByRole("progressbar")).toBeNull();
 });
 
-test.each([
-	"es-ES",
-	"en-US",
-	undefined,
-])("marks only TMDB card text with loaded language %s", (language) => {
-	config.language = language;
-	render(
-		<MemoryRouter>
-			<MediaCard item={item()} />
-		</MemoryRouter>,
-	);
-	for (const title of screen.getAllByText("Top Gun")) {
-		expect(title.getAttribute("lang")).toBe(language ?? null);
-	}
-	expect(screen.getByRole("link").hasAttribute("lang")).toBe(false);
-	expect(screen.getByText("1986").hasAttribute("lang")).toBe(false);
-});
+test.each(["es-ES", "en-US", undefined])(
+	"marks only TMDB card text with loaded language %s",
+	(language) => {
+		config.language = language;
+		render(
+			<MemoryRouter>
+				<MediaCard item={item()} />
+			</MemoryRouter>,
+		);
+		for (const title of screen.getAllByText("Top Gun")) {
+			expect(title.getAttribute("lang")).toBe(language ?? null);
+		}
+		expect(screen.getByRole("link").hasAttribute("lang")).toBe(false);
+		expect(screen.getByText("1986").hasAttribute("lang")).toBe(false);
+	},
+);
 
 test("next-up cards show episode context without a progress bar", () => {
 	render(

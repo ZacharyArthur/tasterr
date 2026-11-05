@@ -8,7 +8,11 @@ and bounded background history synchronization for personalized experiences.
 
 ### Requirement: Advertised Plex server connections are verified before use
 
-Resource discovery SHALL request HTTPS and relay connection data. When
+Resource discovery SHALL request HTTPS and relay connection data.
+
+#### Details
+
+When
 `PLEX_SERVER_ID` is set it SHALL retain only the resource whose client identifier
 equals it for both history and Continue Watching; otherwise it SHALL
 retain at most
@@ -110,7 +114,11 @@ response SHALL be used.
 ### Requirement: Plex media maps only through canonical TMDB GUIDs
 
 The system SHALL map Plex movies only from validated `tmdb://<id>` GUIDs and
-SHALL collapse an episode to its containing show's validated TMDB GUID. TMDB ids
+SHALL collapse an episode to its containing show's validated TMDB GUID.
+
+#### Details
+
+TMDB ids
 SHALL satisfy the shared positive database-safe bound. Duplicates across servers
 SHALL merge by `(media_type, tmdb_id)`, keeping the newest relevant watch/progress
 context by the spike-confirmed last-viewed timestamp and then deterministic
@@ -151,7 +159,11 @@ used.
 
 A successful Plex sign-in, a new Plex link, and a Home read by any user with a
 Plex link SHALL evaluate the same per-user single-flight trigger: schedule only
-when the Plex link's `sync_attempted_at` is absent or older than six hours. The
+when the Plex link's `sync_attempted_at` is absent or older than six hours.
+
+#### Details
+
+The
 task SHALL use the token stored on the Plex link, whichever method the user signed
 in with. Plex SHALL use single-flight state separate from the Seerr sync state and
 SHALL only read the latter to wait for that user's Seerr sync to settle. After
@@ -291,7 +303,11 @@ SHALL be retained.
 For a user with a usable Plex link or a usable Jellyfin link (as defined in
 `jellyfin-personalization`) and the rail type enabled, the home composer SHALL
 add `continue-watching` titled **Continue Watching** ahead of the other
-personalized providers. For the Plex contribution it SHALL read bounded items from
+personalized providers.
+
+#### Details
+
+For the Plex contribution it SHALL read bounded items from
 `MediaContainer.Hub[].Metadata` on each validated server, retain only
 account-scoped in-progress movie items and eligible in-progress or next-up
 episode items, order them by the first available item, show, or season
@@ -436,6 +452,12 @@ independent-degradation behavior.
 
 ### Requirement: Live Plex contracts are opt-in and redacted
 
+An opt-in live pytest suite, excluded from `just check` and CI, SHALL validate
+Plex identity, discovery, connection, history, Continue Watching, and canonical
+mapping contracts without exposing credentials or viewing data.
+
+#### Details
+
 An opt-in live pytest suite, excluded from `just check` and CI, SHALL validate the
 current PIN token's account identity, PMS-local `/accounts` resolution or the
 explicit-403 self-only fallback,
@@ -462,7 +484,11 @@ keys, titles, timestamps, URLs, or raw bodies.
 ### Requirement: Plex media reads use only the caller's linked-account material
 
 For an authenticated user with a Plex link, the system SHALL decrypt the token
-stored on that link only inside the server-side request/task that needs it. It
+stored on that link only inside the server-side request/task that needs it.
+
+#### Details
+
+It
 SHALL validate the token against the Plex account endpoint, discover accessible
 Plex Media Server resources through plex.tv, and use each resource's access token
 only as an `X-Plex-Token` request header. A user without a Plex link, or whose

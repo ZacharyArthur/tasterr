@@ -242,104 +242,108 @@ test("logout returns to the login screen", async () => {
 	).toBeTruthy();
 });
 
-test.each([
-	"local",
-	"jellyfin",
-])("%s account switch clears user A data and blocks a late query", async (method) => {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	primeUserAQueries(queryClient);
-	const lateUserAHome = deferred<typeof HOME>();
-	const lateUserACompleted = deferred<void>();
-	const userBLogin = deferred<Response>();
-	const userBHome = deferred<Response>();
-	const lateRequest = queryClient
-		.fetchQuery({
-			queryKey: ["home"],
-			queryFn: async () => {
-				const home = await lateUserAHome.promise;
-				lateUserACompleted.resolve(undefined);
-				return home;
-			},
-		})
-		.catch(() => undefined);
-	expect(queryClient.getQueryState(["home"])?.fetchStatus).toBe("fetching");
-	const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-		const url = String(input);
-		if (url === "/api/v1/auth/logout") return jsonResponse(null, 204);
-		if (url === `/api/v1/auth/${method}`) return userBLogin.promise;
-		if (url === "/api/v1/home") return userBHome.promise;
-		if (url === "/api/v1/config") return jsonResponse(CONFIG);
-		if (url === "/api/v1/rails?cursor=0") return jsonResponse(RAILS);
-		if (url === "/api/v1/taste-onboarding")
-			return jsonResponse({ state: "done" });
-		throw new Error(`unexpected fetch: ${url}`);
-	});
-	vi.stubGlobal("fetch", fetchMock);
-	renderApp("/", queryClient);
+test.each(["local", "jellyfin"])(
+	"%s account switch clears user A data and blocks a late query",
+	async (method) => {
+		const queryClient = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		primeUserAQueries(queryClient);
+		const lateUserAHome = deferred<typeof HOME>();
+		const lateUserACompleted = deferred<void>();
+		const userBLogin = deferred<Response>();
+		const userBHome = deferred<Response>();
+		const lateRequest = queryClient
+			.fetchQuery({
+				queryKey: ["home"],
+				queryFn: async () => {
+					const home = await lateUserAHome.promise;
+					lateUserACompleted.resolve(undefined);
+					return home;
+				},
+			})
+			.catch(() => undefined);
+		expect(queryClient.getQueryState(["home"])?.fetchStatus).toBe("fetching");
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === "/api/v1/auth/logout") return jsonResponse(null, 204);
+			if (url === `/api/v1/auth/${method}`) return userBLogin.promise;
+			if (url === "/api/v1/home") return userBHome.promise;
+			if (url === "/api/v1/config") return jsonResponse(CONFIG);
+			if (url === "/api/v1/rails?cursor=0") return jsonResponse(RAILS);
+			if (url === "/api/v1/taste-onboarding")
+				return jsonResponse({ state: "done" });
+			throw new Error(`unexpected fetch: ${url}`);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		renderApp("/", queryClient);
 
-	const signOut = await screen.findByRole("button", { name: "Sign out" });
-	expect(
-		queryClient
-			.getQueryCache()
-			.find({ queryKey: ["home"] })
-			?.getObserversCount(),
-	).toBeGreaterThan(0);
-	expect(queryClient.getQueryState(["home"])?.fetchStatus).toBe("fetching");
-	fireEvent.click(signOut);
-	await screen.findByRole("button", { name: "Continue with Plex" });
-	expectUserAQueriesRemoved(queryClient);
-	expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
+		const signOut = await screen.findByRole("button", { name: "Sign out" });
+		expect(
+			queryClient
+				.getQueryCache()
+				.find({ queryKey: ["home"] })
+				?.getObserversCount(),
+		).toBeGreaterThan(0);
+		expect(queryClient.getQueryState(["home"])?.fetchStatus).toBe("fetching");
+		fireEvent.click(signOut);
+		await screen.findByRole("button", { name: "Continue with Plex" });
+		expectUserAQueriesRemoved(queryClient);
+		expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
 
-	fireEvent.click(
-		await screen.findByRole("button", {
-			name:
-				method === "jellyfin"
-					? "Continue with Jellyfin"
-					: "Continue with Seerr",
-		}),
-	);
-	fireEvent.change(
-		screen.getByLabelText(method === "jellyfin" ? "Username" : "Email"),
-		{
-			target: { value: "viewer-b@example.test" },
-		},
-	);
-	fireEvent.change(screen.getByLabelText("Password"), {
-		target: { value: "password" },
-	});
-	fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-	await waitFor(() =>
-		expect(fetchMock).toHaveBeenCalledWith(
-			`/api/v1/auth/${method}`,
-			expect.objectContaining({ method: "POST" }),
-		),
-	);
-	expectUserAQueriesRemoved(queryClient);
-	expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
-
-	userBLogin.resolve(jsonResponse(USER_B));
-	expect(await screen.findByRole("button", { name: "Viewer B" })).toBeTruthy();
-	lateUserAHome.resolve({
-		hero: [],
-		rails: [
+		fireEvent.click(
+			await screen.findByRole("button", {
+				name:
+					method === "jellyfin"
+						? "Continue with Jellyfin"
+						: "Continue with Seerr",
+			}),
+		);
+		fireEvent.change(
+			screen.getByLabelText(method === "jellyfin" ? "Username" : "Email"),
 			{
-				id: "private-a",
-				title: "Viewer A Private",
-				kind: "standard",
-				items: [],
+				target: { value: "viewer-b@example.test" },
 			},
-		],
-	});
-	await lateUserACompleted.promise;
-	await lateRequest;
-	expect(queryClient.getQueryData(["home"])).toBeUndefined();
-	expect(screen.queryByRole("button", { name: "Viewer A Private" })).toBeNull();
+		);
+		fireEvent.change(screen.getByLabelText("Password"), {
+			target: { value: "password" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+		await waitFor(() =>
+			expect(fetchMock).toHaveBeenCalledWith(
+				`/api/v1/auth/${method}`,
+				expect.objectContaining({ method: "POST" }),
+			),
+		);
+		expectUserAQueriesRemoved(queryClient);
+		expect(queryClient.getQueryData(["auth", "me"])).toBeNull();
 
-	userBHome.resolve(jsonResponse(HOME_B));
-	expect(await screen.findByText("For Viewer B")).toBeTruthy();
-});
+		userBLogin.resolve(jsonResponse(USER_B));
+		expect(
+			await screen.findByRole("button", { name: "Viewer B" }),
+		).toBeTruthy();
+		lateUserAHome.resolve({
+			hero: [],
+			rails: [
+				{
+					id: "private-a",
+					title: "Viewer A Private",
+					kind: "standard",
+					items: [],
+				},
+			],
+		});
+		await lateUserACompleted.promise;
+		await lateRequest;
+		expect(queryClient.getQueryData(["home"])).toBeUndefined();
+		expect(
+			screen.queryByRole("button", { name: "Viewer A Private" }),
+		).toBeNull();
+
+		userBHome.resolve(jsonResponse(HOME_B));
+		expect(await screen.findByText("For Viewer B")).toBeTruthy();
+	},
+);
 
 test("Plex account switch clears user A data before user B arrives", async () => {
 	const queryClient = new QueryClient({

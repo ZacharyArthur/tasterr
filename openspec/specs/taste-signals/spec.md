@@ -11,6 +11,9 @@ Record bounded, caller-scoped taste events and canonical imported history with e
 user with a validated body: `media_type` constrained to `movie` or `tv`, an
 integer `tmdb_id` between 1 and 2,147,483,647 inclusive, and `kind` constrained
 to the client-recordable kinds — `detail_open`, `watchlist`, `not_interested`.
+
+#### Details
+
 Each stored signal SHALL carry its kind's fixed weight and a creation timestamp.
 A `detail_open` post SHALL succeed without storing anything while the user has
 switched off the `browsing` taste source.

@@ -133,30 +133,30 @@ const sources: TasteSource[] = [
 	"trakt",
 	"browsing",
 ];
-test.each([
-	false,
-	true,
-])("Account warns only when no linked method is offered: %s", async (offeredLink) => {
-	setup({
-		providers: [
-			{ ...SUMMARY.providers[0], sign_in: false },
-			{ ...SUMMARY.providers[1], linked: offeredLink, sign_in: true },
-		],
-	});
-	await screen.findByText("Plex member");
-	expect(screen.getByText("Not used for sign-in")).toBeTruthy();
-	if (offeredLink) {
-		expect(screen.queryByText(/after this session ends/)).toBeNull();
-	} else {
-		expect(screen.getByRole("alert").textContent).toContain(
-			"after this session ends",
-		);
-		expect(screen.getByRole("alert").textContent).toContain(
-			"Link an offered method: Seerr.",
-		);
-		expect(screen.getByRole("button", { name: "Link Seerr" })).toBeTruthy();
-	}
-});
+test.each([false, true])(
+	"Account warns only when no linked method is offered: %s",
+	async (offeredLink) => {
+		setup({
+			providers: [
+				{ ...SUMMARY.providers[0], sign_in: false },
+				{ ...SUMMARY.providers[1], linked: offeredLink, sign_in: true },
+			],
+		});
+		await screen.findByText("Plex member");
+		expect(screen.getByText("Not used for sign-in")).toBeTruthy();
+		if (offeredLink) {
+			expect(screen.queryByText(/after this session ends/)).toBeNull();
+		} else {
+			expect(screen.getByRole("alert").textContent).toContain(
+				"after this session ends",
+			);
+			expect(screen.getByRole("alert").textContent).toContain(
+				"Link an offered method: Seerr.",
+			);
+			expect(screen.getByRole("button", { name: "Link Seerr" })).toBeTruthy();
+		}
+	},
+);
 const sourceLabels = {
 	trakt: "Trakt history",
 	plex: "Plex history",
@@ -172,78 +172,79 @@ const clearNames = {
 	browsing: "Clear browsing activity",
 };
 
-test.each([
-	"plex",
-	"seerr",
-	"jellyfin",
-	"trakt",
-] as const)("%s controls stay on configured, dormant, and retained-history cards", async (provider) => {
-	for (const [available, linked] of [
-		[true, true],
-		[true, false],
-		[false, true],
-		[false, false],
-	]) {
-		const view = setup({
+test.each(["plex", "seerr", "jellyfin", "trakt"] as const)(
+	"%s controls stay on configured, dormant, and retained-history cards",
+	async (provider) => {
+		for (const [available, linked] of [
+			[true, true],
+			[true, false],
+			[false, true],
+			[false, false],
+		]) {
+			const view = setup({
+				providers: [
+					{ provider, available, sign_in: available, linked, can_unlink: true },
+				],
+			});
+			const toggle = await screen.findByRole("switch", {
+				name: `Use ${sourceLabels[provider]} for recommendations`,
+			});
+			const card = within(toggle.closest("section") as HTMLElement);
+			const clearButton = card.getByRole("button", {
+				name: clearNames[provider],
+			});
+			expect(clearButton.getAttribute("aria-label")).toContain(
+				clearButton.textContent?.trim(),
+			);
+			if (!available && !linked) {
+				expect(card.queryByText("Not connected")).toBeNull();
+				expect(
+					card.queryByText("No longer available on this server"),
+				).toBeNull();
+				expect(card.queryByRole("button", { name: /Link|Unlink/ })).toBeNull();
+			}
+			view.cache.clear();
+			cleanup();
+		}
+	},
+);
+
+test.each(sources)(
+	"%s clears only after confirmation and supports cancel",
+	async (source) => {
+		const { fetch } = setup({
 			providers: [
-				{ provider, available, sign_in: available, linked, can_unlink: true },
+				...SUMMARY.providers,
+				{
+					provider: "jellyfin",
+					available: true,
+					sign_in: true,
+					linked: false,
+					can_unlink: false,
+				},
 			],
 		});
-		const toggle = await screen.findByRole("switch", {
-			name: `Use ${sourceLabels[provider]} for recommendations`,
-		});
-		const card = within(toggle.closest("section") as HTMLElement);
-		const clearButton = card.getByRole("button", {
-			name: clearNames[provider],
-		});
-		expect(clearButton.getAttribute("aria-label")).toContain(
-			clearButton.textContent?.trim(),
+		fireEvent.click(
+			await screen.findByRole("button", {
+				name: clearNames[source],
+			}),
 		);
-		if (!available && !linked) {
-			expect(card.queryByText("Not connected")).toBeNull();
-			expect(card.queryByText("No longer available on this server")).toBeNull();
-			expect(card.queryByRole("button", { name: /Link|Unlink/ })).toBeNull();
-		}
-		view.cache.clear();
-		cleanup();
-	}
-});
-
-test.each(
-	sources,
-)("%s clears only after confirmation and supports cancel", async (source) => {
-	const { fetch } = setup({
-		providers: [
-			...SUMMARY.providers,
-			{
-				provider: "jellyfin",
-				available: true,
-				sign_in: true,
-				linked: false,
-				can_unlink: false,
-			},
-		],
-	});
-	fireEvent.click(
-		await screen.findByRole("button", {
-			name: clearNames[source],
-		}),
-	);
-	const path = `/api/v1/account/taste-sources/${source}/clear`;
-	expect(fetch.mock.calls.some(([url]) => String(url) === path)).toBe(false);
-	fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-	expect(screen.queryByRole("dialog")).toBeNull();
-	expect(fetch.mock.calls.some(([url]) => String(url) === path)).toBe(false);
-	fireEvent.click(screen.getByRole("button", { name: clearNames[source] }));
-	fireEvent.click(screen.getByRole("button", { name: "Confirm clear" }));
-	await waitFor(() =>
-		expect(fetch).toHaveBeenCalledWith(
-			path,
-			expect.objectContaining({ method: "POST" }),
-		),
-	);
-	await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-});
+		const path = `/api/v1/account/taste-sources/${source}/clear`;
+		expect(fetch.mock.calls.some(([url]) => String(url) === path)).toBe(false);
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(fetch.mock.calls.some(([url]) => String(url) === path)).toBe(false);
+		fireEvent.click(screen.getByRole("button", { name: clearNames[source] }));
+		fireEvent.click(screen.getByRole("button", { name: "Confirm clear" }));
+		await waitFor(() =>
+			expect(fetch).toHaveBeenCalledWith(
+				path,
+				expect.objectContaining({ method: "POST" }),
+			),
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	},
+);
 
 test("clearing a retained-history card restores focus when the card disappears", async () => {
 	const { fetch } = setup({
@@ -313,57 +314,58 @@ test("failed toggle is optimistic, rolls back, and shows only a generic error", 
 	expect(screen.queryByText("private failure detail")).toBeNull();
 });
 
-test.each(
-	sources,
-)("%s toggle follows server state and refreshes taste queries", async (source) => {
-	const summary = {
-		...SUMMARY,
-		providers: [
-			...SUMMARY.providers,
-			{
-				provider: "jellyfin" as const,
-				available: true,
-				sign_in: true,
-				linked: false,
-				can_unlink: false,
-			},
-		],
-		taste_sources: { ...SUMMARY.taste_sources, [source]: false },
-	};
-	const { fetch, cache } = setup(summary);
-	const toggle = await screen.findByRole("switch", {
-		name: `Use ${sourceLabels[source]} for recommendations`,
-	});
-	expect(toggle).toHaveProperty("checked", false);
-	for (const key of [
-		"home",
-		"rails",
-		"explain",
-		"household-members",
-		"taste-onboarding",
-	])
-		cache.setQueryData([key], {});
-	fetch.mockImplementation(async (input, init) => {
-		if (String(input).endsWith("/taste-sources")) {
-			summary.taste_sources = { ...summary.taste_sources, [source]: true };
-			expect(init?.body).toBe(JSON.stringify({ source, enabled: true }));
-			return { ok: true, status: 204 } as Response;
-		}
-		return { ok: true, status: 200, json: async () => summary } as Response;
-	});
-	fireEvent.click(toggle);
-	await waitFor(() => expect(toggle).toHaveProperty("checked", true));
-	await waitFor(() =>
-		expect(cache.getQueryState(["home"])?.isInvalidated).toBe(true),
-	);
-	for (const key of [
-		"rails",
-		"explain",
-		"household-members",
-		"taste-onboarding",
-	])
-		expect(cache.getQueryState([key])?.isInvalidated).toBe(true);
-});
+test.each(sources)(
+	"%s toggle follows server state and refreshes taste queries",
+	async (source) => {
+		const summary = {
+			...SUMMARY,
+			providers: [
+				...SUMMARY.providers,
+				{
+					provider: "jellyfin" as const,
+					available: true,
+					sign_in: true,
+					linked: false,
+					can_unlink: false,
+				},
+			],
+			taste_sources: { ...SUMMARY.taste_sources, [source]: false },
+		};
+		const { fetch, cache } = setup(summary);
+		const toggle = await screen.findByRole("switch", {
+			name: `Use ${sourceLabels[source]} for recommendations`,
+		});
+		expect(toggle).toHaveProperty("checked", false);
+		for (const key of [
+			"home",
+			"rails",
+			"explain",
+			"household-members",
+			"taste-onboarding",
+		])
+			cache.setQueryData([key], {});
+		fetch.mockImplementation(async (input, init) => {
+			if (String(input).endsWith("/taste-sources")) {
+				summary.taste_sources = { ...summary.taste_sources, [source]: true };
+				expect(init?.body).toBe(JSON.stringify({ source, enabled: true }));
+				return { ok: true, status: 204 } as Response;
+			}
+			return { ok: true, status: 200, json: async () => summary } as Response;
+		});
+		fireEvent.click(toggle);
+		await waitFor(() => expect(toggle).toHaveProperty("checked", true));
+		await waitFor(() =>
+			expect(cache.getQueryState(["home"])?.isInvalidated).toBe(true),
+		);
+		for (const key of [
+			"rails",
+			"explain",
+			"household-members",
+			"taste-onboarding",
+		])
+			expect(cache.getQueryState([key])?.isInvalidated).toBe(true);
+	},
+);
 
 test("late toggle failure cannot restore another member's account state", async () => {
 	const { fetch, cache } = setup();
@@ -430,88 +432,88 @@ test("Jellyfin card links with credentials and offers the history choice on unli
 	);
 });
 
-test.each([
-	true,
-	false,
-])("Seerr dialog offers Jellyfin only while available: %s", async (available) => {
-	const { fetch } = setup({
-		providers: [
-			{
-				provider: "seerr",
-				available: true,
-				sign_in: true,
-				linked: false,
-				can_unlink: false,
-			},
-			{
-				provider: "jellyfin",
-				available,
-				sign_in: available,
-				linked: false,
-				can_unlink: false,
-			},
-		],
-	});
-	fireEvent.click(await screen.findByRole("button", { name: "Link Seerr" }));
-	expect(
-		screen.getByText("Sign in with your Seerr account email and password."),
-	).toBeTruthy();
-	expect(screen.getByLabelText("Email")).toBeTruthy();
-	expect(screen.getByLabelText("Password")).toBeTruthy();
-	if (!available) {
+test.each([true, false])(
+	"Seerr dialog offers Jellyfin only while available: %s",
+	async (available) => {
+		const { fetch } = setup({
+			providers: [
+				{
+					provider: "seerr",
+					available: true,
+					sign_in: true,
+					linked: false,
+					can_unlink: false,
+				},
+				{
+					provider: "jellyfin",
+					available,
+					sign_in: available,
+					linked: false,
+					can_unlink: false,
+				},
+			],
+		});
+		fireEvent.click(await screen.findByRole("button", { name: "Link Seerr" }));
 		expect(
-			screen.queryByRole("button", { name: "Use Jellyfin credentials" }),
+			screen.getByText("Sign in with your Seerr account email and password."),
+		).toBeTruthy();
+		expect(screen.getByLabelText("Email")).toBeTruthy();
+		expect(screen.getByLabelText("Password")).toBeTruthy();
+		if (!available) {
+			expect(
+				screen.queryByRole("button", { name: "Use Jellyfin credentials" }),
+			).toBeNull();
+			return;
+		}
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Use Jellyfin credentials" }),
+		);
+		expect(
+			screen.getByText("Sign in with your Jellyfin username and password."),
+		).toBeTruthy();
+		expect(screen.getByLabelText("Username")).toBeTruthy();
+		expect(screen.queryByLabelText("Email")).toBeNull();
+		expect(
+			screen.queryByText("Sign in with your Seerr account email and password."),
 		).toBeNull();
-		return;
-	}
-	fireEvent.click(
-		await screen.findByRole("button", { name: "Use Jellyfin credentials" }),
-	);
-	expect(
-		screen.getByText("Sign in with your Jellyfin username and password."),
-	).toBeTruthy();
-	expect(screen.getByLabelText("Username")).toBeTruthy();
-	expect(screen.queryByLabelText("Email")).toBeNull();
-	expect(
-		screen.queryByText("Sign in with your Seerr account email and password."),
-	).toBeNull();
-	const useSeerr = screen.getByRole("button", {
-		name: "Use Seerr email instead",
-	});
-	expect(useSeerr.hasAttribute("aria-expanded")).toBe(false);
-	fireEvent.click(useSeerr);
-	expect(
-		screen.getByText("Sign in with your Seerr account email and password."),
-	).toBeTruthy();
-	expect(screen.getByLabelText("Email")).toBeTruthy();
-	expect(screen.getByLabelText("Password")).toBeTruthy();
-	expect(screen.queryByLabelText("Username")).toBeNull();
-	expect(
-		screen.queryByText("Sign in with your Jellyfin username and password."),
-	).toBeNull();
-	fireEvent.click(
-		screen.getByRole("button", { name: "Use Jellyfin credentials" }),
-	);
-	fireEvent.change(screen.getByLabelText("Username"), {
-		target: { value: "viewer" },
-	});
-	fireEvent.change(screen.getByLabelText("Password"), {
-		target: { value: "pw" },
-	});
-	fireEvent.click(screen.getByRole("button", { name: "Connect Seerr" }));
-	await waitFor(() =>
-		expect(fetch).toHaveBeenCalledWith(
-			"/api/v1/account/links/seerr",
-			expect.objectContaining({
-				body: JSON.stringify({
-					method: "jellyfin",
-					username: "viewer",
-					password: "pw",
+		const useSeerr = screen.getByRole("button", {
+			name: "Use Seerr email instead",
+		});
+		expect(useSeerr.hasAttribute("aria-expanded")).toBe(false);
+		fireEvent.click(useSeerr);
+		expect(
+			screen.getByText("Sign in with your Seerr account email and password."),
+		).toBeTruthy();
+		expect(screen.getByLabelText("Email")).toBeTruthy();
+		expect(screen.getByLabelText("Password")).toBeTruthy();
+		expect(screen.queryByLabelText("Username")).toBeNull();
+		expect(
+			screen.queryByText("Sign in with your Jellyfin username and password."),
+		).toBeNull();
+		fireEvent.click(
+			screen.getByRole("button", { name: "Use Jellyfin credentials" }),
+		);
+		fireEvent.change(screen.getByLabelText("Username"), {
+			target: { value: "viewer" },
+		});
+		fireEvent.change(screen.getByLabelText("Password"), {
+			target: { value: "pw" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Connect Seerr" }));
+		await waitFor(() =>
+			expect(fetch).toHaveBeenCalledWith(
+				"/api/v1/account/links/seerr",
+				expect.objectContaining({
+					body: JSON.stringify({
+						method: "jellyfin",
+						username: "viewer",
+						password: "pw",
+					}),
 				}),
-			}),
-		),
-	);
-});
+			),
+		);
+	},
+);
 
 test("dormant Jellyfin card remains unlinkable and deletion names all upstreams", async () => {
 	setup({

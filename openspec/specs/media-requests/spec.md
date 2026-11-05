@@ -11,7 +11,11 @@ identity, permissions, defaults, quotas, and approval rules preserved.
 `POST /api/v1/request` SHALL proxy `POST {SEERR_INTERNAL_URL}/api/v1/request`
 using the **per-user Seerr session cookie** stored encrypted on the member's Seerr
 link, so the request is attributed to that member in Seerr and subject
-to their own quota and approval rules. The request body SHALL be validated
+to their own quota and approval rules.
+
+#### Details
+
+The request body SHALL be validated
 (`media_type` constrained to `movie` or `tv`, an integer `tmdb_id` between 1
 and 2,147,483,647 inclusive); a TV request SHALL request the whole series at
 the selected standard or 4K variant unless an optional `seasons` list is
@@ -158,12 +162,20 @@ approval and administrator rules SHALL remain authoritative.
 ### Requirement: Invalid-session re-auth ladder
 
 A member without a Seerr link, or whose stored Seerr cookie is absent or cannot be
-decrypted, SHALL receive `re_auth_required` without any Seerr call. Otherwise the
+decrypted, SHALL receive `re_auth_required` without any Seerr call.
+
+#### Details
+
+Otherwise the
 backend SHALL recover from Seerr's `403` invalid-session rejection with a bounded
 re-auth ladder, re-authenticating **at most once** per request (because `403` is
 also Seerr's genuine permission-denied response). For a member with a **Plex
-link**, the backend SHALL silently re-authenticate by decrypting the link's Plex
-token and logging into Seerr again. When the token cannot be decrypted or Seerr
+link**, the backend SHALL check Seerr's public login support before decrypting or
+forwarding the link's Plex token. A known-refused Plex method SHALL return
+`re_auth_required` without forwarding the token or retrying the request; unknown
+or unreadable support SHALL preserve the existing attempt path. Otherwise the
+backend SHALL silently re-authenticate by decrypting the token and logging into
+Seerr again. When the token cannot be decrypted or Seerr
 refuses the login, the response SHALL be `re_auth_required` so the member can
 reconnect Seerr. Only when Seerr returns the linked Seerr account SHALL the backend persist the fresh cookie on the Seerr link and retry the
 request once with it; when Seerr returns a different account, the cookie SHALL be
@@ -189,6 +201,13 @@ the SPA to offer reconnecting Seerr, without retrying.
 
 - **WHEN** the Plex token cannot be decrypted or Seerr refuses it during re-auth
 - **THEN** the response is `re_auth_required` and nothing is retried
+
+#### Scenario: Known-refused Plex login skips silent re-auth
+
+- **WHEN** a request receives `403` and Seerr's public settings report that Plex
+  login is disabled or that another media server is configured
+- **THEN** the response is `re_auth_required`, the Plex token is not forwarded,
+  the stored Seerr cookie is unchanged, and the request is not retried
 
 #### Scenario: Persistent denial after re-auth is generic
 
@@ -227,9 +246,14 @@ Seerr" fallback without constructing a Seerr URL client-side.
 - **THEN** the response includes no Seerr link and never exposes the internal URL
 
 ### Requirement: Request endpoint is hardened and degrades
+
 `POST /api/v1/request` SHALL require a valid session using the shared default-deny
 dependency and, as a mutation, SHALL enforce the same-origin (CSRF) check and shared
-loose authenticated-mutation rate limit. It SHALL declare an explicit, secret-free
+loose authenticated-mutation rate limit.
+
+#### Details
+
+It SHALL declare an explicit, secret-free
 response model and return generic errors carrying no upstream body, status, or
 internal URL. When Seerr is unconfigured the endpoint SHALL report requests
 unavailable rather than attempt a call; when Seerr is unreachable it SHALL return a
@@ -270,7 +294,11 @@ session re-authentication, taste-signal write, or database change.
 A pytest-marked live suite (excluded from `just check` and CI) SHALL validate the
 request-as-user contract against a real instance — creating a request with a user
 session and confirming attribution, then cleaning up without treating Seerr's
-delete `204` as authoritative while a request may still be mid-dispatch. It SHALL
+delete `204` as authoritative while a request may still be mid-dispatch.
+
+#### Details
+
+It SHALL
 also validate the re-auth **primitives** the ladder composes — an invalid session
 returning `403`, and (given an operator-supplied stored Plex token) that token
 minting a fresh session — while the ladder's orchestration (`403` → re-auth →
@@ -297,7 +325,11 @@ recorded.
 GET /api/v1/{type}/{id}/destinations SHALL return a secret-free options envelope
 containing current per-media standard/4K request capabilities, advanced capability, and
 permitted destinations, plus can_request_4k_default indicating permission and a
-configured default 4K server. TV discovery SHALL also return
+configured default 4K server.
+
+#### Details
+
+TV discovery SHALL also return
 can_request_partial, true only when Seerr public settings explicitly enable
 partialRequestsEnabled, and can_request_specials, true only when both partial
 requesting and enableSpecialEpisodes are explicitly enabled. A failed settings read SHALL disable season selection and Specials and preserve
@@ -368,7 +400,11 @@ details from other servers SHALL survive an individual detail failure.
 ### Requirement: Explicit and resilient request controls
 
 Controls SHALL offer permitted missing Standard/4K variants explicitly, selecting
-Standard first when requestable and otherwise the eligible missing variant. Initial
+Standard first when requestable and otherwise the eligible missing variant.
+
+#### Details
+
+Initial
 destination SHALL be Use Seerr defaults; no unchanged confirmation SHALL send
 destination overrides. Advanced members SHALL be able to explicitly choose a variant-
 matching server/profile/folder and cancel back to defaults. Controls SHALL await initial
@@ -405,6 +441,9 @@ For a TV title with verified partial-request support and more than one
 selectable season entry, activating
 Request SHALL open a dialog listing selectable seasons, each with an on/off
 toggle, plus an "All seasons" toggle, an OK action and a Cancel action.
+
+#### Details
+
 Selectable seasons SHALL have episode_count > 0; Specials SHALL additionally
 require can_request_specials=true. Regular selectable seasons SHALL start on
 and enabled Specials off, matching Seerr 3.5.0's whole-series selection.
@@ -500,6 +539,9 @@ move focus outside a remaining dialog.
 When a request returns `re_auth_required`, the request control SHALL open an
 inline "Connect Seerr" dialog offering the same Seerr link methods as the account
 page, omitting methods Seerr is known to refuse (as defined in `account-linking`).
+
+#### Details
+
 The dialog SHALL show the same plain-text guidance as the account page under the
 same condition (no usable Plex action and no offered Jellyfin form), alongside
 the local form when local login is offered and instead of an empty form

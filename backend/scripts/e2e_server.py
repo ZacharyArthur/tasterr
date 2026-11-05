@@ -21,6 +21,7 @@ import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, SecretStr
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasterr.auth.deps import AuthedSession, get_db, require_session
@@ -42,6 +43,20 @@ E2E_PASSWORD = "placeholder-password"
 E2E_SEERR_COOKIE = "connect.sid=e2e-session"
 SCREENSHOTS = environ.get("TASTERR_E2E_SCREENSHOTS") == "1"
 JELLYFIN_USER_ID = f"{1:032x}"
+
+
+class FixtureSettings(Settings):
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Captures must never inherit operator credentials or destinations.
+        return (init_settings,)
 
 
 class LocalLoginBody(BaseModel):
@@ -369,7 +384,7 @@ def e2e_harness(static_dir: Path | None = None) -> Generator[E2EHarness]:
     original_trakt_auth, original_trakt_api = trakt.AUTH_BASE, trakt.API_BASE
     with TemporaryDirectory(prefix="tasterr-e2e-") as temporary:
         root = Path(temporary)
-        settings = Settings(
+        settings = FixtureSettings(
             tmdb_api_key=SecretStr("e2e-tmdb-placeholder"),
             seerr_internal_url=SEERR_BASE,
             seerr_api_key=SecretStr("e2e-seerr-placeholder"),

@@ -45,7 +45,11 @@ Exclusions SHALL apply to home and paginated discovery rails, hero slides, house
 
 ### Requirement: Bounded best-effort verification and refill
 
-Active filtering SHALL reuse completed title checks within a request and bound total verification time across all its discovery surfaces, including availability-based ranking boosts while a household filter is enabled. Filtering is active for a request when library hiding or service exclusions are enabled, or when the caller has any personal exclusion. With only personal exclusions, ranking boosts SHALL keep their unfiltered availability lookup outside the verification budget, and the request's shared deadline SHALL still start at its first filtering step so that discover refill stays bounded by it. Unverified titles SHALL remain eligible on errors or deadline expiry. Subscription checks SHALL use current region-scoped catalog metadata rather than long-lived recommendation features. Discover-based rails SHALL attempt bounded refill of at most three source pages; fixed-list sources SHALL retain their existing bounds. Inactive filtering SHALL perform no new verification or refill work.
+Active filtering SHALL reuse completed title checks within a request and bound total verification time across all its discovery surfaces, including availability-based ranking boosts while a household filter is enabled.
+
+#### Details
+
+Filtering is active for a request when library hiding or service exclusions are enabled, or when the caller has any personal exclusion. With only personal exclusions, ranking boosts SHALL keep their unfiltered availability lookup outside the verification budget, and the request's shared deadline SHALL still start at its first filtering step so that discover refill stays bounded by it. Unverified titles SHALL remain eligible on errors or deadline expiry. Subscription checks SHALL use current region-scoped catalog metadata rather than long-lived recommendation features. Discover-based rails SHALL attempt bounded refill of at most three source pages; fixed-list sources SHALL retain their existing bounds. Inactive filtering SHALL perform no new verification or refill work.
 
 #### Scenario: Outage does not multiply verification waits
 - **WHEN** many titles need verification across multiple rails and an upstream stalls
@@ -74,7 +78,11 @@ Active filtering SHALL reuse completed title checks within a request and bound t
 
 ### Requirement: Filtered-empty discovery is a successful outcome
 
-Existing rail minimum sizes SHALL apply after filtering. With filtering active, a home with successfully fetched catalog sources but no eligible/full rails SHALL return a valid empty result rather than an upstream error, including successful sources containing zero titles. Actual total catalog failure SHALL retain the existing error behavior; underfilled exempt lists SHALL NOT count as catalog success. The UI SHALL explain that discovery settings can empty the feed, and saved settings SHALL invalidate stale discovery and household results.
+Existing rail minimum sizes SHALL apply after filtering.
+
+#### Details
+
+With filtering active, a home with successfully fetched catalog sources but no eligible/full rails SHALL return a valid empty result rather than an upstream error, including successful sources containing zero titles. Actual total catalog failure SHALL retain the existing error behavior; underfilled exempt lists SHALL NOT count as catalog success. The UI SHALL explain that discovery settings can empty the feed, and saved settings SHALL invalidate stale discovery and household results.
 
 #### Scenario: Exclusions remove every fetched title
 - **WHEN** catalog fetches succeed but exclusions remove every title
@@ -119,7 +127,11 @@ Each request SHALL apply the caller's personal exclusions to every discovery
 surface that household exclusions cover (Home and paginated rails, including
 related-title rails, hero slides, household blend, and detail
 recommendations/similar lists), with the same exemptions (Search, My List,
-Continue Watching, and direct title detail). Personal exclusions SHALL be:
+Continue Watching, and direct title detail).
+
+#### Details
+
+Personal exclusions SHALL be:
 
 - every title with an active `not_interested` signal from the caller, always;
 - while the household `hide_watched_items` setting is on, every title with any

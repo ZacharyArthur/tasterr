@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tasterr.api.auth import seerr_login_support
 from tasterr.api.runtime_settings import RuntimeSettingsDep
 from tasterr.api.taste import refresh_profile
 from tasterr.auth.crypto import decrypt_token, encrypt_token
@@ -184,6 +185,8 @@ async def create_request(
         authed,
         payload.media_type,
         payload.tmdb_id,
+        request=request,
+        settings=settings,
         seerr_link=seerr_link,
         cookie=cookie,
         is_4k=payload.is_4k,
@@ -275,6 +278,8 @@ async def _request_with_reauth(
     media_type: MediaType,
     tmdb_id: int,
     *,
+    request: Request,
+    settings: Settings,
     seerr_link: LinkedAccount,
     cookie: str,
     is_4k: bool = False,
@@ -302,7 +307,7 @@ async def _request_with_reauth(
             return _Outcome("failed")  # a non-403 rejection is not a session problem
 
     # 403 — an invalid session or a genuine denial. Re-auth at most once.
-    new_cookie = await _reauth_plex(ctx, db, authed, seerr_link)
+    new_cookie = await _reauth_plex(ctx, db, authed, seerr_link, request, settings)
     if new_cookie is None:
         return _Outcome("re_auth_required")
     try:
@@ -326,6 +331,8 @@ async def _reauth_plex(
     db: AsyncSession,
     authed: AuthedSession,
     seerr_link: LinkedAccount,
+    request: Request,
+    settings: Settings,
 ) -> str | None:
     """Silently refresh the member's Seerr session from their stored Plex token and
     persist the new cookie. Returns the fresh cookie, or None if re-auth is not
@@ -333,6 +340,8 @@ async def _reauth_plex(
     plex_link = await get_link(db, authed.user.id, "plex")
     enc = plex_link.credential_enc if plex_link is not None else None
     if enc is None:
+        return None
+    if (await seerr_login_support(request, settings)).plex is False:
         return None
     try:
         token = decrypt_token(ctx.secret_key, enc)

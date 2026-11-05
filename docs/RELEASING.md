@@ -131,14 +131,14 @@ When the release contains an OpenSpec change, run strict validation on its chang
 branch:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 validate <change-id> --strict --no-interactive
+npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.16.0 validate <change-id> --strict --no-interactive
 ```
 
 After every task is complete, archive before merging so the implementation and
 living specs land atomically:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.5.0 archive <change-id>
+npx @devcontainers/cli exec --workspace-folder . npx --yes @fission-ai/openspec@1.16.0 archive <change-id>
 ```
 
 Review the archive diff and rerun `just check`. Do not use `--skip-specs` or

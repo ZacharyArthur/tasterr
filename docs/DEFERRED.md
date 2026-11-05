@@ -5,6 +5,7 @@ entries when they ship.
 
 | Item | Why deferred | Lands with |
 |---|---|---|
+| TypeScript 7 compiler upgrade | openapi-typescript 7.13.0 requires TypeScript 5.x; keep the supported single-toolchain setup | Recheck generator compatibility during the next dependency-bump chore |
 | Starlette TestClient → httpx2 migration (currently a deprecation warning under pytest) | Upstream transition, non-failing today | dependency-bump chore |
 | `static_dir` default is a CWD-relative path | Container sets an absolute `STATIC_DIR`; only affects non-container runs, which are not a supported workflow yet | If local uvicorn runs ever become supported |
 | Richer where-to-watch categories | Catalog models retain rent/buy/free categories, but the detail UI still renders flatrate providers only | A dedicated detail presentation change |

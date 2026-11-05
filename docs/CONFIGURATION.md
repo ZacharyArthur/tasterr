@@ -482,7 +482,8 @@ For provider combinations and request-link options, see [Mixed setups](#mixed-se
   Seerr outage blocks only a would-be new user, preserving the existing-user bridge.
   Jellyfin sign-in follows the same Seerr auto-link rule.
 - A Seerr cookie expires: a member with a Plex link gets one silent re-authentication
-  attempt with its encrypted token. Otherwise the request opens **Connect Seerr**;
+  attempt with its encrypted token unless Seerr's cached settings show it refuses
+  Plex login. Otherwise the request opens **Connect Seerr**;
   successful linking retries the original selection once.
 - Plex token invalid, plex.tv down, or every advertised server unreachable: ordinary
   Home rails remain available; the Plex Continue Watching contribution is omitted

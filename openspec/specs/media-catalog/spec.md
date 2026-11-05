@@ -9,7 +9,11 @@ Normalize and cache TMDB catalog metadata into typed, secret-free movie and seri
 
 The system SHALL perform all TMDB access through a single client module in
 `tasterr.clients`, including catalog reads, region/provider enumeration, and the
-configured connection probe. Every request SHALL carry an explicit timeout and a
+configured connection probe.
+
+#### Details
+
+Every request SHALL carry an explicit timeout and a
 bounded retry with backoff that honors `Retry-After` on `429`/`5xx`. The global
 `TMDB_API_KEY` SHALL be attached to requests server-side only and never returned
 to a client. Browser headers SHALL NOT be forwarded upstream, and upstream
@@ -34,7 +38,11 @@ responses SHALL be parsed into typed models with unknown fields dropped.
 Normalization SHALL convert TMDB JSON into typed domain models — media summary,
 media detail, hero slide, rail, person, video, season summary, watch-provider
 info, region option, and service option — resolving movie/TV titles and release
-years and passing image/logo paths through unchanged. Person results returned by
+years and passing image/logo paths through unchanged.
+
+#### Details
+
+Person results returned by
 multi-search SHALL be dropped. Movie/TV provider lists SHALL be unioned by
 provider id and ordered by the best TMDB display priority. Domain models SHALL
 contain no secret material and SHALL NOT import the application deployment
@@ -129,7 +137,11 @@ a typed not-configured signal, and the application SHALL continue serving
 The catalog SHALL expose an internal **title facts** surface per title — genres,
 keywords, top-billed cast, director/creator, original language, release year,
 runtime, vote statistics, active watch region, and that region's flatrate
-provider ids — for the recommendation engine's feature builder. The TMDB detail
+provider ids — for the recommendation engine's feature builder.
+
+#### Details
+
+The TMDB detail
 fetch SHALL include keywords and watch providers via the detail append. Title
 facts SHALL always be read in `en-US`, whatever the configured metadata language,
 so the engine's feature vocabulary never changes with that setting. When the
@@ -184,7 +196,11 @@ generic catalog error boundary rather than returning partial upstream JSON.
 
 Every display-facing TMDB read (discover, trending, search, detail, genre lists
 used for rail titles, watch-provider regions, and providers) SHALL send the
-resolved household metadata language. Detail reads SHALL request images in the
+resolved household metadata language.
+
+#### Details
+
+Detail reads SHALL request images in the
 configured language, then English, then language-neutral, and videos in the
 configured language, then English, then language-neutral. Logo selection SHALL
 prefer the configured language, then English, then language-neutral, and trailer

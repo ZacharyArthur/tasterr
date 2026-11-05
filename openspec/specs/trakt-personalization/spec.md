@@ -38,7 +38,11 @@ sign-in method.
 
 All Trakt calls SHALL live in `clients/trakt.py` and use only two fixed hosts with
 TLS verification: `https://auth.trakt.tv` for every OAuth endpoint (`/oauth/*`)
-and `https://api.trakt.tv` for every other call. They SHALL carry explicit
+and `https://api.trakt.tv` for every other call.
+
+#### Details
+
+They SHALL carry explicit
 timeouts, never follow redirects, cap response size, parse responses into typed
 models (unknown fields dropped), and never forward browser headers upstream or
 upstream headers/bodies downstream. Every call SHALL send `trakt-api-version: 2`,
@@ -92,7 +96,11 @@ other write SHALL be made.
 
 `POST /api/v1/account/links/trakt/device` SHALL require a session, the
 same-origin check, the authenticated mutation bucket, and the login bucket; it
-SHALL return 503 and store nothing when Trakt is not configured. It SHALL request
+SHALL return 503 and store nothing when Trakt is not configured.
+
+#### Details
+
+It SHALL request
 a device code from Trakt, keep the device code and polling interval server-side
 under an opaque, single-use handle bound to the creating session and to linking,
 expiring at Trakt's expiry or 600 seconds, whichever is sooner, and return only
@@ -184,7 +192,11 @@ SHALL appear in any response.
 
 A Trakt link SHALL NOT authenticate anyone into Tasterr, SHALL NOT take part in
 admin derivation, SHALL NOT supply display identity, and SHALL NOT be used for
-Seerr linking or silent Seerr re-authentication. It SHALL NOT count as another
+Seerr linking or silent Seerr re-authentication.
+
+#### Details
+
+It SHALL NOT count as another
 way to sign in for the unlink rule, and unlinking a Trakt link SHALL NOT be
 refused by that rule, so the account summary SHALL report it as unlinkable. It SHALL be ignored by the admin `sign_in_link_counts`
 grouping, and `trakt` SHALL NOT be a valid sign-in method name in the sign-in
@@ -223,7 +235,11 @@ false. A Trakt link SHALL be dormant while Trakt is not configured.
 
 A Trakt sync SHALL refresh the access token when it expires within five minutes,
 using the stored refresh token, and SHALL commit the rotated token set before any
-history read. The refresh call and that commit SHALL run as a separate task with
+history read.
+
+#### Details
+
+The refresh call and that commit SHALL run as a separate task with
 its own database session. The sync SHALL wait on that task only in a way that
 never propagates its own cancellation into it (a shielded wait, repeated until the
 task is done); when the sync task is cancelled (reset, source switch-off,
@@ -293,7 +309,11 @@ the local deletion SHALL proceed as usual.
 A new Trakt link, a sign-in, and a Home read by any user with a usable Trakt link SHALL
 evaluate one per-user single-flight trigger that schedules a background sync only
 when the `trakt` taste source is on and the link's `sync_attempted_at` is absent
-or older than six hours, waiting for that user's Seerr sync to settle. The task
+or older than six hours, waiting for that user's Seerr sync to settle.
+
+#### Details
+
+The task
 SHALL commit the attempt timestamp before network work, SHALL NOT delay or fail
 Home or linking, and SHALL complete token refresh and all reads under a
 30-second deadline.

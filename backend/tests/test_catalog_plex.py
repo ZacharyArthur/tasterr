@@ -40,7 +40,7 @@ def _item(
     last_viewed_at: int | None = None,
     grandparent_last_viewed_at: int | None = None,
     parent_last_viewed_at: int | None = None,
-    view_offset: int | float | None | object = _MISSING,
+    view_offset: int | float | object | None = _MISSING,
     duration: int | float | None = None,
     parent_index: int | None = None,
     index: int | None = None,
@@ -69,7 +69,7 @@ class FakePlex:
         self.server_list = [_server(index) for index in range(servers)]
         self.histories: dict[str, list[PlexPmsItem] | Exception] = {}
         self.hubs: dict[str, list[PlexPmsItem] | Exception] = {}
-        self.metadata_items: dict[tuple[str, str], PlexPmsItem | None | Exception] = {}
+        self.metadata_items: dict[tuple[str, str], PlexPmsItem | Exception | None] = {}
         self.history_delays: dict[str, float] = {}
         self.history_active = 0
         self.metadata_calls = 0

@@ -9,7 +9,11 @@ how admin and display identity derive from links, and the member account page.
 
 ### Requirement: Users are Tasterr-owned and hold linked accounts
 
-A Tasterr user SHALL be identified only by its local id. External identities
+A Tasterr user SHALL be identified only by its local id.
+
+#### Details
+
+External identities
 SHALL be stored as linked accounts: a provider (`plex`, `jellyfin`, `seerr`, or
 `trakt`; `trakt` is a link-only provider, see `trakt-personalization`), the
 provider's stable account id, a display name, an optional avatar URL, an
@@ -41,6 +45,11 @@ let anyone, including an admin, assign or edit a link by id.
 - **THEN** its credential, display name, and avatar are refreshed in place
 
 ### Requirement: Sign-in resolves the user through linked accounts
+
+Every sign-in SHALL resolve one Tasterr user through the linked-account
+resolution order, with the specified conflict and outage handling.
+
+#### Details
 
 Every sign-in SHALL resolve exactly one Tasterr user in this order: (1) the user
 already linked to the sign-in account; otherwise (2) when the Seerr auto-link
@@ -126,7 +135,11 @@ SHALL proceed; where Seerr is the sign-in gate, its outage still fails sign-in.
 When Seerr is configured, each Plex sign-in SHALL attempt a Seerr login with the
 same Plex token, each Jellyfin sign-in SHALL attempt Seerr's Jellyfin login with
 the same username and password within that request, and each Seerr local sign-in
-is itself that Seerr login. A Plex or Jellyfin attempt SHALL be skipped, without
+is itself that Seerr login.
+
+#### Details
+
+A Plex or Jellyfin attempt SHALL be skipped, without
 contacting Seerr's login endpoint, when Seerr is known to refuse that method (as
 defined in "Seerr login methods follow Seerr's own settings"); a skipped attempt
 SHALL be treated exactly as a Seerr refusal. A Seerr refusal SHALL NOT block a
@@ -182,6 +195,11 @@ attempt SHALL NOT be stored or logged.
 - **THEN** the existing Seerr link and cookie are unchanged
 
 ### Requirement: Admin derives from any linked account
+
+At each sign-in, `is_admin` SHALL be derived from all configured linked accounts
+using their provider-specific grants and outage rules.
+
+#### Details
 
 At each sign-in, `is_admin` SHALL be re-derived from every linked account the
 user holds, not only the sign-in account: a Seerr link grants admin when that
@@ -251,7 +269,11 @@ sign-ins.
 
 At each sign-in, the user's display name and avatar URL SHALL be refreshed from
 the highest-priority linked account that answers: Seerr, then Plex, then
-Jellyfin. Values from
+Jellyfin.
+
+#### Details
+
+Values from
 the sign-in itself SHALL be used where available; otherwise stored link values
 SHALL be used. Users SHALL NOT override their display name. Avatar URLs SHALL come
 only from the Seerr user record or the plex.tv account, never from Jellyfin
@@ -274,6 +296,12 @@ the user's initials, not an avatar image, for every user.
 - **THEN** the Jellyfin user name is shown with initials and no avatar URL
 
 ### Requirement: Members view and manage their own linked accounts
+
+Members SHALL view and manage only their own linked accounts through
+session-gated endpoints, with provider admission, credential handling, rate limits,
+and link-handle isolation enforced.
+
+#### Details
 
 `GET /api/v1/account` SHALL require the shared session dependency and return,
 for each provider configured on this server (a provider is configured when its
@@ -371,7 +399,11 @@ the link poll SHALL refuse sign-in handles the same way. Failures SHALL be gener
 
 `POST /api/v1/account/links/{provider}/unlink` with `{delete_history: bool}`
 SHALL require a session, the same-origin check, and the authenticated mutation
-bucket. It SHALL first cancel and await that user's in-flight sync for the
+bucket.
+
+#### Details
+
+It SHALL first cancel and await that user's in-flight sync for the
 provider within its deadline, so no batch from it commits afterward, and SHALL
 hold the same per-user scheduling guard as reset until it commits, so no new
 sync can start in between; then delete the link and its credential; for a Plex or
@@ -442,7 +474,11 @@ unlinked account. `is_admin` SHALL NOT change until the next sign-in.
 
 `POST /api/v1/account/delete` SHALL require a session, the same-origin check, the
 authenticated mutation bucket, and a confirmation string equal to the caller's
-current display name. It SHALL cancel and await the caller's in-flight sync tasks
+current display name.
+
+#### Details
+
+It SHALL cancel and await the caller's in-flight sync tasks
 within their deadlines and hold the per-user scheduling guard until the delete
 commits, then delete the user; the user's cached Continue Watching entry SHALL be
 cleared; sessions, links, credentials,
@@ -485,7 +521,11 @@ defined in `trakt-personalization`.
 ### Requirement: Account page for every member
 
 The SPA SHALL provide an `/account` route for every signed-in user, reached from
-the avatar menu, while `/settings` stays admin-only. It SHALL show a Connected
+the avatar menu, while `/settings` stays admin-only.
+
+#### Details
+
+It SHALL show a Connected
 accounts section with one card per configured provider (linked state, account
 name, Link or Unlink in the sign-in button style) and a danger zone with "Delete
 my Tasterr account". Unconfigured providers SHALL be hidden unless the member has them linked or still
@@ -540,7 +580,11 @@ A link whose provider is no longer configured (as defined in "Members view and
 manage their own linked accounts"; a provider that is configured but not offered
 for sign-in is not dormant) SHALL be dormant: no history sync is scheduled for it,
 no Continue Watching or other media read uses it, it takes part in no admin check,
-and it is not used for silent Seerr re-authentication or Seerr linking. Its
+and it is not used for silent Seerr re-authentication or Seerr linking.
+
+#### Details
+
+Its
 stored credential SHALL be kept until the member unlinks it or deletes their
 account, so configuring the provider again resumes everything without relinking.
 A dormant link SHALL NOT count as another way to sign in for the unlink rule. The
@@ -574,7 +618,11 @@ member SHALL still be able to unlink it.
 When `PLEX_SERVER_ID` is set, linking a Plex account from the account page SHALL
 require that the account's plex.tv resources include that server, using the
 same check as Plex sign-in; otherwise the link SHALL be refused with a generic
-403 and nothing stored. Linking a Plex account SHALL be available only when Plex
+403 and nothing stored.
+
+#### Details
+
+Linking a Plex account SHALL be available only when Plex
 is configured, and linking a Seerr account only when Seerr is configured (as
 defined in "Members view and manage their own linked accounts"), whether or not
 either is offered for sign-in;
@@ -597,7 +645,11 @@ The Connect Seerr dialog, on the Account page and in the request control, SHALL
 show a fixed caption above its credential fields naming the account they belong
 to: "Sign in with your Seerr account email and password." for Seerr local
 sign-in, and "Sign in with your Jellyfin username and password." for Seerr's
-Jellyfin login. The dialog SHALL open on the Seerr local form when local sign-in
+Jellyfin login.
+
+#### Details
+
+The dialog SHALL open on the Seerr local form when local sign-in
 is offered, otherwise on the Jellyfin form when Seerr's Jellyfin login is
 offered; when neither form is offered it SHALL show no credential form. The
 "Use my Plex account" action SHALL appear whenever the `plex` method is offered
@@ -680,7 +732,11 @@ so a member cannot unlink their last offered method.
 Tasterr SHALL derive, from Seerr's public settings, whether Seerr accepts each
 Seerr login method: `plex` when Seerr reports a Plex media server and media
 server login enabled; `jellyfin` when Seerr reports a Jellyfin media server and
-media server login enabled; `local` when Seerr reports local login enabled. A
+media server login enabled; `local` when Seerr reports local login enabled.
+
+#### Details
+
+A
 method is **known refused** only when the settings were read and the relevant
 fields are present, well-typed, and do not satisfy that condition. Otherwise
 (Seerr unconfigured, unreachable, a failed or malformed read, a missing field, or

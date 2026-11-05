@@ -143,7 +143,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       client, parsing typed capability flags with bounded cache/stale lifetimes.
       Missing or malformed values remain unknown, never invented permissions.
 - [ ] Known-refused methods receive no Plex token or Jellyfin password during
-      auto-link or manual linking. Unknown preserves the existing attempt path.
+      auto-link, manual linking, or silent request re-authentication. Unknown
+      preserves the existing attempt path.
 - [ ] Account returns accepted-method booleans; the admin integration summary
       returns fixed warnings and capabilities, never raw settings or internal URLs.
       Request permissions are still checked separately. `/auth/methods` stays

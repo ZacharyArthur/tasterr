@@ -77,30 +77,29 @@ test("rotates the hero when motion is allowed", () => {
 	expect(screen.getByRole("heading", { name: "Second" })).toBeTruthy();
 });
 
-test.each([
-	"es-ES",
-	"en-US",
-	undefined,
-])("marks hero title and overview with loaded language %s", (language) => {
-	config.language = language;
-	stubMatchMedia(true);
-	const entry = slide(1, "Primero");
-	entry.item.overview = "Una historia";
-	render(
-		<MemoryRouter>
-			<Hero slides={[entry]} />
-		</MemoryRouter>,
-	);
-	expect(
-		screen.getByRole("heading", { name: "Primero" }).getAttribute("lang"),
-	).toBe(language ?? null);
-	expect(screen.getByText("Una historia").getAttribute("lang")).toBe(
-		language ?? null,
-	);
-	expect(
-		screen.getByRole("link", { name: "View details" }).hasAttribute("lang"),
-	).toBe(false);
-});
+test.each(["es-ES", "en-US", undefined])(
+	"marks hero title and overview with loaded language %s",
+	(language) => {
+		config.language = language;
+		stubMatchMedia(true);
+		const entry = slide(1, "Primero");
+		entry.item.overview = "Una historia";
+		render(
+			<MemoryRouter>
+				<Hero slides={[entry]} />
+			</MemoryRouter>,
+		);
+		expect(
+			screen.getByRole("heading", { name: "Primero" }).getAttribute("lang"),
+		).toBe(language ?? null);
+		expect(screen.getByText("Una historia").getAttribute("lang")).toBe(
+			language ?? null,
+		);
+		expect(
+			screen.getByRole("link", { name: "View details" }).hasAttribute("lang"),
+		).toBe(false);
+	},
+);
 
 test("does not rotate under reduced motion", () => {
 	vi.useFakeTimers();

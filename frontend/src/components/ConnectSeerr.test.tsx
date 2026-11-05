@@ -100,149 +100,144 @@ test.each([
 		guidance: [],
 		toggle: true,
 	},
-])("$name", async ({
-	accepts,
-	plex,
-	jellyfin,
-	form,
-	action,
-	guidance,
-	toggle,
-}) => {
-	const account: AccountResponse = {
-		seerr_accepts: accepts,
-		taste_sources: {
-			plex: true,
-			jellyfin: true,
-			seerr: true,
-			trakt: true,
-			browsing: true,
-		},
-		providers: [
-			{
-				provider: "plex",
-				available: true,
-				sign_in: true,
-				linked: plex,
-				can_unlink: false,
+])(
+	"$name",
+	async ({ accepts, plex, jellyfin, form, action, guidance, toggle }) => {
+		const account: AccountResponse = {
+			seerr_accepts: accepts,
+			taste_sources: {
+				plex: true,
+				jellyfin: true,
+				seerr: true,
+				trakt: true,
+				browsing: true,
 			},
-			{
-				provider: "jellyfin",
-				available: jellyfin,
-				sign_in: jellyfin,
-				linked: jellyfin,
-				can_unlink: false,
-			},
-		],
-	};
-	const cache = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	cache.setQueryData(["account"], account);
-	vi.stubGlobal(
-		"fetch",
-		vi.fn(async () => ({ ok: true, status: 200, json: async () => account })),
-	);
-	render(
-		<QueryClientProvider client={cache}>
-			<ConnectSeerr onConnected={vi.fn()} onCancel={vi.fn()} />
-		</QueryClientProvider>,
-	);
-	expect(
-		await screen.findByRole("dialog", { name: "Connect Seerr" }),
-	).toBeTruthy();
-	expect(!!screen.queryByRole("button", { name: "Use my Plex account" })).toBe(
-		action,
-	);
-	expect(
-		!!screen.queryByRole("button", { name: "Use Jellyfin credentials" }),
-	).toBe(toggle);
-	expect(!!screen.queryByLabelText("Email")).toBe(form === "Email");
-	expect(!!screen.queryByLabelText("Username")).toBe(form === "Username");
-	expect(!!screen.queryByLabelText("Password")).toBe(form !== null);
-	const guidanceText =
-		screen
-			.queryByText(
-				/Link Plex on your Account page|Ask your household admin|Requests are unavailable/,
-			)
-			?.textContent?.trim() ?? "";
-	expect(guidanceText).toBe(guidance.join(" "));
-	if (form) {
-		expect(
-			screen.getByText(
-				form === "Email"
-					? "Sign in with your Seerr account email and password."
-					: "Sign in with your Jellyfin username and password.",
-			),
-		).toBeTruthy();
-	} else {
-		expect(screen.queryByText(/Sign in with your/)).toBeNull();
-	}
-	if (toggle) {
-		fireEvent.click(
-			screen.getByRole("button", { name: "Use Jellyfin credentials" }),
-		);
-		expect(screen.getByLabelText("Username")).toBeTruthy();
-		fireEvent.click(
-			screen.getByRole("button", { name: "Use Seerr email instead" }),
-		);
-		expect(screen.getByLabelText("Email")).toBeTruthy();
-	}
-});
-
-test.each([
-	false,
-	true,
-])("cold account lookup keeps focus in the dialog: Jellyfin offered %s", async (jellyfin) => {
-	let respond!: (response: Response) => void;
-	const pending = new Promise<Response>((resolve) => {
-		respond = resolve;
-	});
-	vi.stubGlobal(
-		"fetch",
-		vi.fn(() => pending),
-	);
-	const cache = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={cache}>
-			<ConnectSeerr onConnected={vi.fn()} onCancel={vi.fn()} />
-		</QueryClientProvider>,
-	);
-	const dialog = screen.getByRole("dialog", { name: "Connect Seerr" });
-	expect(document.activeElement).toBe(screen.getByLabelText("Email"));
-	await act(async () => {
-		respond({
-			ok: true,
-			status: 200,
-			json: async () => ({
-				seerr_accepts: { plex: false, jellyfin, local: false },
-				providers: [
-					{
-						provider: "jellyfin",
-						available: jellyfin,
-						linked: jellyfin,
-						sign_in: jellyfin,
-						can_unlink: false,
-					},
-				],
-				taste_sources: {
-					plex: true,
-					jellyfin: true,
-					seerr: true,
-					browsing: true,
+			providers: [
+				{
+					provider: "plex",
+					available: true,
+					sign_in: true,
+					linked: plex,
+					can_unlink: false,
 				},
-			}),
-		} as Response);
-	});
-	await waitFor(() => {
-		expect(screen.queryByLabelText("Email")).toBeNull();
-		expect(dialog.contains(document.activeElement)).toBe(true);
-	});
-	if (jellyfin) expect(screen.getByLabelText("Username")).toBeTruthy();
-	else
-		expect(document.activeElement).toBe(
-			screen.getByRole("button", { name: "Cancel" }),
+				{
+					provider: "jellyfin",
+					available: jellyfin,
+					sign_in: jellyfin,
+					linked: jellyfin,
+					can_unlink: false,
+				},
+			],
+		};
+		const cache = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		cache.setQueryData(["account"], account);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => ({ ok: true, status: 200, json: async () => account })),
 		);
-});
+		render(
+			<QueryClientProvider client={cache}>
+				<ConnectSeerr onConnected={vi.fn()} onCancel={vi.fn()} />
+			</QueryClientProvider>,
+		);
+		expect(
+			await screen.findByRole("dialog", { name: "Connect Seerr" }),
+		).toBeTruthy();
+		expect(
+			!!screen.queryByRole("button", { name: "Use my Plex account" }),
+		).toBe(action);
+		expect(
+			!!screen.queryByRole("button", { name: "Use Jellyfin credentials" }),
+		).toBe(toggle);
+		expect(!!screen.queryByLabelText("Email")).toBe(form === "Email");
+		expect(!!screen.queryByLabelText("Username")).toBe(form === "Username");
+		expect(!!screen.queryByLabelText("Password")).toBe(form !== null);
+		const guidanceText =
+			screen
+				.queryByText(
+					/Link Plex on your Account page|Ask your household admin|Requests are unavailable/,
+				)
+				?.textContent?.trim() ?? "";
+		expect(guidanceText).toBe(guidance.join(" "));
+		if (form) {
+			expect(
+				screen.getByText(
+					form === "Email"
+						? "Sign in with your Seerr account email and password."
+						: "Sign in with your Jellyfin username and password.",
+				),
+			).toBeTruthy();
+		} else {
+			expect(screen.queryByText(/Sign in with your/)).toBeNull();
+		}
+		if (toggle) {
+			fireEvent.click(
+				screen.getByRole("button", { name: "Use Jellyfin credentials" }),
+			);
+			expect(screen.getByLabelText("Username")).toBeTruthy();
+			fireEvent.click(
+				screen.getByRole("button", { name: "Use Seerr email instead" }),
+			);
+			expect(screen.getByLabelText("Email")).toBeTruthy();
+		}
+	},
+);
+
+test.each([false, true])(
+	"cold account lookup keeps focus in the dialog: Jellyfin offered %s",
+	async (jellyfin) => {
+		let respond!: (response: Response) => void;
+		const pending = new Promise<Response>((resolve) => {
+			respond = resolve;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => pending),
+		);
+		const cache = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		render(
+			<QueryClientProvider client={cache}>
+				<ConnectSeerr onConnected={vi.fn()} onCancel={vi.fn()} />
+			</QueryClientProvider>,
+		);
+		const dialog = screen.getByRole("dialog", { name: "Connect Seerr" });
+		expect(document.activeElement).toBe(screen.getByLabelText("Email"));
+		await act(async () => {
+			respond({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					seerr_accepts: { plex: false, jellyfin, local: false },
+					providers: [
+						{
+							provider: "jellyfin",
+							available: jellyfin,
+							linked: jellyfin,
+							sign_in: jellyfin,
+							can_unlink: false,
+						},
+					],
+					taste_sources: {
+						plex: true,
+						jellyfin: true,
+						seerr: true,
+						browsing: true,
+					},
+				}),
+			} as Response);
+		});
+		await waitFor(() => {
+			expect(screen.queryByLabelText("Email")).toBeNull();
+			expect(dialog.contains(document.activeElement)).toBe(true);
+		});
+		if (jellyfin) expect(screen.getByLabelText("Username")).toBeTruthy();
+		else
+			expect(document.activeElement).toBe(
+				screen.getByRole("button", { name: "Cancel" }),
+			);
+	},
+);

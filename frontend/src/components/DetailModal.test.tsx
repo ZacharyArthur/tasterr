@@ -121,41 +121,40 @@ test("renders the title detail sections", async () => {
 	expect(external.getAttribute("rel")).toBe("noopener noreferrer");
 });
 
-test.each([
-	"es-ES",
-	"en-US",
-	undefined,
-])("marks detail TMDB text with loaded language %s", async (language) => {
-	vi.stubGlobal(
-		"fetch",
-		vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url === "/api/v1/config") {
-				if (!language) return new Promise<Response>(() => {});
-				return {
-					ok: true,
-					json: async () => ({ metadata_language: language }),
-				} as Response;
+test.each(["es-ES", "en-US", undefined])(
+	"marks detail TMDB text with loaded language %s",
+	async (language) => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = String(input);
+				if (url === "/api/v1/config") {
+					if (!language) return new Promise<Response>(() => {});
+					return {
+						ok: true,
+						json: async () => ({ metadata_language: language }),
+					} as Response;
+				}
+				return { ok: true, json: async () => DETAIL } as Response;
+			}),
+		);
+		renderModal();
+		await screen.findByRole("heading", { name: "Deep Movie" });
+		await waitFor(() => {
+			for (const text of ["Deep Movie", "An overview.", "A tagline"]) {
+				expect(screen.getByText(text).getAttribute("lang")).toBe(
+					language ?? null,
+				);
 			}
-			return { ok: true, json: async () => DETAIL } as Response;
-		}),
-	);
-	renderModal();
-	await screen.findByRole("heading", { name: "Deep Movie" });
-	await waitFor(() => {
-		for (const text of ["Deep Movie", "An overview.", "A tagline"]) {
-			expect(screen.getByText(text).getAttribute("lang")).toBe(
-				language ?? null,
-			);
-		}
-	});
-	expect(
-		screen.getByRole("button", { name: "Close" }).hasAttribute("lang"),
-	).toBe(false);
-	expect(
-		screen.getByRole("link", { name: /View on TMDB/ }).hasAttribute("lang"),
-	).toBe(false);
-});
+		});
+		expect(
+			screen.getByRole("button", { name: "Close" }).hasAttribute("lang"),
+		).toBe(false);
+		expect(
+			screen.getByRole("link", { name: /View on TMDB/ }).hasAttribute("lang"),
+		).toBe(false);
+	},
+);
 
 test("available titles expose separate focusable Plex web and app links", async () => {
 	stubTasteFetch({

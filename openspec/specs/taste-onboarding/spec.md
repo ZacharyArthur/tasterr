@@ -11,7 +11,11 @@ Offer an optional inline taste picker after history sync, recording deliberate s
 the user has any signal of a kind that counts toward their profile (not from a
 source they switched off) or has previously completed/dismissed the picker;
 otherwise `pending` while any of the user's history syncs (Seerr request history
-or a watch-history sync) is reserved or running; otherwise `show`. A user with
+or a watch-history sync) is reserved or running; otherwise `show`.
+
+#### Details
+
+A user with
 signals that count is therefore never `pending`, even while a routine sync runs. The endpoint SHALL use only the session user's server-side
 state and SHALL make no outbound request.
 

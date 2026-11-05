@@ -171,12 +171,13 @@ test("availability batches stay within the endpoint limit and merge responses", 
 	expect(Object.keys(result)).toHaveLength(101);
 });
 
-test.each([
-	401, 403, 422, 429, 500,
-])("admin failures preserve status %i", async (status) => {
-	stubFetch(status, { detail: "generic failure" });
-	const error = await getServices("US").catch((caught: unknown) => caught);
-	expect(error).toBeInstanceOf(ApiError);
-	expect((error as ApiError).status).toBe(status);
-	expect((error as ApiError).message).toBe("generic failure");
-});
+test.each([401, 403, 422, 429, 500])(
+	"admin failures preserve status %i",
+	async (status) => {
+		stubFetch(status, { detail: "generic failure" });
+		const error = await getServices("US").catch((caught: unknown) => caught);
+		expect(error).toBeInstanceOf(ApiError);
+		expect((error as ApiError).status).toBe(status);
+		expect((error as ApiError).message).toBe("generic failure");
+	},
+);

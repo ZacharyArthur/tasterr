@@ -9,17 +9,19 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from tests.factories import mint_linked_session, user_with_links
 
+from tasterr.api.auth import SEERR_LOGIN_SUPPORT_KEY
 from tasterr.api.request import SeerrRequestCtx, get_seerr_request_ctx
 from tasterr.auth.crypto import decrypt_token, encrypt_token
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import hash_token
-from tasterr.clients.seerr import SeerrAuthClient, SeerrClient
+from tasterr.cache import CacheOpts
+from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrPublicSettings
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import LinkedAccount, Signal, UserSession
@@ -124,7 +126,12 @@ def _override_ctx(
         seerr_auth=SeerrAuthClient(http, SEERR_URL),
         secret_key=SECRET,
     )
-    app.dependency_overrides[get_seerr_request_ctx] = lambda: ctx
+
+    def provide_ctx(request: Request) -> SeerrRequestCtx:
+        request.app.state.http = http
+        return ctx
+
+    app.dependency_overrides[get_seerr_request_ctx] = provide_ctx
 
 
 def _client(app: FastAPI, token: str) -> TestClient:
@@ -469,6 +476,77 @@ def test_plex_member_reauths_and_retries(tmp_path: Path) -> None:
     assert state.request_cookies == [SEED_COOKIE, NEW_COOKIE]  # retried with the fresh cookie
     assert state.auth_plex_called is True
     assert _stored_cookie(db_path, token) == NEW_COOKIE  # refreshed cookie persisted
+
+
+@pytest.mark.parametrize(
+    "server,enabled,status,reauth",
+    [
+        (2, True, 200, False),
+        (1, False, 200, False),
+        (1, True, 200, True),
+        (None, None, 200, True),
+        (None, None, 503, True),
+    ],
+)
+def test_silent_reauth_respects_known_plex_refusal(
+    tmp_path: Path, server: int | None, enabled: bool | None, status: int, reauth: bool
+) -> None:
+    handler, state = _ladder_handler(httpx.Response(201, json={"media": {"status": 2}}))
+
+    def with_support(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(
+                status, json={"mediaServerType": server, "mediaServerLogin": enabled}
+            )
+        return handler(request)
+
+    app = _app(tmp_path)
+    _override_ctx(app, with_support, settings=False)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path, plex_token="plex-token")
+    with _client(app, token) as client:
+        response = client.post("/api/v1/request", json=_body())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == ("ok" if reauth else "re_auth_required")
+    assert state.auth_plex_called is reauth
+    assert state.request_cookies == ([SEED_COOKIE, NEW_COOKIE] if reauth else [SEED_COOKIE])
+    assert _stored_cookie(db_path, token) == (NEW_COOKIE if reauth else SEED_COOKIE)
+
+
+@pytest.mark.parametrize("server,enabled", [(2, True), (1, False)])
+def test_silent_reauth_keeps_cached_refusal_during_settings_outage(
+    tmp_path: Path, server: int, enabled: bool
+) -> None:
+    handler, state = _ladder_handler(httpx.Response(201, json={"media": {"status": 2}}))
+
+    def with_outage(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(503)
+        return handler(request)
+
+    async def refusal() -> SeerrPublicSettings:
+        return SeerrPublicSettings(mediaServerType=server, mediaServerLogin=enabled)
+
+    app = _app(tmp_path)
+    _override_ctx(app, with_outage, settings=False)
+    db_path = tmp_path / "tasterr.db"
+    token = _seed_session(db_path, plex_token="plex-token")
+    with _client(app, token) as client:
+        assert client.portal is not None
+        client.portal.call(
+            app.state.seerr_settings_cache.cached,
+            SEERR_LOGIN_SUPPORT_KEY,
+            CacheOpts(300, 3600),
+            refusal,
+        )
+        response = client.post("/api/v1/request", json=_body())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "re_auth_required"
+    assert state.auth_plex_called is False
+    assert state.request_cookies == [SEED_COOKIE]
+    assert _stored_cookie(db_path, token) == SEED_COOKIE
 
 
 def test_persistent_denial_after_reauth_is_failed(tmp_path: Path) -> None:

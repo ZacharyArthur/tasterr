@@ -158,14 +158,15 @@ test.each(["expired", "denied"])("%s offers start again", async (status) => {
 		);
 });
 
-test.each([
-	404, 409,
-])("failed or consumed handle %s offers start again", async (http) => {
-	setup([{ http }]);
-	await tick();
-	await tick(2000);
-	expect(screen.getByRole("button", { name: "Start again" })).toBeTruthy();
-});
+test.each([404, 409])(
+	"failed or consumed handle %s offers start again",
+	async (http) => {
+		setup([{ http }]);
+		await tick();
+		await tick(2000);
+		expect(screen.getByRole("button", { name: "Start again" })).toBeTruthy();
+	},
+);
 
 test("transient error keeps polling and can link", async () => {
 	const { linked } = setup([{ http: 502 }, { status: "linked" }]);

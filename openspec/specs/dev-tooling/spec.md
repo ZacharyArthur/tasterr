@@ -28,11 +28,16 @@ re-implementation — on every pull request.
 - **THEN** CI runs `just check` and the PR is blocked if it fails
 
 ### Requirement: Boundary invariants are mechanically enforced
+
 The gate SHALL include import-linter contracts asserting that only
 `tasterr.clients` may import `httpx`, that `tasterr.api` is not imported by
 domain or client modules, and that the **catalog and rails domain-model modules**
 (the network-free typed shapes those layers build) do not import the application
-settings module — so secret configuration can never be embedded in them. (`api/`
+settings module — so secret configuration can never be embedded in them.
+
+#### Details
+
+(`api/`
 routers legitimately import settings for dependency injection; the client-facing
 guarantee there is upheld by an explicit `response_model` on every route plus the
 PublicConfig no-secrets regression test.)
@@ -87,7 +92,11 @@ committed.
 
 The repository SHALL provide a lightweight Chromium Playwright suite that serves the
 compiled SPA from a real Tasterr FastAPI process using a temporary SQLite database
-and deterministic local TMDB/Seerr doubles. The smoke SHALL cover local login, home
+and deterministic local TMDB/Seerr doubles.
+
+#### Details
+
+The smoke SHALL cover local login, home
 browsing, opening detail, and requesting a title through visible user behavior. It
 MUST use only invented fixture data and placeholder credentials, make no live
 internet request, add no production test mode, and retain diagnostic artifacts only
@@ -158,7 +167,11 @@ credentials or publish images.
 
 The repository SHALL provide an advanced CodeQL workflow that scans Actions,
 JavaScript/TypeScript and Python on every pull request to main, including forks,
-on main pushes and weekly. It SHALL use the default query suite on standard
+on main pushes and weekly.
+
+#### Details
+
+It SHALL use the default query suite on standard
 GitHub-hosted runners, bounded runtime and immutable action pins. Pull-request
 analysis SHALL use pull_request rather than a privileged target event and SHALL
 NOT execute project build scripts, receive secrets or publish packages. The

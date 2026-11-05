@@ -11,7 +11,11 @@ Seerr outages, and carry validated playback links for household browsing.
 The system SHALL perform all Seerr availability reads through the single Seerr
 client module in `tasterr.clients`, resolving a title's library status by TMDB id
 via `GET {SEERR_INTERNAL_URL}/api/v1/{type}/{tmdbId}` and parsing `mediaInfo`
-(overall status, plus per-season status for TV). Reads SHALL authenticate with the
+(overall status, plus per-season status for TV).
+
+#### Details
+
+Reads SHALL authenticate with the
 **global `SEERR_API_KEY`** server setting — never a per-user session — because
 availability is not user-attributed. Each read SHALL carry a short timeout and
 SHALL NOT be retried (no retry storm). A `404` SHALL resolve to a *known*
@@ -98,7 +102,11 @@ even when an individual user's Seerr session has lapsed.
 
 `POST /api/v1/availability` SHALL take a bounded, validated list of `{type, id}`
 titles and return a library status for each, so the SPA can hydrate badges after a
-feed has rendered. The endpoint SHALL require a valid session using the shared
+feed has rendered.
+
+#### Details
+
+The endpoint SHALL require a valid session using the shared
 default-deny dependency and SHALL declare an explicit, secret-free response model.
 A failure resolving any single title SHALL degrade that title to Unknown without
 failing the batch. When Seerr is unconfigured, the endpoint SHALL return Unknown
@@ -146,7 +154,11 @@ Seerr version tested.
 
 Normalization SHALL carry a Seerr media variant's Plex web and app links in the
 typed, secret-free Availability model whenever its status is available or
-partially available. The client boundary SHALL accept both Overseerr's `plexUrl`
+partially available.
+
+#### Details
+
+The client boundary SHALL accept both Overseerr's `plexUrl`
 and Jellyseerr's `mediaUrl`, plus
 `iOSPlexUrl`, and SHALL accept the corresponding `plexUrl4k`/`mediaUrl4k` and
 `iOSPlexUrl4k` variants. A web link SHALL be retained only when it is a

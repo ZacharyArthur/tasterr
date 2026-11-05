@@ -9,7 +9,11 @@ sign-in, and bounded watch-history synchronization into taste signals.
 ### Requirement: Jellyfin is configured from the environment
 
 Jellyfin features SHALL be enabled only when both `JELLYFIN_INTERNAL_URL` and
-`JELLYFIN_API_KEY` are set. The URL SHALL be http or https with a host and SHALL
+`JELLYFIN_API_KEY` are set.
+
+#### Details
+
+The URL SHALL be http or https with a host and SHALL
 NOT carry embedded credentials (`user:pass@`), which would replace the required
 `Authorization: MediaBrowser` header with basic auth; any other value SHALL be
 treated as unset. The URL is server-side only. Neither value SHALL appear in `PublicConfig`, `/auth/methods`,
@@ -36,7 +40,11 @@ available.
 All Jellyfin calls SHALL live in `clients/jellyfin.py`, use only the configured
 base URL, carry explicit timeouts, never follow redirects, parse responses into
 typed models (unknown fields dropped), and never forward browser headers upstream
-or upstream headers/bodies downstream. The API key and any user access token SHALL
+or upstream headers/bodies downstream.
+
+#### Details
+
+The API key and any user access token SHALL
 be sent only in the `Authorization` header (`MediaBrowser Token="…"`), never in a
 URL. The API key SHALL be used only for reads scoped by an explicit Jellyfin user
 id (user record, played items, series lookups, resumable items, next-up
@@ -65,6 +73,9 @@ An empty password SHALL be refused with the same generic 401, before any Jellyfi
 call, unless the operator sets `JELLYFIN_ALLOW_EMPTY_PASSWORD=true` (default
 false), because Jellyfin sees every attempt as coming from Tasterr's own address
 and would admit passwordless accounts to anyone who can reach Tasterr.
+
+#### Details
+
 `POST /api/v1/auth/jellyfin` with `{username, password}` SHALL forward the
 credentials once to Jellyfin `AuthenticateByName`, and on success SHALL
 immediately log out the returned access token, where a failed logout SHALL be logged
@@ -124,7 +135,11 @@ the SPA login experience SHALL apply to Jellyfin sign-in.
 A Jellyfin sign-in, a new Jellyfin link, and a Home read by any user with a
 Jellyfin link SHALL evaluate one per-user single-flight trigger that schedules a
 background sync only when the Jellyfin link's `sync_attempted_at` is absent or
-older than six hours, waiting for that user's Seerr sync to settle. The task SHALL
+older than six hours, waiting for that user's Seerr sync to settle.
+
+#### Details
+
+The task SHALL
 commit the attempt timestamp before network work and SHALL NOT delay or fail
 sign-in or Home. It SHALL read the linked user's played movies and played
 episodes with the API key, newest play first, in pages of 100, at most 500 rows
@@ -190,7 +205,11 @@ and the `continue-watching` rail type enabled, Continue Watching SHALL include a
 Jellyfin contribution read live with the API key, scoped to that link's Jellyfin
 user id: up to 50 resumable movies and episodes, up to 50 next-up episodes, and
 one page of up to 100 most recently played episodes ordered by descending
-last-played time. The played-episode page SHALL be read concurrently with resume
+last-played time.
+
+#### Details
+
+The played-episode page SHALL be read concurrently with resume
 and next-up, without pagination, solely to establish next-up activity timestamps;
 it SHALL NOT contribute additional cards or imported signals. The Jellyfin source
 load SHALL have a ten-second wall-clock deadline and SHALL run concurrently with
