@@ -77,9 +77,22 @@ async def disposable_users() -> AsyncGenerator[tuple[httpx.AsyncClient, list[Jel
                     assert response.status_code in (200, 204)
             yield http, users
         finally:
+            cleaned = True
             for user in users:
-                response = await http.delete(f"{URL}/Users/{user.id}", headers=headers(KEY))
-                assert response.status_code in (200, 204, 404)
+                try:
+                    response = await http.delete(f"{URL}/Users/{user.id}", headers=headers(KEY))
+                    cleaned = cleaned and response.status_code in (200, 204, 404)
+                    check = await http.get(f"{URL}/Users/{user.id}", headers=headers(KEY))
+                    cleaned = cleaned and check.status_code == 404
+                except httpx.HTTPError:
+                    cleaned = False
+            _require(cleaned, "Jellyfin disposable-user cleanup failed")
+
+
+async def test_keyless_public_info() -> None:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as http:
+        info = await JellyfinClient(http, URL, "", DEVICE_ID).public_info()
+        _require(bool(info.version), "Jellyfin keyless public-info version missing")
 
 
 async def test_version_recorded() -> None:
