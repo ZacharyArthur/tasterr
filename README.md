@@ -18,10 +18,11 @@ stack. It combines the TMDB catalog in your household's metadata language with
 optional linked Plex, Seerr, Jellyfin, and Trakt accounts, library state, and
 requests, then learns a separate taste profile for each signed-in user.
 
-The pinned `2.3.1` image is the current published release. Linked accounts, direct
-Plex/Jellyfin sign-in, metadata language, discovery exclusions, Jellyfin Continue
-Watching, sign-in choices, Seerr setup awareness, and Trakt history described here
-are unreleased; see [unreleased notes](docs/releases/unreleased.md) before upgrading.
+The pinned `2.4.0` image includes linked accounts, direct Plex/Jellyfin sign-in,
+metadata language, discovery exclusions, Jellyfin Continue Watching, sign-in choices,
+Seerr setup awareness, and Trakt history. Read the
+[release notes](docs/releases/v2.4.0.md) before upgrading: watched hiding starts on,
+and rollback across migrations `0007`–`0010` can delete accounts and history.
 
 The current source supports Plex, Jellyfin, or local Seerr sign-in, composed discovery rails,
 search, title details, availability badges, requests attributed to the signed-in
@@ -179,17 +180,16 @@ Save [compose.example.yaml](compose.example.yaml) as `compose.yaml` in an empty
 directory for a new deployment. For an existing deployment, replace `compose.yaml`
 in place and keep the same Compose project name and data volume. Create `.env`
 beside it from [`.env.example`](.env.example) only for a new deployment; otherwise
-keep your existing `.env`. Replace placeholders in a new file and configure Seerr
-for `2.3.1`. The example documents every setting, inline non-secret values, and
-file-based environment injection.
+keep your existing `.env`. Replace placeholders in a new file and configure at least
+one sign-in provider (Seerr, pinned Plex, or Jellyfin). The example documents every
+setting, inline non-secret values, and file-based environment injection.
 
 ```console
 docker compose up -d
 curl --fail http://127.0.0.1:8000/api/v1/health
 ```
 
-The example pins the published `2.3.1` image; source features marked unreleased
-require a later release containing them. See the [configuration
+The example pins the `2.4.0` image. See the [configuration
 reference](docs/CONFIGURATION.md) for networking, secrets, and upgrades.
 
 ## Living documentation

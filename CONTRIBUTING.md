@@ -66,11 +66,16 @@ Use Conventional Commit subjects (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`
 
 ## Versioning
 
-Tasterr uses SemVer (`MAJOR.MINOR.PATCH`) for its configuration, API, and upgrade
-contracts:
+Tasterr uses SemVer (`MAJOR.MINOR.PATCH`) for its supported operator contracts:
+configuration/environment variables, the image and its tags, the health endpoint,
+persisted data and upgrade/downgrade paths, and documented operator procedures.
 
-- **MAJOR:** breaking configuration/environment, API, or upgrade contracts, or a
-  required manual migration step.
+The SPA-internal `/api/v1` backend is private. It is versioned with the bundled
+frontend, shipped in the same image, and not covered by SemVer as a supported
+integration surface. The health endpoint remains a supported operator contract.
+
+- **MAJOR:** breaking supported operator contracts, or a required manual migration
+  step.
 - **MINOR:** backward-compatible features or opt-in/opt-out behavior changes.
 - **PATCH:** fixes only.
 
@@ -79,8 +84,9 @@ downgrade still needs an explicit warning. The historical [release
 records](docs/releases/) include feature releases such as `2.2.0` and `2.3.0`
 and the sign-in fix in `2.3.1`.
 
-Accumulate user-facing changes and upgrade warnings in
-[`docs/releases/unreleased.md`](docs/releases/unreleased.md) between releases.
+Accumulate user-facing changes and upgrade warnings under
+[`docs/releases/`](docs/releases/) between releases, creating `unreleased.md`
+when the next changes arrive.
 During release readiness, choose the version, rename that file to `vX.Y.Z.md`,
 and complete its verification evidence. Synchronize package versions, image pins,
 and release references together using the [release procedure](docs/RELEASING.md).

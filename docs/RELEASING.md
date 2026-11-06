@@ -1,13 +1,12 @@
 # Releasing
 
 This procedure is for stable releases. The current package version is
-`2.3.1`, its Git tag is `v2.3.1`, and its image is published by the `image` workflow
+`2.4.0`, its Git tag is `v2.4.0`, and its image is published by the `image` workflow
 only after all release changes are squash-merged to protected `main`.
 
-The account work and eight subsequent feature changes are tracked in
-[unreleased notes](releases/unreleased.md).
-Choose the next version during release preparation; do not relabel `2.3.1` as
-containing them. Update backend `pyproject.toml` and `uv.lock`, frontend
+The account work and eight subsequent feature changes ship in
+[v2.4.0](releases/v2.4.0.md). Choose each release version during preparation.
+Update backend `pyproject.toml` and `uv.lock`, frontend
 `package.json` and `package-lock.json`, the published tag in `compose.example.yaml`,
 the release-boundary notes in `.env.example` and README, this procedure, the supported line
 in root `SECURITY.md`, and the corresponding docs/release assertions together.
@@ -61,7 +60,7 @@ native image/Compose smoke sequentially. Any failure blocks the release.
 npx @devcontainers/cli exec --workspace-folder . just release-check
 ```
 
-Record the date and result in `docs/releases/v2.3.1.md`. This command intentionally
+Record the date and result in `docs/releases/v2.4.0.md`. This command intentionally
 does not imply that audits, security review, or live contracts passed.
 
 The committed evidence file is the pre-tag record. Write it so it remains true after
@@ -83,7 +82,7 @@ finding only when its advisory identifier, affected surface, and concise rationa
 are recorded in the release evidence. Never copy audit output containing private
 registry coordinates or environment data into the repository.
 
-## 5. Run live Seerr, Plex, and Jellyfin contracts
+## 5. Run live Seerr, Plex, Jellyfin, and Trakt contracts
 
 Create `/tmp/tasterr-live.env` inside the devcontainer with mode `600`; never place it
 under the repository. It must supply the live Seerr URL, local account email/password,
@@ -98,7 +97,10 @@ play dates per type to verify newest-first ordering), and
 users and deliberately lock one out; obtain operator permission before running.
 Supply Jellyfin username/password for Seerr's `/auth/jellyfin` case, and exercise
 disabled Jellyfin/Plex login statuses on a disposable Seerr configuration using the
-flags documented in the live suite. Then run:
+flags documented in the live suite. For Trakt, supply the client id and optional
+secret named in `backend/tests/live/test_trakt_live.py`, and explicitly set
+`TASTERR_LIVE_TRAKT_INTERACTIVE=true` to permit device approval, token rotation
+and revocation. The approving member must belong to the development app. Then run:
 
 ```console
 npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/tasterr-live.env; set +a; just test-live'
@@ -115,7 +117,12 @@ and verify cleanup afterward. Mandatory Jellyfin cases cover auth/logout, user
 policy, played movie/episode queries, series provider ids, empty passwords, account
 lockout, deleted-user 404, and two users authenticating with one shared DeviceId
 while logging out one token. Record the tested Jellyfin version and verify every
-disposable account was deleted. Only a deeper pagination, available-title, or other
+disposable account was deleted. Mandatory Trakt cases cover device authorization
+and pending polling, required headers/fixed hosts, user-settings identity, watched
+activities, newest-first movie/show history, pagination/date narrowing when their
+data preconditions exist, refresh rotation and revocation. Record Trakt API v2;
+the community-app-limit 420 response cannot safely be induced live and remains a
+unit-tested limitation. Only a deeper pagination, available-title, or other
 explicitly documented data-precondition case may skip. Record only upstream versions
 and generic passed/skipped case names. If retained credentials have become stale or unavailable, a
 release owner may accept a recent complete automated baseline plus a fresh integrated
@@ -226,35 +233,35 @@ pushes.
 After every pre-tag release-record field is final, create and push the annotated tag:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . git tag -a v2.3.1 -m "v2.3.1"
-npx @devcontainers/cli exec --workspace-folder . git push origin v2.3.1
+npx @devcontainers/cli exec --workspace-folder . git tag -a v2.4.0 -m "v2.4.0"
+npx @devcontainers/cli exec --workspace-folder . git push origin v2.4.0
 ```
 
-Wait for the image workflow. It must publish `2.3.1`, `2.3`, `2`, and `latest`, and
+Wait for the image workflow. It must publish `2.4.0`, `2.4`, `2`, and `latest`, and
 leave the existing `sha-<full-commit>` candidate unchanged. Inspect the stable
 manifest and confirm both platforms:
 
 ```console
-npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:2.3.1
+npx @devcontainers/cli exec --workspace-folder . docker buildx imagetools inspect ghcr.io/zacharyarthur/tasterr:2.4.0
 ```
 
 Verify the stable image attestation:
 
 ```console
-gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:2.3.1 -R ZacharyArthur/tasterr
+gh attestation verify oci://ghcr.io/zacharyarthur/tasterr:2.4.0 -R ZacharyArthur/tasterr
 ```
 
 Perform a fresh install in an empty directory with a new external network, disposable
 `.env`, and new Compose project. Set
-`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:2.3.1`, run `docker compose pull` and
+`TASTERR_IMAGE=ghcr.io/zacharyarthur/tasterr:2.4.0`, run `docker compose pull` and
 `docker compose up -d --no-build`, then verify health, SPA serving, non-root uid, and
 named-volume persistence. Delete every disposable resource after verification.
 
 Publish release notes only after the applicable manifest, attestation, and fresh
 install checks pass. Summarize user-visible changes, upgrade steps, and known
-limitations; then pin the `2.3.1` digest as the released artifact without reproducing
-private evidence. Publish v2.3.1 with repository immutability enabled only after
-`2.3.1`, `2.3`, `2`, and `latest`
+limitations; then pin the `2.4.0` digest as the released artifact without reproducing
+private evidence. Publish v2.4.0 with repository immutability enabled only after
+`2.4.0`, `2.4`, `2`, and `latest`
 resolve to the expected release commit, the `sha-<full-commit>` candidate retains its
 recorded pre-tag digest, and the tagged clean-install smoke passes.
 
@@ -278,11 +285,22 @@ documented in [CONFIGURATION.md](CONFIGURATION.md). To roll back an image-only c
 set `TASTERR_IMAGE` to the preceding known-good digest and force-recreate the service
 against the existing volume. If a migration is not backward-compatible, stop the
 writer and restore the matching pre-upgrade backup before starting the old digest.
-For the unreleased account and Trakt changes, follow the revision-specific
+The immediate rollback target is the known-good v2.3.1 digest, whose database
+revision is `0006`. That image requires Seerr and ignores `PLEX_SERVER_ID`,
+`JELLYFIN_*`, `TASTERR_SIGN_IN_METHODS` and saved sign-in choices: Plex membership
+pinning and sign-in restrictions cease to apply, and Seerr gates sign-in again.
+Deployments without Seerr have no sign-in path on v2.3.1. If Seerr admission is
+unsuitable or those restrictions are required, recover on compatible v2.4 code
+instead of starting v2.3.1.
+
+For the v2.4.0 account and Trakt changes, follow the revision-specific
 `0010` → `0009` → `0008` → `0007` → `0006` downgrade limits in CONFIGURATION.md
 before starting an older image, or restore the matching backup. Downgrades can
 remove Trakt links/history, source preferences, Jellyfin accounts/history, users
-without Seerr, and sessions.
+without Seerr, their local data, and every session. While the current v2.4.0 image
+is selected and the writer stopped, use the CONFIGURATION.md Alembic command with
+`command.downgrade(c,'0006')` before selecting v2.3.1. Never start v2.3.1 on the
+`0010` database.
 
 Version 2.0 includes migration `0006`. To return to v1.1, use the v2 image to
 downgrade to `0005` before starting the old image, or restore the validated matching
