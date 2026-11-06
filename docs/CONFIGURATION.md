@@ -33,12 +33,10 @@ Use `$$` for a literal dollar sign inline, and single-quote literal dollars in
 Compose file. See [Docker's substitution reference](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/).
 Never share rendered Compose configuration: it includes secrets.
 
-The example pins `2.3.1`; the account work, metadata language, discovery exclusions,
-Jellyfin Continue Watching, sign-in choices, Seerr setup awareness, and Trakt history
-in the current source are unreleased. Use a release
-containing them once available; no version bump is implied by this reference.
-The pinned release requires Seerr and ignores `PLEX_SERVER_ID` and `JELLYFIN_*`;
-in particular, setting `PLEX_SERVER_ID` on `2.3.1` does not restrict sign-in.
+The example pins `2.4.0`, including linked accounts, metadata language, discovery
+exclusions, Jellyfin Continue Watching, sign-in choices, Seerr setup awareness and
+Trakt history. Read the [release notes](releases/v2.4.0.md) before upgrading.
+Configure at least one sign-in provider: Seerr, pinned Plex, or Jellyfin.
 Existing deployments should replace their Compose file in place and preserve the
 project name and data volume; moving to a new directory/project can select a new,
 empty volume. Keep the existing `.env` rather than replacing it with placeholders.
@@ -89,7 +87,7 @@ IP). Empty passwords are refused before any upstream call unless
 | Variable | Default | Purpose |
 |---|---|---|
 | `TASTERR_MEDIA_NETWORK` | unset | Existing external Docker network used only with `docker-compose.seerr-network.yml` when Seerr runs on this same Docker host in another Compose project. |
-| `TASTERR_IMAGE` | `ghcr.io/zacharyarthur/tasterr:2.3.1` in the published example; `tasterr:latest` in source Compose | Optional image tag/digest override. |
+| `TASTERR_IMAGE` | `ghcr.io/zacharyarthur/tasterr:2.4.0` in the published example; `tasterr:latest` in source Compose | Optional image tag/digest override. |
 | `TASTERR_HTTP_PORT` | `127.0.0.1:8000` | Host-side port or bind expression. Set `8000` or a specific LAN IP and port only for intentional direct LAN access. |
 | `TASTERR_ENV_FILE` | `.env` | Environment file loaded by the bundled Compose service. With an alternate file, pass the same file to Compose via `--env-file`. This is a Compose concern, not an application requirement. |
 
@@ -253,8 +251,8 @@ the container. Sign in with that method, then remove the variable and restart to
 edit Settings again. The variable locks all method checkboxes and overrides,
 without replacing, the stored denylist. Removing it restores the previous choice;
 keep your session open and correct that choice before signing out. Omit the
-variable entirely to leave Settings editable. This setting requires a release
-after the example's pinned `2.3.1` image.
+variable entirely to leave Settings editable. This setting is available in the
+example's pinned `2.4.0` image.
 
 ## Member accounts and taste sources
 
@@ -604,7 +602,7 @@ request destination selection worked after valid root folders were configured in
 Seerr. This was manual verification; the automated live suite was not rerun on
 3.5.0. The earlier automated Seerr 3.3.0 baseline remains historical evidence.
 
-Live Plex/Seerr/Jellyfin contracts are opt-in and excluded from `just check` and CI. Put the
+Live Plex/Seerr/Jellyfin/Trakt contracts are opt-in and excluded from `just check` and CI. Put the
 `TASTERR_LIVE_*` values named at the top of `backend/tests/live/` in a temporary file
 outside the repository, restrict that file to the current user, load it only into
 the devcontainer shell, and run `just test-live`. Owner, managed, and shared Plex
@@ -622,9 +620,9 @@ npx @devcontainers/cli exec --workspace-folder . bash -lc 'set -a; . /tmp/taster
 
 Never put live values in `.env.example`, the repository, command output, test
 fixtures, or evidence. Record only versions and generic exercised/skipped/pass/fail
-results. Every v2.3 release candidate must pass these live contracts and the full
+results. Every v2.4 release candidate must pass these live contracts and the full
 release gate before tagging, or record the narrow release-owner exception in
-[RELEASING.md section 5](RELEASING.md#5-run-live-seerr-plex-and-jellyfin-contracts).
+[RELEASING.md section 5](RELEASING.md#5-run-live-seerr-plex-jellyfin-and-trakt-contracts).
 
 Jellyfin contracts require `TASTERR_LIVE_JELLYFIN_URL`,
 `TASTERR_LIVE_JELLYFIN_API_KEY`, and explicit permission via

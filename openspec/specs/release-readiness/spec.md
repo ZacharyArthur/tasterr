@@ -13,30 +13,18 @@ architecture, releasing, licensing, and vulnerability-reporting documents.
 
 #### Details
 
-The
-configuration guide SHALL cover every supported environment variable, secret
-generation, existing Seerr networking across routable-LAN and optional same-host
-Docker-network paths, loopback-by-default and explicit LAN publication, trusted
-proxies/HTTPS, application security headers, private application/proxy logging, first
-boot, degraded integration states, named-volume backup and restore, upgrade,
-migration-aware rollback, and troubleshooting. The architecture guide SHALL describe
-the process/module boundaries, browser/API and upstream data flows, SQLite/cache
-lifecycle, generated API types, identity/secrets, and independent Seerr/Plex
-degradation without replacing the frozen founding documents. Root and package
-metadata SHALL identify the selected AGPL-3.0-only license and the published image
-SHALL include its license text. The root quick start SHALL include a copyable Compose
-example using the current `2.3.1` GHCR image, loopback host publication, and the named
-data volume. It SHALL distinguish Tasterr's ordinary process environment from the
-bundled Compose file's explicit environment-file loading and document how another
-container platform or Compose service can inject the same variable names without a
-file.
+Root and package metadata SHALL identify AGPL-3.0-only and the published image
+SHALL include its license text. The root quick start SHALL include a copyable
+Compose example using the current `2.4.0` GHCR image, loopback host publication,
+and the named data volume.
 
 #### Scenario: New operator can deploy from living docs
 
 - **WHEN** an operator starts with the root README and an existing Seerr instance
 - **THEN** the linked configuration guide contains every required step and variable
   needed to start, expose intentionally, secure, keep logs private, back up, restore,
-  upgrade to v2.3.1, roll back across migration `0006`, and troubleshoot Tasterr
+  upgrade to v2.4.0, roll back across migrations `0010`–`0007` to v2.3.1 or
+  migration `0006` to v1.1, and troubleshoot Tasterr
 
 #### Scenario: Maintainer can locate architectural boundaries
 
@@ -55,7 +43,7 @@ file.
 
 - **WHEN** an operator deploys the README's published-image Compose example beside a
   populated `.env`
-- **THEN** Compose pulls `ghcr.io/zacharyarthur/tasterr:2.3.1`, publishes it on host
+- **THEN** Compose pulls `ghcr.io/zacharyarthur/tasterr:2.4.0`, publishes it on host
   loopback, and persists `/data` in the documented named volume
 
 #### Scenario: Environment sources are unambiguous
@@ -69,7 +57,7 @@ file.
 
 ### Requirement: Public vulnerability reporting is private and actionable
 
-The root `SECURITY.md` SHALL identify v2.3.x as the supported stable line, direct
+The root `SECURITY.md` SHALL identify v2.4.x as the supported stable line, direct
 vulnerability reports to GitHub private vulnerability reporting, tell reporters not
 to disclose secrets or household data, and describe acknowledgement/remediation
 expectations. The release procedure SHALL require private vulnerability reporting,
@@ -84,12 +72,12 @@ releases, and protected version tags before stable publication.
 
 #### Scenario: Current supported line is clear
 
-- **WHEN** an operator or reporter checks the support table after v2.3 publication
-- **THEN** v2.3.x is supported and older or pre-release builds are not
+- **WHEN** an operator or reporter checks the support table after v2.4 publication
+- **THEN** v2.4.x is supported and older or pre-release builds are not
 
 #### Scenario: Public release checks repository security features
 
-- **WHEN** the operator prepares the v2.3.1 tag
+- **WHEN** the operator prepares the v2.4.0 tag
 - **THEN** the release checklist requires private reporting, secret scanning,
   dependency maintenance, immutable releases, and protected version tags first
 
@@ -101,18 +89,7 @@ container/Compose smoke.
 
 #### Details
 
-The release procedure SHALL separately require both locked
-dependency audits, the full relevant security checklist, placeholder-only env
-verification, and the live Seerr, owner/managed/shared Plex, and Jellyfin
-contract suites
-because those checks require network access, operator credentials, or human triage.
-A failed required check MUST block tagging unless a specific dependency advisory is
-risk-triaged in the release record. When retained live credentials have become stale or unavailable,
-the release owner MAY explicitly accept a recent complete automated baseline plus a
-fresh integrated manual test only for an integration whose request/response path is
-unchanged by the release. Every integration changed by the release still requires a
-fresh automated pass, and the evidence MUST record any exception without claiming a
-fresh automated pass.
+External checks remain separate from the deterministic release command.
 
 #### Scenario: Deterministic release checks pass
 
@@ -125,7 +102,14 @@ fresh automated pass.
 - **WHEN** the deterministic command passes without live credentials or registry
   access
 - **THEN** the release procedure still shows dependency audits, security/repository
-  review, and live Seerr/Plex/Jellyfin contracts as incomplete pre-tag requirements
+  review, and live Seerr/Plex/Jellyfin/Trakt contracts as incomplete pre-tag requirements
+
+#### Scenario: V2.4.0 live gate is complete
+
+- **WHEN** the operator reaches the v2.4.0 tag step
+- **THEN** mandatory Seerr, owner/managed/shared Plex, Jellyfin and Trakt behavior
+  has a fresh automated pass, including every integration changed by the release
+- **AND** only documented absent-data cases skip, with generic evidence
 
 #### Scenario: V2.3.0 live gate is complete
 
@@ -155,18 +139,20 @@ fresh automated pass.
 
 Before a stable tag is created, the repository SHALL contain a release record naming
 the release version/date, deterministic check results, dependency-audit disposition,
-security-review scope/result, live Seerr and Plex versions plus generic
+security-review scope/result, live Seerr/Plex/Jellyfin versions and Trakt API version plus generic
 exercised/skipped cases, known limitations, and migration-aware rollback basis.
 
 #### Details
 
-The
-record MUST NOT contain credentials, tokens, cookies, household identities, request
-titles, internal/live URLs, rating keys, server/account identifiers, viewing data,
-or raw upstream output. A live case MAY be recorded as skipped only when its
-documented data precondition is absent. Merged-candidate and post-tag facts that
-cannot exist in the reviewed pre-tag commit SHALL be recorded in the immutable
-GitHub Release rather than a post-release source commit.
+A live case MAY be recorded as skipped only when its documented data
+precondition is absent.
+
+#### Scenario: V2.4.0 evidence is complete before tagging
+
+- **WHEN** the operator reaches the `v2.4.0` tag step
+- **THEN** `docs/releases/v2.4.0.md` records every branch-verifiable required outcome,
+  tested Seerr/Plex/Jellyfin versions and Trakt API version, upgrade/rollback basis,
+  limitations and an approved disposition with no mandatory case unresolved
 
 #### Scenario: V2.3.0 evidence is complete before tagging
 
@@ -210,30 +196,19 @@ GitHub Release rather than a post-release source commit.
 
 ### Requirement: Stable versioning and release order are explicit
 
-The current stable release SHALL use SemVer `2.3.1` in backend/frontend package and
-lock metadata and Git tag `v2.3.1`.
+The current stable release SHALL use SemVer `2.4.0` in backend/frontend package and
+lock metadata and Git tag `v2.4.0`.
 
 #### Details
 
-Its release preparation and any applicable archived
-OpenSpec changes SHALL be squash-merged through required `check`, `e2e`,
-`container-smoke`, and CodeQL gates before tagging. The main workflow SHALL publish
-an immutable commit-SHA candidate with verifiable provenance. Before the stable tag,
-the release procedure SHALL verify that candidate's amd64/arm64 manifest, artifact
-attestation, public package visibility, anonymous pull, clean deployment, non-root
-runtime, health, SPA, and named-volume persistence. The tag workflow SHALL publish
-`2.3.1`, `2.3`, `2`, and `latest` while leaving the SHA candidate unchanged; those
-stable aliases, their attestation, and a fresh tagged deployment SHALL be verified
-before the immutable GitHub Release. Rollback to v2.3.0 SHALL use the immutable prior
-image digest; rollback across migration `0006` to v1.1 SHALL first downgrade to
-`0005` with a v2 image or restore a validated pre-upgrade SQLite backup. Every
-template owner/repository marker MUST be replaced by the final coordinate before
-publication.
+The tag workflow SHALL publish `2.4.0`, `2.4`, `2`, and `latest` while leaving
+the SHA candidate unchanged. Every template owner/repository marker MUST be
+replaced by the final coordinate before publication.
 
 #### Scenario: Stable tag follows the atomic merge
 
-- **WHEN** the v2.3.1 release preparation has passed review and been squash-merged
-- **THEN** the operator tags that releasable main commit `v2.3.1`, not an unmerged
+- **WHEN** the v2.4.0 release preparation has passed review and been squash-merged
+- **THEN** the operator tags that releasable main commit `v2.4.0`, not an unmerged
   change-branch commit
 
 #### Scenario: First stable tag follows the atomic merge
@@ -261,7 +236,7 @@ publication.
 - **WHEN** the release-readiness change is merged and the main workflow publishes its
   immutable candidate
 - **THEN** the operator verifies both architectures, attestation, public visibility,
-  anonymous pull, and a disposable clean installation before creating `v2.3.1`
+  anonymous pull, and a disposable clean installation before creating `v2.4.0`
 
 #### Scenario: Public candidate precedes the stable tag
 
@@ -272,14 +247,147 @@ publication.
 
 #### Scenario: Published image is verified
 
-- **WHEN** the stable image workflow finishes for `v2.3.1`
-- **THEN** the operator confirms `2.3.1`, `2.3`, `2`, `latest`, and the unchanged SHA
+- **WHEN** the stable image workflow finishes for `v2.4.0`
+- **THEN** the operator confirms `2.4.0`, `2.4`, `2`, `latest`, and the unchanged SHA
   candidate resolve to the release commit, verifies the stable manifest and
   attestation, and completes a fresh tagged-image deployment before publishing the
   immutable GitHub Release
 
 #### Scenario: Failed publication fixes forward
 
-- **WHEN** any verification fails after `v2.3.1` is published
+- **WHEN** any verification fails after `v2.4.0` is published
 - **THEN** the tag is never moved, deleted, or reused and remediation ships through
   protected main as the next patch release
+
+### Requirement: Operator configuration guidance covers deployment and recovery
+
+The configuration guide SHALL document every supported environment variable, secret
+generation, routable-LAN and optional same-host Seerr networking, loopback defaults
+and intentional LAN publication, trusted proxies/HTTPS, security headers, private
+application/proxy logging, first boot, degraded integrations, named-volume backup
+and restore, upgrades, migration-aware rollback and troubleshooting.
+
+#### Scenario: Operator can recover a deployment
+
+- **WHEN** an operator upgrades or restores a deployment
+- **THEN** the guide provides stopped-writer validated backups, migration-aware
+  rollback and generic troubleshooting without exposing household data
+
+### Requirement: Architecture and environment boundaries are documented
+
+The architecture guide SHALL describe module boundaries, browser/API and upstream
+flows, SQLite/cache lifecycle, generated types, identity/secrets and independent
+Seerr/Plex degradation without replacing the frozen founding documents.
+Documentation SHALL distinguish ordinary process environment from Compose's
+explicit environment-file loading and explain injecting the same names without a
+file, including explicit Compose environment mappings.
+
+#### Scenario: Maintainer can distinguish configuration sources
+
+- **WHEN** a maintainer moves deployment to another container platform
+- **THEN** the architecture and configuration guides explain boundaries and
+  supplying the same process variables without requiring an environment file
+
+### Requirement: External release verification remains mandatory
+
+The release procedure SHALL separately require both locked dependency audits,
+the full relevant security checklist, placeholder-only environment verification,
+repository controls and live Seerr, owner/managed/shared Plex, Jellyfin and Trakt
+contract suites. A failed required check MUST block tagging unless a specific
+dependency advisory is risk-triaged in the release record.
+
+#### Scenario: Deterministic success cannot substitute for external evidence
+
+- **WHEN** deterministic checks pass but a mandatory external check is unresolved
+- **THEN** tagging remains blocked until it passes or a permitted advisory
+  disposition or unchanged-integration exception is recorded
+
+### Requirement: Live exceptions require unchanged integration paths
+
+When retained live credentials become stale or unavailable, the release owner MAY
+explicitly accept a recent complete automated baseline plus a fresh integrated
+manual test only for an integration whose request/response path is unchanged by the
+release. Every changed integration SHALL have a fresh automated pass. Evidence MUST
+record each exception without claiming a fresh automated pass.
+
+#### Scenario: Changed integration cannot reuse an old baseline
+
+- **WHEN** a release changes an integration's request/response path
+- **THEN** a fresh automated live pass is required even if an older complete
+  baseline or a fresh manual test exists
+
+### Requirement: Release evidence protects private data and source history
+
+Release records MUST exclude credentials, tokens, cookies, household identities,
+request titles, internal/live URLs, rating keys, server/account identifiers,
+viewing data and raw upstream output. Merged-candidate and post-tag facts that
+cannot exist in the reviewed pre-tag commit SHALL be recorded in the immutable
+GitHub Release without a post-release source commit.
+
+#### Scenario: Candidate facts are recorded after merge
+
+- **WHEN** a merged candidate digest or post-tag verification becomes available
+- **THEN** it is recorded in the GitHub Release with generic results and no
+  private material or extra source commit
+
+### Requirement: Candidate verification follows protected-main merge
+
+Release preparation and applicable archived changes SHALL be squash-merged through
+required check, e2e, container-smoke and CodeQL gates before tagging. The main
+workflow SHALL publish an immutable commit-SHA candidate with verifiable provenance.
+Before tagging, verify its amd64/arm64 manifest, attestation, public package
+visibility, anonymous pull, clean deployment, non-root runtime, health, SPA and
+named-volume persistence.
+
+#### Scenario: Candidate must be verified before tagging
+
+- **WHEN** protected main publishes a release candidate
+- **THEN** every listed candidate check passes and disposable resources are
+  removed before the stable tag is created
+
+### Requirement: Stable aliases are verified before immutable publication
+
+Before the immutable GitHub Release, the release procedure SHALL verify that
+`2.4.0`, `2.4`, `2` and `latest` resolve to the release commit, the SHA candidate
+retains its recorded digest, and the stable manifest, artifact attestation and
+fresh tagged deployment pass.
+
+#### Scenario: Tagged image is verified separately
+
+- **WHEN** the stable image workflow finishes
+- **THEN** stable aliases, manifest, attestation and a disposable fresh install
+  pass without replacing the previously verified SHA candidate
+
+### Requirement: Rollback respects the prior release schema
+
+Immediate rollback from v2.4.0 SHALL target the immutable v2.3.1 digest only after
+restoring a validated matching backup or downgrading with the current image through
+`0010` → `0009` → `0008` → `0007` → `0006`, documenting all destructive limits.
+Rollback across migration `0006` to v1.1 SHALL first downgrade to `0005` with a v2
+image or restore a validated matching pre-upgrade backup.
+
+#### Scenario: Previous stable image never opens the new schema
+
+- **WHEN** an operator rolls back v2.4.0 to v2.3.1
+- **THEN** the writer is stopped and the documented backup or downgrade procedure
+  reaches revision `0006` before the old image starts
+- **AND** warnings cover Trakt/Jellyfin links and history, source preferences,
+  users without Seerr, their local data and every session
+
+### Requirement: SemVer covers supported operator contracts
+
+SemVer SHALL cover configuration/environment variables, the image and its tags,
+the health endpoint, persisted data and upgrade/downgrade paths, and documented
+operator procedures. The bundled SPA's private `/api/v1` backend SHALL be versioned
+with its frontend and excluded from supported SemVer integration contracts.
+
+#### Scenario: Internal response change ships with its only client
+
+- **WHEN** a private SPA response changes with the bundled frontend while
+  supported operator contracts remain compatible
+- **THEN** the internal change alone does not require a major release
+
+#### Scenario: Operator contract incompatibility requires a major release
+
+- **WHEN** a supported operator contract breaks or a manual migration is required
+- **THEN** the release uses a new major version

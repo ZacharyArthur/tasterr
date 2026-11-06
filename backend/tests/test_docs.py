@@ -91,12 +91,12 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "This is a Compose concern, not an application requirement" in configuration
 
     releasing = _read(DOCS / "RELEASING.md")
-    evidence = _read(DOCS / "releases" / "v2.3.1.md")
+    evidence = _read(DOCS / "releases" / "v2.4.0.md")
     assert "OWNER/REPOSITORY" not in readme + releasing + evidence
     assert "empty **public** `ZacharyArthur/tasterr` repository" in releasing
     assert "`check`, `e2e`, `container-smoke`, and `CodeQL`" in releasing
     assert "leave the existing `sha-<full-commit>` candidate unchanged" in releasing
-    assert "pin the `2.3.1` digest" in releasing
+    assert "pin the `2.4.0` digest" in releasing
     assert "GitHub Release is the authoritative post-tag record" in releasing
     assert "do not create a post-release evidence commit" in releasing
     assert "do not move, delete, or reuse the published tag" in releasing
@@ -107,6 +107,7 @@ def test_readme_links_every_living_operator_document() -> None:
     assert "artifact attestations" in evidence
     assert "immutable GitHub Releases are enabled" in evidence
     assert "do not use a create-and-push shortcut" in releasing
+    assert "Jellyfin, and Trakt contracts" in releasing
 
 
 def test_agpl_license_is_declared_consistently() -> None:
@@ -151,7 +152,7 @@ def test_release_check_is_deterministic_and_keeps_external_checks_explicit() -> 
     assert "just release-check" in releasing
     assert "just audit" in releasing
     assert "just test-live" in releasing
-    assert "v2.3.1" in releasing
+    assert "v2.4.0" in releasing
     assert "archive <change-id>" in releasing
 
 
@@ -159,7 +160,7 @@ def test_public_security_policy_is_private_and_actionable() -> None:
     policy = _read(ROOT / "SECURITY.md")
     engineering = _read(DOCS / "SECURITY.md")
 
-    assert "2.3.x" in policy
+    assert "2.4.x" in policy
     assert "Security → Advisories → Report a vulnerability" in policy
     assert "Do not open a public issue" in policy
     assert "three business days" in policy
@@ -188,7 +189,7 @@ def test_plex_operator_docs_cover_privacy_recovery_and_release_order() -> None:
         "Manage Library Access",
         "downgrade to `0005`",
         "TASTERR_LIVE_PLEX_OWNER_TOKEN",
-        "Every v2.3 release candidate",
+        "Every v2.4 release candidate",
     ):
         assert term in configuration
     for term in (
@@ -212,12 +213,40 @@ def test_published_compose_documents_every_setting_and_compose_variable() -> Non
     assert not (expected - documented), f"compose.example.yaml is missing: {expected - documented}"
 
 
-def test_account_operator_docs_cover_unreleased_upgrade_and_member_controls() -> None:
+def test_account_operator_docs_cover_release_upgrade_and_member_controls() -> None:
     for path in (ROOT / "README.md", DOCS / "CONFIGURATION.md", DOCS / "ARCHITECTURE.md"):
         text = _read(path)
         for term in ("/account", "Jellyfin", "initials", "0007", "0009"):
             assert term in text, f"{path.name} is missing {term}"
         assert re.search(r"90-day absolute|absolutely 90 days", text), path.name
-    notes = _read(DOCS / "releases" / "unreleased.md")
-    for term in ("PLEX_SERVER_ID", "JELLYFIN_ALLOW_EMPTY_PASSWORD", "0007", "0008", "0009"):
+    notes = _read(DOCS / "releases" / f"v{VERSION}.md")
+    for term in (
+        "PLEX_SERVER_ID",
+        "JELLYFIN_ALLOW_EMPTY_PASSWORD",
+        "TASTERR_HIDE_WATCHED_ITEMS",
+        "TASTERR_WATCH_HISTORY_DAYS",
+        "TASTERR_SIGN_IN_METHODS",
+        "TRAKT_CLIENT_ID",
+        "TRAKT_CLIENT_SECRET",
+        "0007",
+        "0008",
+        "0009",
+        "0010",
+        "watched_trakt",
+        "204 with no body",
+    ):
         assert term in notes
+
+    contributing = _read(ROOT / "CONTRIBUTING.md")
+    for term in (
+        "configuration/environment variables",
+        "image and its tags",
+        "health endpoint",
+        "persisted data",
+        "upgrade/downgrade paths",
+        "documented operator procedures",
+        "private",
+        "`/api/v1`",
+        "not covered by SemVer",
+    ):
+        assert term in contributing

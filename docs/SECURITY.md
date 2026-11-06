@@ -246,7 +246,7 @@ validated-backup procedure in [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-ro
 - [ ] Security review pass over the full diff since the last tag.
 - [ ] Live contract tests against the home Seerr instance pass and the tested Seerr
       version is recorded, or the narrow release-owner exception in
-      [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-plex-and-jellyfin-contracts) is recorded.
+      [RELEASING.md section 5](RELEASING.md#5-run-live-seerr-plex-jellyfin-and-trakt-contracts) is recorded.
 - [ ] Opt-in Plex contracts pass for every available owner/managed/shared role with
       standard TLS, machine identity, per-row history identity, account-scoped
       Continue Watching, and TMDB GUID mapping with redacted evidence, or the same
@@ -254,6 +254,10 @@ validated-backup procedure in [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-ro
 - [ ] Opt-in Jellyfin contracts pass, including disposable-account cleanup,
       empty password, lockout, deleted-user 404, shared DeviceId/token logout,
       user policy, played items, and series ids. Record the tested Jellyfin version.
+- [ ] Opt-in Trakt API v2 contracts pass: device flow, required headers/fixed hosts,
+      settings identity, activities, bounded history, pagination/date narrowing
+      where data exists, refresh and revoke. The 420 community-app limit remains
+      unit-tested because it cannot safely be induced live.
 - [ ] `.env.example` contains placeholders only — no real values, no real hostnames.
 
 - [ ] `just release-check` passes in the devcontainer (ordinary gate + browser +
