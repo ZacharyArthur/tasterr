@@ -40,6 +40,9 @@ any non-`/api` path, while unknown `/api/v1/*` paths return a JSON 404.
 ### Requirement: SPA shell is auth-gated
 
 The SPA SHALL resolve auth state from `GET /api/v1/auth/me` on load.
+
+#### Details
+
 Unauthenticated visitors see the login screen; authenticated users see the routed
 application shell — a navigation bar (current user, logout control, search entry
 point, an Account entry for every user, and an admin-only Settings entry) hosting

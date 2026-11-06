@@ -17,11 +17,15 @@ from itertools import zip_longest
 
 from pydantic import SecretStr
 
+from tasterr.cache import Cache
 from tasterr.catalog.discovery import DiscoveryFilter
+from tasterr.catalog.jellyfin import resume_candidates as jellyfin_resume_candidates
 from tasterr.catalog.models import MediaSummary, MediaType, RailKind, ServiceOption
 from tasterr.catalog.plex import PlexCatalogService
+from tasterr.catalog.resume import ResumeCandidate, continue_watching
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamError
+from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.db.models import User
 from tasterr.recommend.service import TasteService
 from tasterr.runtime_settings import RailType
@@ -48,6 +52,9 @@ class RailContext:
     taste: TasteService | None = None
     plex: PlexCatalogService | None = None
     plex_account_token: SecretStr | None = None
+    jellyfin: JellyfinClient | None = None
+    jellyfin_user_id: str | None = None
+    resume_cache: Cache = field(default_factory=Cache, repr=False)
     disabled_rail_types: frozenset[RailType] = frozenset()
     catalog_succeeded: bool = False
 
@@ -144,15 +151,27 @@ def personalized_home_providers(
 
 
 def continue_watching_provider(ctx: RailContext) -> RailProvider | None:
-    """Caller-scoped live Plex provider; no request DB session is involved."""
-    if ctx.user is None or ctx.plex is None or ctx.plex_account_token is None:
+    """Caller-scoped live resume provider; no request DB session is involved."""
+    if (
+        ctx.user is None
+        or not ctx.enabled(RailType.CONTINUE_WATCHING)
+        or not (
+            (ctx.plex is not None and ctx.plex_account_token is not None)
+            or (ctx.jellyfin is not None and ctx.jellyfin_user_id is not None)
+        )
+    ):
         return None
-    plex = ctx.plex
     user_id = ctx.user.id
-    account_token = ctx.plex_account_token
 
     async def fetch(_: RailContext) -> list[MediaSummary]:
-        return await plex.continue_watching(user_id, account_token.get_secret_value())
+        sources: list[Callable[[], Awaitable[list[ResumeCandidate]]]] = []
+        plex, token = ctx.plex, ctx.plex_account_token
+        if plex is not None and token is not None:
+            sources.append(lambda: plex.resume_candidates(token.get_secret_value()))
+        jellyfin, linked_id = ctx.jellyfin, ctx.jellyfin_user_id
+        if jellyfin is not None and linked_id is not None:
+            sources.append(lambda: jellyfin_resume_candidates(jellyfin, linked_id))
+        return await continue_watching(ctx.resume_cache, ctx.catalog, user_id, sources)
 
     return RailProvider(
         "continue-watching",

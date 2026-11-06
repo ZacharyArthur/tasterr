@@ -1,7 +1,7 @@
 import type { KeyboardEventHandler } from "react";
 import { Link, type Location, useLocation } from "react-router";
 import type { MediaSummary } from "../lib/api";
-import { useAvailabilityFor } from "../lib/availability";
+import { useAvailabilityFor, useConfig } from "../lib/availability";
 import { posterUrl } from "../lib/images";
 import { AvailabilityBadge } from "./AvailabilityBadge";
 
@@ -13,6 +13,7 @@ export function MediaCard({
 	onKeyDown?: KeyboardEventHandler<HTMLAnchorElement>;
 }) {
 	const location = useLocation();
+	const language = useConfig().data?.metadata_language;
 	const poster = posterUrl(item.poster_path);
 	const availability = useAvailabilityFor(item);
 	const inDetail = location.pathname.startsWith("/title/");
@@ -45,11 +46,15 @@ export function MediaCard({
 					<img
 						src={poster}
 						alt={item.title}
+						lang={language}
 						loading="lazy"
 						className="h-full w-full object-cover motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:scale-105"
 					/>
 				) : (
-					<div className="flex h-full items-center justify-center p-2 text-center text-xs text-app-muted-text">
+					<div
+						lang={language}
+						className="flex h-full items-center justify-center p-2 text-center text-xs text-app-muted-text"
+					>
 						{item.title}
 					</div>
 				)}
@@ -78,7 +83,9 @@ export function MediaCard({
 					</div>
 				)}
 			</div>
-			<p className="mt-1 truncate text-sm text-app-text">{item.title}</p>
+			<p lang={language} className="mt-1 truncate text-sm text-app-text">
+				{item.title}
+			</p>
 			{item.year !== null && (
 				<p className="text-xs text-app-muted-text">{item.year}</p>
 			)}

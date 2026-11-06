@@ -11,7 +11,11 @@ Blend the caller and selected household members into ephemeral recommendations u
 dependency and return known local Tasterr users using only local id, display name,
 avatar URL, and `has_taste_signals`, which SHALL be true exactly when that user has
 at least one stored taste signal of a kind that counts toward their profile (not
-from a source they switched off). Whether a member switched sources off SHALL NOT
+from a source they switched off).
+
+#### Details
+
+Whether a member switched sources off SHALL NOT
 be revealed. The list SHALL include the caller and SHALL be
 ordered by ascending local user id. This coarse
 activity boolean is sufficient for selection but SHALL NOT claim that upstream
@@ -58,7 +62,11 @@ perform no profile/catalog/Plex work.
 
 `POST /api/v1/recommendations/household-blend` SHALL require a valid session,
 same-origin evidence, the shared authenticated mutation rate limit, and an
-explicit body containing two to six unique positive local user ids. The caller's
+explicit body containing two to six unique positive local user ids.
+
+#### Details
+
+The caller's
 id SHALL be present and every selected user SHALL exist and have sufficient taste.
 For this endpoint, sufficient taste SHALL mean `has_taste_signals=true`; after
 validation, if normal materialization produces an empty profile for any selected
@@ -105,7 +113,11 @@ The blend service SHALL compute the normalized arithmetic mean of the selected
 users' normalized taste profiles, build a union of their existing candidate
 sources capped by the shared `CANDIDATE_CAP = 150`,
 and exclude a title when any selected member has hidden it or
-already has a strong-positive engagement with it. Remaining candidates SHALL use
+already has a strong-positive engagement with it.
+
+#### Details
+
+Remaining candidates SHALL use
 the existing quality, single availability boost, and diversity ranking against
 the combined profile. The response SHALL be one standard rail with id
 `household-blend` and title **Something for Everyone Tonight**, or no rail when
@@ -141,7 +153,11 @@ be serialized or logged.
 ### Requirement: Household audience selection is ephemeral and non-blocking
 
 The SPA SHALL render an inline, keyboard/remote-accessible audience picker on Home
-when the capability is enabled and at least two eligible members exist. It SHALL
+when the capability is enabled and at least two eligible members exist.
+
+#### Details
+
+It SHALL
 use a native disclosure collapsed by default; opening it reveals the picker and a
 requested result, while collapsing it hides them without affecting ordinary Home
 rails. The caller SHALL remain selected; the user MAY select up to five additional

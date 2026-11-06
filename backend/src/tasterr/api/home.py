@@ -18,13 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tasterr.api.availability import AvailabilityDep
 from tasterr.api.catalog import CatalogDep
 from tasterr.api.runtime_settings import RuntimeSettingsDep
-from tasterr.api.taste import schedule_history
-from tasterr.auth.crypto import decrypt_token, plex_client_identifier
+from tasterr.api.taste import build_jellyfin, build_plex_media, schedule_history
+from tasterr.auth.crypto import decrypt_token
 from tasterr.auth.deps import AuthedSession, get_db, require_session
 from tasterr.auth.login import get_link
 from tasterr.catalog.models import HomeFeed, RailsPage
 from tasterr.catalog.plex import PlexCatalogService
-from tasterr.clients.plex import PlexMediaClient
 from tasterr.rails.composer import build_extra_rails, build_home
 from tasterr.rails.registry import RailContext
 from tasterr.recommend.service import TasteService
@@ -63,16 +62,21 @@ async def get_home(
             pass
         else:
             plex = PlexCatalogService(
-                PlexMediaClient(
-                    request.app.state.http,
-                    plex_client_identifier(secret_key),
-                    max_connection_probes=settings.tasterr_plex_max_connection_probes,
-                    server_id=settings.plex_server_id,
-                ),
+                build_plex_media(request, settings, secret_key),
                 catalog,
                 request.app.state.catalog_cache,
             )
     taste = TasteService(db, catalog, availability)
+    jellyfin = None
+    jellyfin_user_id = None
+    if (
+        settings.jellyfin_configured
+        and RailType.CONTINUE_WATCHING not in runtime.disabled_rail_types
+    ):
+        jellyfin_link = await get_link(db, authed.user.id, "jellyfin")
+        if jellyfin_link is not None:
+            jellyfin = build_jellyfin(request, settings)
+            jellyfin_user_id = jellyfin_link.external_id
     feed = await build_home(
         RailContext(
             catalog,
@@ -80,6 +84,9 @@ async def get_home(
             taste=taste,
             plex=plex,
             plex_account_token=plex_account_token,
+            jellyfin=jellyfin,
+            jellyfin_user_id=jellyfin_user_id,
+            resume_cache=request.app.state.catalog_cache,
             disabled_rail_types=frozenset(runtime.disabled_rail_types),
         )
     )

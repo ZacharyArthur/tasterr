@@ -117,6 +117,7 @@ async def test_first_import_commits_attempt_before_reads_and_batches_writes(
             SECRET,
             encrypt_token(SECRET, "account-token"),
             user_id,
+            timedelta(days=365),
         )
 
         assert history.account_token == "account-token"
@@ -157,7 +158,7 @@ async def test_absent_pinned_server_does_not_advance_watermark(tmp_path: Path) -
             history = PlexCatalogService(plex, None, Cache())
             assert await history.continue_watching(user_id, "token") == []
             await taste_api.import_plex_history(
-                maker, history, SECRET, encrypt_token(SECRET, "token"), user_id
+                maker, history, SECRET, encrypt_token(SECRET, "token"), user_id, timedelta(days=365)
             )
         async with maker() as db:
             link = await plex_link(db, user_id)
@@ -180,6 +181,7 @@ async def test_partial_import_persists_facts_without_advancing_overlap_watermark
             SECRET,
             encrypt_token(SECRET, "token"),
             user_id,
+            timedelta(days=365),
         )
 
         assert history.viewed_after == int(
@@ -224,6 +226,7 @@ async def test_import_failure_log_omits_private_exception_text(
             SECRET,
             encrypt_token(SECRET, "account-token"),
             user_id,
+            timedelta(days=365),
         )
 
         assert "plex history: import failed" in caplog.text
@@ -250,6 +253,7 @@ async def test_failed_attempt_commit_runs_no_network_and_leaves_no_timestamp(
             SECRET,
             encrypt_token(SECRET, "token"),
             user_id,
+            timedelta(days=365),
         )
 
         assert history.calls == 0
@@ -280,6 +284,7 @@ async def test_fresh_database_attempt_suppresses_a_stale_request_import(tmp_path
             SECRET,
             encrypt_token(SECRET, "token"),
             user_id,
+            timedelta(days=365),
         )
 
         assert history.calls == 0

@@ -6,7 +6,12 @@ Authenticate members through configured Plex, Seerr, or Jellyfin providers, reso
 ## Requirements
 
 ### Requirement: Plex PIN login flow
-The system SHALL implement Plex PIN login. `POST /api/v1/auth/plex/pin` creates a
+
+The system SHALL implement Plex PIN login.
+
+#### Details
+
+`POST /api/v1/auth/plex/pin` creates a
 PIN at plex.tv (product `Tasterr`, a stable client identifier) and returns an
 opaque poll handle plus the plex.tv approval URL. The handle is polled with a
 same-origin-protected `POST /api/v1/auth/plex/pin/poll` carrying
@@ -103,9 +108,14 @@ the account exists.
   password and unknown account
 
 ### Requirement: Tasterr session lifecycle
+
 Sessions SHALL use a 256-bit random token delivered as an HttpOnly, `SameSite=Lax`
 cookie, marked `Secure` when the request is HTTPS (respecting proxy forwarding
-headers). Only the token's SHA-256 hash is stored. Sessions expire 30 days after
+headers).
+
+#### Details
+
+Only the token's SHA-256 hash is stored. Sessions expire 30 days after
 last activity (sliding) and SHALL never outlive 90 days from creation, whatever
 the activity, so every member signs in again at least every 90 days and the
 sign-in gate and admin derivation re-run. Every login mints a fresh token; validation of an
@@ -136,13 +146,20 @@ expired or unknown token fails with 401 and expired rows are deleted.
 ### Requirement: Upstream session material is protected at rest
 
 Upstream credentials SHALL be stored only on the owning user's linked-account
-row, never on Tasterr session rows, and never sent to the browser. The Seerr
+row, never on Tasterr session rows, and never sent to the browser.
+
+#### Details
+
+The Seerr
 session cookie (Seerr link) and the Plex account token (Plex link) SHALL each be
 stored encrypted with Fernet keyed from `TASTERR_SECRET_KEY`. The Seerr cookie
 MAY be decrypted only to create the member's own Seerr requests. The Plex token
 MAY be decrypted only for silent Seerr re-authentication, Seerr linking with the
 `plex` method, admin and display identity checks, or the owning user's bounded Plex account/resource/PMS reads and
-history task. Credentials SHALL survive logout and session expiry and SHALL be
+history task. The Trakt token set (Trakt link) SHALL be stored encrypted the
+same way and MAY be decrypted only for the owning user's Trakt history task,
+token refresh, and best-effort revocation on unlink or account deletion.
+Credentials SHALL survive logout and session expiry and SHALL be
 deleted when their link is unlinked or the user is deleted. Plex resource access
 tokens discovered for PMS communication SHALL be call-local and SHALL NOT be
 persisted.
@@ -152,6 +169,12 @@ persisted.
 - **WHEN** a Plex sign-in completes and the linked-account rows are inspected
 - **THEN** the Plex token and Seerr cookie columns hold only Fernet ciphertext,
   and the session row holds neither
+
+#### Scenario: No plaintext Trakt token at rest
+
+- **WHEN** a Trakt link completes and the linked-account row is inspected
+- **THEN** its credential column holds only Fernet ciphertext and no session row
+  holds a Trakt token
 
 #### Scenario: Local session has no Plex token
 
@@ -213,8 +236,13 @@ dependencies rather than re-implementing checks.
 - **THEN** the response is 403
 
 ### Requirement: Login endpoints are hardened
+
 Mutating auth endpoints SHALL enforce a same-origin check (`Sec-Fetch-Site` /
-`Origin`). The login-start endpoints (`/auth/plex/pin`, `/auth/local`, `/auth/jellyfin`) SHALL be
+`Origin`).
+
+#### Details
+
+The login-start endpoints (`/auth/plex/pin`, `/auth/local`, `/auth/jellyfin`) SHALL be
 tightly rate-limited in-process. The Plex PIN poll (`POST /auth/plex/pin/poll`)
 SHALL enforce the same-origin check and SHALL be exempt from the tight login
 rate limit — it polls every ~2s by design behind an unguessable, expiring,
@@ -246,7 +274,11 @@ The login screen SHALL offer exactly the sign-in methods `GET /api/v1/auth/metho
 reports as available, as a full-width stack of rounded pill buttons in the style
 of common single-sign-on buttons, each with its service's mark as inline SVG and a
 "Continue with …" label: "Continue with Plex", "Continue with Jellyfin", and
-"Continue with Seerr", in that order. A method
+"Continue with Seerr", in that order.
+
+#### Details
+
+A method
 that needs credentials SHALL expand its email/password (or, for Jellyfin, username/password) form in place when
 activated. Plex sign-in SHALL attempt to open a script-created popup
 context directly from the user's activation, sever that context's access to its
@@ -396,10 +428,18 @@ or influence cookie security.
 
 `GET /api/v1/auth/methods` SHALL be unauthenticated by explicit decision (the
 login screen needs it before a session exists) and SHALL return only booleans for
-each sign-in method: `plex` (true when `PLEX_SERVER_ID` is set or Seerr is
-configured), `jellyfin` (true when the Jellyfin URL and API key are set), and
-`seerr` (true when Seerr is configured), each also requiring
-`TASTERR_SECRET_KEY`. It SHALL NOT return URLs, server ids, keys, or any other
+each sign-in method: `plex` (configured when `PLEX_SERVER_ID` is set or Seerr is
+configured), `jellyfin` (configured when the Jellyfin URL and API key are set),
+and `seerr` (configured when Seerr is configured), each also requiring
+`TASTERR_SECRET_KEY`.
+
+#### Details
+
+A method SHALL be reported true only when it is configured
+**and** offered by the admin sign-in allowlist (see `app-settings`). A method is
+**available for sign-in** exactly when this endpoint reports it true; every rule
+that refers to an available sign-in method uses this definition. The endpoint
+SHALL NOT return URLs, server ids, keys, the allowlist itself, or any other
 configuration, and SHALL perform no upstream call.
 
 #### Scenario: Methods reflect configuration
@@ -412,11 +452,29 @@ configuration, and SHALL perform no upstream call.
 - **WHEN** every integration is configured and the response is inspected
 - **THEN** it contains only method booleans and no URL, id, or secret
 
+#### Scenario: Allowlist hides a configured method
+
+- **WHEN** Plex, Jellyfin, and Seerr are configured and the admin offers only
+  Jellyfin
+- **THEN** the response is `plex: false, jellyfin: true, seerr: false`, and the
+  login screen shows only "Continue with Jellyfin"
+
+#### Scenario: Hidden method is refused
+
+- **WHEN** Plex is configured but not offered and a client calls the Plex sign-in
+  PIN endpoint directly
+- **THEN** the response is the generic 503 "authentication unavailable" and no
+  plex.tv call is made
+
 ### Requirement: Auth degrades when no sign-in method is available
 
 When `TASTERR_SECRET_KEY` is unset or no sign-in method is available, sign-in
 endpoints SHALL return 503 with a generic "authentication unavailable" error, and
-an endpoint for an unavailable method SHALL do the same. When an upstream needed
+an endpoint for an unavailable method SHALL do the same.
+
+#### Details
+
+When an upstream needed
 for a sign-in has an outage (transport error, timeout, or HTTP 502, 503, or 504,
 as defined in `account-linking`), that sign-in SHALL fail with a generic
 upstream-unavailable error that carries no upstream body or internal URL. Seerr

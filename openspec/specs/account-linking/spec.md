@@ -9,8 +9,13 @@ how admin and display identity derive from links, and the member account page.
 
 ### Requirement: Users are Tasterr-owned and hold linked accounts
 
-A Tasterr user SHALL be identified only by its local id. External identities
-SHALL be stored as linked accounts: a provider (`plex`, `jellyfin`, or `seerr`), the
+A Tasterr user SHALL be identified only by its local id.
+
+#### Details
+
+External identities
+SHALL be stored as linked accounts: a provider (`plex`, `jellyfin`, `seerr`, or
+`trakt`; `trakt` is a link-only provider, see `trakt-personalization`), the
 provider's stable account id, a display name, an optional avatar URL, an
 optional Fernet-encrypted credential, sync attempt/success timestamps, and a
 link time. A user SHALL hold at most one linked account per provider, and a
@@ -40,6 +45,11 @@ let anyone, including an admin, assign or edit a link by id.
 - **THEN** its credential, display name, and avatar are refreshed in place
 
 ### Requirement: Sign-in resolves the user through linked accounts
+
+Every sign-in SHALL resolve one Tasterr user through the linked-account
+resolution order, with the specified conflict and outage handling.
+
+#### Details
 
 Every sign-in SHALL resolve exactly one Tasterr user in this order: (1) the user
 already linked to the sign-in account; otherwise (2) when the Seerr auto-link
@@ -125,11 +135,18 @@ SHALL proceed; where Seerr is the sign-in gate, its outage still fails sign-in.
 When Seerr is configured, each Plex sign-in SHALL attempt a Seerr login with the
 same Plex token, each Jellyfin sign-in SHALL attempt Seerr's Jellyfin login with
 the same username and password within that request, and each Seerr local sign-in
-is itself that Seerr login. A Seerr refusal SHALL NOT block a Jellyfin sign-in; a
-Seerr outage SHALL block only a sign-in that would create a new user. A
-successful attempt SHALL link that Seerr account when the resolved user has no
-Seerr link, has never unlinked Seerr (`users.seerr_unlinked_at` is null), and the
-account is unlinked, and SHALL refresh the stored Seerr cookie
+is itself that Seerr login.
+
+#### Details
+
+A Plex or Jellyfin attempt SHALL be skipped, without
+contacting Seerr's login endpoint, when Seerr is known to refuse that method (as
+defined in "Seerr login methods follow Seerr's own settings"); a skipped attempt
+SHALL be treated exactly as a Seerr refusal. A Seerr refusal SHALL NOT block a
+Jellyfin sign-in; a Seerr outage SHALL block only a sign-in that would create a
+new user. A successful attempt SHALL link that Seerr account when the resolved
+user has no Seerr link, has never unlinked Seerr (`users.seerr_unlinked_at` is
+null), and the account is unlinked, and SHALL refresh the stored Seerr cookie
 when it is the user's linked Seerr account. When the user's Seerr link is a
 different Seerr account, the result SHALL be discarded. Credentials used for the
 attempt SHALL NOT be stored or logged.
@@ -146,6 +163,19 @@ attempt SHALL NOT be stored or logged.
   same Jellyfin credentials
 - **THEN** that Seerr account is linked with its encrypted cookie and the
   password is discarded
+
+#### Scenario: Jellyfin credentials are not sent to a Plex-backed Seerr
+
+- **WHEN** a user signs in with Jellyfin and Seerr's public settings report a
+  Plex media server
+- **THEN** Seerr's Jellyfin login endpoint is not called, sign-in succeeds, and no
+  Seerr link is created
+
+#### Scenario: Unknown Seerr settings keep the attempt
+
+- **WHEN** a user signs in with Jellyfin and Seerr's public settings cannot be
+  read or lack the media server fields
+- **THEN** the Seerr Jellyfin login is attempted as before
 
 #### Scenario: Sign-in refreshes the Seerr cookie
 
@@ -166,6 +196,11 @@ attempt SHALL NOT be stored or logged.
 
 ### Requirement: Admin derives from any linked account
 
+At each sign-in, `is_admin` SHALL be derived from all configured linked accounts
+using their provider-specific grants and outage rules.
+
+#### Details
+
 At each sign-in, `is_admin` SHALL be re-derived from every linked account the
 user holds, not only the sign-in account: a Seerr link grants admin when that
 Seerr user's permissions (read by id with the global API key) include ADMIN (bit
@@ -180,8 +215,15 @@ errors only on an outage (transport error, timeout, or HTTP 502, 503, or 504);
 any other failure, including a 404 for a deleted upstream user or a 401 for a
 revoked token, completes without a grant. A provider's check exists only while that
 provider is configured: a link to a provider the operator has since unconfigured
-neither grants admin nor counts as an error. Admin SHALL NOT be re-derived on link, unlink, or between
+neither grants admin nor counts as an error. A Trakt link SHALL have no admin
+check: it never grants admin and never counts as an error. Admin SHALL NOT be re-derived on link, unlink, or between
 sign-ins.
+
+#### Scenario: Trakt link never grants admin
+
+- **WHEN** a member whose only other link is a shared Plex account signs in with a
+  Trakt link present
+- **THEN** no Trakt call is made for admin derivation and `is_admin` is false
 
 #### Scenario: Seerr admin bit grants admin
 
@@ -227,7 +269,11 @@ sign-ins.
 
 At each sign-in, the user's display name and avatar URL SHALL be refreshed from
 the highest-priority linked account that answers: Seerr, then Plex, then
-Jellyfin. Values from
+Jellyfin.
+
+#### Details
+
+Values from
 the sign-in itself SHALL be used where available; otherwise stored link values
 SHALL be used. Users SHALL NOT override their display name. Avatar URLs SHALL come
 only from the Seerr user record or the plex.tv account, never from Jellyfin
@@ -251,14 +297,23 @@ the user's initials, not an avatar image, for every user.
 
 ### Requirement: Members view and manage their own linked accounts
 
+Members SHALL view and manage only their own linked accounts through
+session-gated endpoints, with provider admission, credential handling, rate limits,
+and link-handle isolation enforced.
+
+#### Details
+
 `GET /api/v1/account` SHALL require the shared session dependency and return,
 for each provider configured on this server (a provider is configured when its
-sign-in method is available as `/auth/methods` reports it: Plex when
-`PLEX_SERVER_ID` is set or Seerr is configured, Jellyfin when its URL and API key
-are set, Seerr when Seerr is configured, each also requiring
-`TASTERR_SECRET_KEY`), whether the caller has
+integration is set up: Plex when `PLEX_SERVER_ID` is set or Seerr is configured,
+Jellyfin when its URL and API key are set, Seerr when Seerr is configured, Trakt
+when its client id is set (its client secret is optional), each
+also requiring `TASTERR_SECRET_KEY`; the admin sign-in allowlist does not affect
+whether a provider is configured), whether the caller has
 it linked and
-that link's display name and link time, plus whether unlinking is allowed. A
+that link's display name and link time, whether unlinking is allowed, and
+whether the provider is currently available for sign-in (`sign_in`, as defined in
+`user-auth`; always false for Trakt). A
 provider the caller has linked but that is no longer configured SHALL also be
 returned, flagged `available: false`. A provider that is neither configured nor
 linked but for which the caller still has imported signals SHALL also be
@@ -277,11 +332,15 @@ caller's stored Plex token; 409 when the caller has no Plex link), `jellyfin` (J
 forwarded once to Seerr's Jellyfin login), offered and accepted only while Jellyfin is
 configured (otherwise 503), or `local` (email and password forwarded
 once to
-Seerr). A link-creation endpoint for a provider whose sign-in method is unavailable
-SHALL return 503 and store nothing; unlinking is never blocked by availability. A link SHALL be created only when the account would be admitted by signing in
-with it at that moment (for Plex, the active Plex sign-in gate: Seerr accepting
+Seerr); Trakt via the device-code flow defined in `trakt-personalization`. A link-creation endpoint for a provider that is not configured SHALL
+return 503 and store nothing; linking a configured provider SHALL NOT depend on
+whether it is offered for sign-in; unlinking is never blocked by availability. A
+Plex, Jellyfin, or Seerr link SHALL be created only when the account would pass that provider's sign-in
+admission checks at that moment (Trakt has no sign-in, so a Trakt link needs only
+a completed device authorization), regardless of the sign-in allowlist (for Plex,
+the active Plex sign-in gate: Seerr accepting
 the token when `PLEX_SERVER_ID` is unset); otherwise the attempt SHALL fail with a
-generic 403 and store nothing, so every link is a real way to sign in. When the admission check cannot complete
+generic 403 and store nothing. When the admission check cannot complete
 because of an upstream outage, the attempt SHALL fail with the generic upstream
 error and store nothing. A Seerr
 login made only to check a Plex link's admission SHALL be discarded: it never
@@ -299,7 +358,8 @@ the link poll SHALL refuse sign-in handles the same way. Failures SHALL be gener
 - **THEN** the response lists configured providers, plus any linked provider no
   longer configured, and any unconfigured provider with retained imported
   signals, the last two flagged `available: false`, each with linked state,
-  display name, link time, and unlink eligibility, and no ids or credentials
+  display name, link time, unlink eligibility, and sign-in availability, and no
+  ids or credentials
 
 #### Scenario: Link Seerr with the stored Plex token
 
@@ -313,6 +373,17 @@ the link poll SHALL refuse sign-in handles the same way. Failures SHALL be gener
 - **WHEN** a member submits Jellyfin credentials the server accepts
 - **THEN** that Jellyfin user is linked by id, no Jellyfin token or password is
   stored, and its history sync becomes eligible
+
+#### Scenario: Link a provider not offered for sign-in
+
+- **WHEN** Plex is configured but not offered for sign-in and a member links Plex
+- **THEN** the link is created, Plex history and Continue Watching work, and the
+  summary reports Plex with `available: true` and `sign_in: false`
+
+#### Scenario: Trakt appears as a link-only provider
+
+- **WHEN** Trakt is configured and a member requests `/account`
+- **THEN** the summary includes Trakt with its linked state and `sign_in: false`
 
 #### Scenario: Plex account the gate would refuse cannot be linked
 
@@ -328,18 +399,25 @@ the link poll SHALL refuse sign-in handles the same way. Failures SHALL be gener
 
 `POST /api/v1/account/links/{provider}/unlink` with `{delete_history: bool}`
 SHALL require a session, the same-origin check, and the authenticated mutation
-bucket. It SHALL first cancel and await that user's in-flight sync for the
+bucket.
+
+#### Details
+
+It SHALL first cancel and await that user's in-flight sync for the
 provider within its deadline, so no batch from it commits afterward, and SHALL
 hold the same per-user scheduling guard as reset until it commits, so no new
-sync can start in between; then delete the link and its credential; for a Plex link, clear the user's cached
-Continue Watching entry; for a Seerr link, set `users.seerr_unlinked_at`
-so sign-in auto-link no longer re-links Seerr; when
+sync can start in between; then delete the link and its credential; for a Plex or
+Jellyfin link, clear the user's cached Continue Watching entry; for a Seerr link,
+set `users.seerr_unlinked_at`
+so sign-in auto-link no longer re-links Seerr; for a Trakt link, revoke its
+token at Trakt after the local commit as defined in `trakt-personalization`; when
 `delete_history` is true it SHALL also delete that source's imported signals
 (`seed_request_history` for Seerr, `watched_plex` for Plex, `watched_jellyfin`
-for Jellyfin) and invalidate the
-profile. It SHALL refuse with 409 when no other remaining link belongs to a sign-in method
+for Jellyfin, `watched_trakt` for Trakt) and invalidate the
+profile. Except for a Trakt link, it SHALL refuse with 409 when no other remaining link belongs to a sign-in method
 that is currently available (as `/auth/methods` would report it), so a member
-cannot strand themselves after a configuration change; the check and the delete
+cannot strand themselves after a configuration change; a Trakt link never counts
+as such a link and unlinking one is never refused by this rule; the check and the delete
 SHALL be one atomic operation so concurrent unlinks
 cannot remove every link. Tasterr
 sessions SHALL stay valid after unlinking, including one signed in with the
@@ -351,11 +429,23 @@ unlinked account. `is_admin` SHALL NOT change until the next sign-in.
 - **THEN** the link and token are gone, `watched_plex` signals remain, and no
   further Plex sync or Continue Watching read occurs
 
+#### Scenario: Unlink Jellyfin clears its Continue Watching
+
+- **WHEN** a member with Plex and Jellyfin links unlinks Jellyfin
+- **THEN** the cached Continue Watching entry is cleared and the next Home load
+  shows only Plex items
+
 #### Scenario: Unlink can delete history
 
 - **WHEN** a member unlinks Plex with `delete_history` true
 - **THEN** their `watched_plex` signals are deleted and their profile is
   invalidated
+
+#### Scenario: Unlink Trakt can delete its history
+
+- **WHEN** a member unlinks Trakt with `delete_history` true
+- **THEN** the link and tokens are gone, their `watched_trakt` signals are deleted,
+  the profile is invalidated, and the token is revoked at Trakt best-effort
 
 #### Scenario: Last link cannot be removed
 
@@ -384,20 +474,32 @@ unlinked account. `is_admin` SHALL NOT change until the next sign-in.
 
 `POST /api/v1/account/delete` SHALL require a session, the same-origin check, the
 authenticated mutation bucket, and a confirmation string equal to the caller's
-current display name. It SHALL cancel and await the caller's in-flight sync tasks
+current display name.
+
+#### Details
+
+It SHALL cancel and await the caller's in-flight sync tasks
 within their deadlines and hold the per-user scheduling guard until the delete
 commits, then delete the user; the user's cached Continue Watching entry SHALL be
 cleared; sessions, links, credentials,
 signals, and profile SHALL be removed by cascade. The response SHALL NOT set,
 clear, or refresh the session cookie: the old cookie no longer authenticates,
 and a delayed deletion response SHALL NOT overwrite a newer sign-in's cookie.
-Nothing SHALL be deleted in any upstream service.
+Nothing SHALL be deleted in any upstream service; the only upstream effect SHALL
+be the best-effort revocation of a Trakt link's token after the local commit, as
+defined in `trakt-personalization`.
 
 #### Scenario: Deletion removes everything local
 
 - **WHEN** a member confirms deletion with their display name
 - **THEN** their user, sessions, links, signals, and profile are gone and the
   old session cookie returns 401
+
+#### Scenario: Deletion revokes Trakt without waiting on it
+
+- **WHEN** a member with a Trakt link deletes their account while Trakt is
+  unreachable
+- **THEN** everything local is deleted and the response succeeds
 
 #### Scenario: Wrong confirmation deletes nothing
 
@@ -419,7 +521,11 @@ Nothing SHALL be deleted in any upstream service.
 ### Requirement: Account page for every member
 
 The SPA SHALL provide an `/account` route for every signed-in user, reached from
-the avatar menu, while `/settings` stays admin-only. It SHALL show a Connected
+the avatar menu, while `/settings` stays admin-only.
+
+#### Details
+
+It SHALL show a Connected
 accounts section with one card per configured provider (linked state, account
 name, Link or Unlink in the sign-in button style) and a danger zone with "Delete
 my Tasterr account". Unconfigured providers SHALL be hidden unless the member has them linked or still
@@ -428,8 +534,13 @@ its taste-source controls, and a linked provider that is no longer configured SH
 available on this server" with Unlink. Unlink SHALL confirm
 with an unticked "Also delete history imported from this account" option and
 SHALL be disabled with "This is your only way to sign in" when no other link can
-currently sign in. Deletion SHALL require
-typing the display name and SHALL state that nothing is deleted in Plex, Jellyfin, or Seerr.
+currently sign in, except on the Trakt card, whose Unlink is never disabled by
+that rule. The Trakt card's Link SHALL open the device-code dialog: the user code,
+a fixed link to `https://auth.trakt.tv/activate` opening in a new tab, a waiting
+state that polls at the returned interval, expired and denied messages with a way
+to start again, and Cancel. Deletion SHALL require
+typing the display name and SHALL state that nothing is deleted in Plex, Jellyfin, Seerr, or Trakt
+(a Trakt connection is revoked).
 A link conflict SHALL show the resolution steps without naming the other user:
 sign in with each account, keep the one you want, delete the other Tasterr
 account from its account page, then link again.
@@ -438,6 +549,12 @@ account from its account page, then link again.
 
 - **WHEN** a non-admin chooses Account from the avatar menu
 - **THEN** `/account` shows their connected accounts and the danger zone
+
+#### Scenario: Member links Trakt from the account page
+
+- **WHEN** a member chooses Link on the Trakt card
+- **THEN** the dialog shows the user code and the trakt.tv activation link, and
+  the card shows Trakt as linked once the member approves on Trakt
 
 #### Scenario: Last link unlink is disabled
 
@@ -459,10 +576,15 @@ account from its account page, then link again.
 
 ### Requirement: Links to an unconfigured provider are dormant
 
-A link whose provider is no longer configured (its sign-in method is not
-currently available) SHALL be dormant: no history sync is scheduled for it, no
-Continue Watching or other media read uses it, it takes part in no admin check,
-and it is not used for silent Seerr re-authentication or Seerr linking. Its
+A link whose provider is no longer configured (as defined in "Members view and
+manage their own linked accounts"; a provider that is configured but not offered
+for sign-in is not dormant) SHALL be dormant: no history sync is scheduled for it,
+no Continue Watching or other media read uses it, it takes part in no admin check,
+and it is not used for silent Seerr re-authentication or Seerr linking.
+
+#### Details
+
+Its
 stored credential SHALL be kept until the member unlinks it or deletes their
 account, so configuring the provider again resumes everything without relinking.
 A dormant link SHALL NOT count as another way to sign in for the unlink rule. The
@@ -470,9 +592,15 @@ member SHALL still be able to unlink it.
 
 #### Scenario: Removed provider stops all activity
 
-- **WHEN** the operator removes Plex sign-in and a member with a Plex link loads
-  Home
+- **WHEN** the operator removes Plex sign-in configuration and a member with a
+  Plex link loads Home
 - **THEN** no Plex history sync is scheduled and no Continue Watching read runs
+
+#### Scenario: Not offered is not dormant
+
+- **WHEN** the admin stops offering Plex for sign-in and a member with a Plex link
+  loads Home
+- **THEN** Plex history sync and Continue Watching continue as before
 
 #### Scenario: Dormant link can be unlinked
 
@@ -490,12 +618,179 @@ member SHALL still be able to unlink it.
 When `PLEX_SERVER_ID` is set, linking a Plex account from the account page SHALL
 require that the account's plex.tv resources include that server, using the
 same check as Plex sign-in; otherwise the link SHALL be refused with a generic
-403 and nothing stored. Linking a Plex account SHALL be available only when Plex
-sign-in is available, and linking a Seerr account only when the Seerr sign-in
-method is available;
+403 and nothing stored.
+
+#### Details
+
+Linking a Plex account SHALL be available only when Plex
+is configured, and linking a Seerr account only when Seerr is configured (as
+defined in "Members view and manage their own linked accounts"), whether or not
+either is offered for sign-in;
 otherwise the link endpoints return 503 and store nothing.
 
 #### Scenario: Plex account without server access cannot be linked
 
 - **WHEN** a member links a Plex account that cannot see the configured server
 - **THEN** the response is a generic 403 and no link or token is stored
+
+#### Scenario: Plex linking works while Plex is not offered for sign-in
+
+- **WHEN** Plex is configured but not offered for sign-in and a member links a
+  Plex account that can see the configured server
+- **THEN** the link is created
+
+### Requirement: Connect Seerr dialog names the active credentials
+
+The Connect Seerr dialog, on the Account page and in the request control, SHALL
+show a fixed caption above its credential fields naming the account they belong
+to: "Sign in with your Seerr account email and password." for Seerr local
+sign-in, and "Sign in with your Jellyfin username and password." for Seerr's
+Jellyfin login.
+
+#### Details
+
+The dialog SHALL open on the Seerr local form when local sign-in
+is offered, otherwise on the Jellyfin form when Seerr's Jellyfin login is
+offered; when neither form is offered it SHALL show no credential form. The
+"Use my Plex account" action SHALL appear whenever the `plex` method is offered
+and usable by the member (they have a usable Plex link), whatever forms are
+offered. The guidance defined in "Seerr login methods follow Seerr's own
+settings" SHALL appear when the member has no usable Plex action and no
+Jellyfin form is offered; the local form MAY show alongside it. So the dialog
+shows guidance alone exactly when it offers no form and no Plex action. Only when both forms are offered,
+a toggle SHALL be shown, labelled by the form it switches to: "Use Jellyfin
+credentials" while the Seerr local form shows, and "Use Seerr email instead"
+while the Jellyfin form shows.
+
+#### Scenario: Default form names Seerr credentials
+
+- **WHEN** a member opens the Connect Seerr dialog and local sign-in is offered
+- **THEN** the Email and Password fields show under the Seerr account caption
+
+#### Scenario: Switching to Jellyfin relabels the dialog
+
+- **WHEN** a member chooses "Use Jellyfin credentials"
+- **THEN** the Username and Password fields show under the Jellyfin caption and
+  the toggle reads "Use Seerr email instead"
+
+#### Scenario: Switching back restores the Seerr form
+
+- **WHEN** a member on the Jellyfin form chooses "Use Seerr email instead"
+- **THEN** the Email and Password fields and the Seerr account caption return and
+  the toggle reads "Use Jellyfin credentials"
+
+#### Scenario: No Jellyfin option still names the credentials
+
+- **WHEN** Jellyfin is not offered, local sign-in is offered, and a member opens
+  the dialog
+- **THEN** no toggle is shown and the Seerr local form shows under the Seerr
+  account caption
+
+#### Scenario: Neither form offered shows guidance only
+
+- **WHEN** neither Seerr local sign-in nor Seerr's Jellyfin login is offered, the
+  member has no usable Plex method, and they open the dialog
+- **THEN** no credential form, toggle, or Plex action is shown, only the guidance
+
+#### Scenario: Neither form offered keeps the Plex action
+
+- **WHEN** Seerr is Plex-backed with media server login on and local login off,
+  and a member with a usable Plex link opens the dialog
+- **THEN** "Use my Plex account" is shown with no credential form, toggle, or
+  guidance
+
+#### Scenario: Local login refused opens the Jellyfin form
+
+- **WHEN** Seerr is known to refuse local login, accepts Jellyfin login, and
+  Jellyfin is configured
+- **THEN** the dialog opens on the Jellyfin form under the Jellyfin caption with
+  no toggle
+
+### Requirement: Members without an offered sign-in method are warned
+
+Turning a sign-in method off SHALL NOT end existing sessions. When none of a
+member's linked providers is available for sign-in, the Account page SHALL show a
+persistent warning that they will not be able to sign in again after this session
+ends, naming the methods currently offered that they can link. The unlink rule's
+"another way to sign in" SHALL count only linked providers available for sign-in,
+so a member cannot unlink their last offered method.
+
+#### Scenario: Stranded member keeps their session and is told
+
+- **WHEN** the admin stops offering Plex and a signed-in member's only link is Plex
+- **THEN** the member stays signed in and their Account page warns them to link
+  Jellyfin or Seerr, whichever are offered
+
+#### Scenario: Last offered method cannot be unlinked
+
+- **WHEN** only Jellyfin is offered and a member with Plex and Jellyfin links
+  unlinks Jellyfin
+- **THEN** the response is 409 and the Jellyfin link is unchanged
+
+### Requirement: Seerr login methods follow Seerr's own settings
+
+Tasterr SHALL derive, from Seerr's public settings, whether Seerr accepts each
+Seerr login method: `plex` when Seerr reports a Plex media server and media
+server login enabled; `jellyfin` when Seerr reports a Jellyfin media server and
+media server login enabled; `local` when Seerr reports local login enabled.
+
+#### Details
+
+A
+method is **known refused** only when the settings were read and the relevant
+fields are present, well-typed, and do not satisfy that condition. Otherwise
+(Seerr unconfigured, unreachable, a failed or malformed read, a missing field, or
+an unrecognized media server value) the method is **unknown** and SHALL be
+treated as accepted, preserving prior behavior. An Emby media server SHALL count
+as refusing `plex` and `jellyfin`. The read SHALL be cached for a bounded time,
+SHALL keep serving the last known value through a bounded outage window, and
+SHALL never block browsing.
+
+`GET /api/v1/account` SHALL include `seerr_accepts` with one boolean per method
+(`plex`, `jellyfin`, `local`), false only when known refused. It SHALL carry no
+other Seerr configuration. `POST /api/v1/account/links/seerr` with a method that
+is known refused SHALL return 409 with a fixed message stating Seerr does not
+accept that sign-in method, SHALL NOT forward the submitted credentials or stored
+token to Seerr, and SHALL store nothing. This check SHALL run after the existing
+availability checks (503 rules are unchanged).
+
+The Account page SHALL offer only Seerr link methods that are not known refused.
+When the member has no Seerr link, no usable `plex` method (offered and backed by
+their usable Plex link), and no offered `jellyfin` method, the page SHALL explain
+the remaining options in plain text, alongside the local form when `local` is
+offered: link Plex when Seerr accepts Plex, or ask the
+household admin for a Seerr local account when Seerr accepts local login, or that
+requests are unavailable for this account otherwise.
+
+#### Scenario: Plex-backed Seerr hides the Jellyfin method
+
+- **WHEN** Seerr reports a Plex media server with media server login and local
+  login enabled, and a member opens the Account page
+- **THEN** `seerr_accepts` is `plex: true, jellyfin: false, local: true` and the
+  Seerr section offers no Jellyfin option
+
+#### Scenario: Refused method is not forwarded
+
+- **WHEN** a member posts a Seerr link with method `jellyfin` while Seerr is
+  known to refuse Jellyfin login
+- **THEN** the response is 409 with the fixed explanation, Seerr receives no
+  login call, and nothing is stored
+
+#### Scenario: Unreadable settings keep every method
+
+- **WHEN** Seerr's public settings cannot be read and no value is cached
+- **THEN** `seerr_accepts` reports every method true and the Account page offers
+  the same methods as before this change
+
+#### Scenario: Jellyfin-only member is told what to do
+
+- **WHEN** a member with only a Jellyfin link opens the Account page and Seerr
+  accepts only Plex and local login
+- **THEN** the Seerr section offers local sign-in and explains that the household
+  admin can create a Seerr local account, or that linking Plex enables requests
+
+#### Scenario: Summary carries no Seerr configuration
+
+- **WHEN** the account summary is inspected
+- **THEN** `seerr_accepts` contains only three booleans and no media server name,
+  URL, or other Seerr setting

@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from tasterr.recommend.features import l2_normalize
-from tasterr.recommend.signals import TitleKey
+from tasterr.recommend.signals import WATCHED_KINDS, SignalKind, TitleKey
 
 HALF_LIFE_DAYS = 90.0
 _SECONDS_PER_DAY = 86400.0
@@ -26,6 +26,7 @@ class SignalInput(NamedTuple):
     key: TitleKey
     weight: float
     created_at: datetime
+    kind: SignalKind
 
 
 def decay_factor(age_days: float) -> float:
@@ -42,7 +43,14 @@ def compute_profile(
     """Signals whose title has no vector are skipped (their titles failed to
     build); they contribute again once the vector exists."""
     profile: dict[str, float] = {}
+    newest: dict[TitleKey, SignalInput] = {}
+    eligible: list[SignalInput] = []
     for signal in signals:
+        if signal.kind not in WATCHED_KINDS:
+            eligible.append(signal)
+        elif signal.key not in newest or signal.created_at > newest[signal.key].created_at:
+            newest[signal.key] = signal
+    for signal in [*eligible, *newest.values()]:
         vector = vectors.get(signal.key)
         if not vector:
             continue

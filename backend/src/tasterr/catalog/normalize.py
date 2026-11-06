@@ -90,12 +90,12 @@ def to_summaries(results: list[TmdbMediaResult], fallback: MediaType | None) -> 
     return out
 
 
-def pick_trailer(videos: list[TmdbVideo]) -> Video | None:
+def pick_trailer(videos: list[TmdbVideo], language: str = "en") -> Video | None:
     youtube = [v for v in videos if v.site == "YouTube" and v.key and _YOUTUBE_KEY.fullmatch(v.key)]
     if not youtube:
         return None
 
-    def rank(video: TmdbVideo) -> int:
+    def rank(video: TmdbVideo) -> tuple[int, int]:
         score = 0
         if video.type == "Trailer":
             score += 4
@@ -103,7 +103,7 @@ def pick_trailer(videos: list[TmdbVideo]) -> Video | None:
             score += 2
         if video.official:
             score += 1
-        return score
+        return _language_rank(video.iso_639_1, language), score
 
     best = max(youtube, key=rank)
     return Video(
@@ -111,17 +111,20 @@ def pick_trailer(videos: list[TmdbVideo]) -> Video | None:
     )
 
 
-def pick_logo(logos: list[TmdbImage]) -> str | None:
+def _language_rank(code: str | None, language: str) -> int:
+    if code == language:
+        return 3
+    if code == "en":
+        return 2
+    return 1 if code is None else 0
+
+
+def pick_logo(logos: list[TmdbImage], language: str = "en") -> str | None:
     if not logos:
         return None
 
-    def score(image: TmdbImage) -> float:
-        value = image.vote_average
-        if image.iso_639_1 == "en":
-            value += 50.0
-        elif image.iso_639_1 is None:
-            value += 10.0
-        return value
+    def score(image: TmdbImage) -> tuple[int, float]:
+        return _language_rank(image.iso_639_1, language), image.vote_average
 
     return max(logos, key=score).file_path or None
 
@@ -202,7 +205,7 @@ def _watch(raw: TmdbDetail, region: str) -> WatchProviders:
     )
 
 
-def to_detail(raw: TmdbDetail, media: MediaType, region: str) -> MediaDetail:
+def to_detail(raw: TmdbDetail, media: MediaType, region: str, language: str = "en") -> MediaDetail:
     title = raw.title or raw.name or raw.original_title or raw.original_name or "Untitled"
     runtime = (
         raw.runtime
@@ -230,8 +233,8 @@ def to_detail(raw: TmdbDetail, media: MediaType, region: str) -> MediaDetail:
         runtime=runtime,
         release_date=raw.release_date or raw.first_air_date,
         certification=_certification(raw, region, media),
-        logo_path=pick_logo(logos),
-        trailer=pick_trailer(videos),
+        logo_path=pick_logo(logos, language),
+        trailer=pick_trailer(videos, language),
         cast=_cast(cast),
         crew=_key_crew(crew),
         watch=_watch(raw, region),

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from fastapi import Request
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from tests.test_request_api import (
@@ -28,6 +29,7 @@ from tasterr.clients.seerr import SeerrAuthClient, SeerrClient, SeerrLogin, Seer
 from tasterr.db.engine import create_engine
 from tasterr.db.migrate import upgrade_to_head
 from tasterr.db.models import LinkedAccount, User
+from tasterr.settings import Settings
 
 
 def test_no_seerr_link_never_calls_upstream(tmp_path: Path) -> None:
@@ -126,6 +128,8 @@ async def test_late_reauth_cannot_refresh_or_retry_a_replacement_link(
 
     async def response(request: httpx.Request) -> httpx.Response:
         nonlocal request_calls
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(200, json={"mediaServerType": 1, "mediaServerLogin": True})
         if request.url.path == "/api/v1/auth/plex":
             started.set()
             await release.wait()
@@ -155,6 +159,12 @@ async def test_late_reauth_cannot_refresh_or_retry_a_replacement_link(
                 SeerrAuthClient(http, "http://seerr"),
                 secret,
             )
+            app = _app(tmp_path)
+            app.state.http = http
+            request = Request({"type": "http", "app": app})
+            settings = Settings.model_validate(
+                {"seerr_internal_url": "http://seerr", "seerr_api_key": "key"}
+            )
             async with asyncio.timeout(5):
                 task = asyncio.create_task(
                     _request_with_reauth(
@@ -163,6 +173,8 @@ async def test_late_reauth_cannot_refresh_or_retry_a_replacement_link(
                         AuthedSession(user, resolved.session),
                         "movie",
                         42,
+                        request=request,
+                        settings=settings,
                         seerr_link=original,
                         cookie="connect.sid=original",
                     )

@@ -17,8 +17,14 @@ from cryptography.fernet import InvalidToken
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from tasterr.auth.crypto import decrypt_token, jellyfin_device_identifier, plex_client_identifier
+from tasterr.auth.crypto import (
+    decrypt_token,
+    encrypt_token,
+    jellyfin_device_identifier,
+    plex_client_identifier,
+)
 from tasterr.auth.login import get_link
+from tasterr.auth.trakt import TraktCredential
 from tasterr.cache import Cache
 from tasterr.catalog.availability import AvailabilityService
 from tasterr.catalog.plex import PlexCatalogService
@@ -27,6 +33,7 @@ from tasterr.clients.jellyfin import JellyfinClient
 from tasterr.clients.plex import PlexMediaClient
 from tasterr.clients.seerr import SeerrClient
 from tasterr.clients.tmdb import TmdbClient
+from tasterr.clients.trakt import HistoryType, TraktClient
 from tasterr.db.io import finish_io
 from tasterr.db.models import utcnow
 from tasterr.db.runtime_settings import load_runtime_settings
@@ -34,14 +41,15 @@ from tasterr.recommend import store
 from tasterr.recommend.jellyfin_history import read_history
 from tasterr.recommend.seed import HISTORY_THROTTLE, reserve_seed, seed_in_background
 from tasterr.recommend.service import TasteService
-from tasterr.recommend.signals import TasteSource
+from tasterr.recommend.signals import SignalKind, TasteSource, TitleKey
+from tasterr.recommend.trakt_history import fold_page
 from tasterr.runtime_settings import RuntimeSettings
 from tasterr.settings import Settings
 
 logger = logging.getLogger("tasterr.taste")
-WATCH_HISTORY_INITIAL_WINDOW = timedelta(days=365)
 WATCH_HISTORY_OVERLAP = timedelta(hours=24)
 WATCH_HISTORY_WRITE_BATCH = 100
+TRAKT_SYNC_TIMEOUT = 30.0
 
 
 def _start_history_task(
@@ -93,6 +101,7 @@ def build_taste(
         client,
         resolved.region,
         resolved.service_ids,
+        language=resolved.language,
         availability=availability,
         hide_library_items=resolved.hide_library_items,
         excluded_service_ids=resolved.excluded_service_ids,
@@ -132,6 +141,15 @@ def build_seerr(request: Request, settings: Settings) -> SeerrClient | None:
         request.app.state.http,
         settings.seerr_internal_url,
         settings.seerr_api_key.get_secret_value(),
+    )
+
+
+def build_plex_media(request: Request, settings: Settings, secret_key: str) -> PlexMediaClient:
+    return PlexMediaClient(
+        request.app.state.http,
+        plex_client_identifier(secret_key),
+        max_connection_probes=settings.tasterr_plex_max_connection_probes,
+        server_id=settings.plex_server_id,
     )
 
 
@@ -177,7 +195,10 @@ def schedule_seed(
 
     def taste_factory(db: AsyncSession, runtime: RuntimeSettings) -> TasteService:
         client = TmdbClient(state.http, tmdb_key, state.catalog_cache)
-        return TasteService(db, CatalogService(client, runtime.region, runtime.service_ids))
+        return TasteService(
+            db,
+            CatalogService(client, runtime.region, runtime.service_ids, language=runtime.language),
+        )
 
     maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
     seeding = cast("set[int]", state.seeding)
@@ -210,6 +231,186 @@ def schedule_seed(
         seeding.discard(user_id)
 
 
+def build_trakt(request: Request, settings: Settings) -> TraktClient | None:
+    if not settings.trakt_configured or settings.trakt_client_id is None:
+        return None
+    return TraktClient(
+        request.app.state.http,
+        settings.trakt_client_id.get_secret_value(),
+        settings.trakt_client_secret.get_secret_value() if settings.trakt_client_secret else None,
+    )
+
+
+def schedule_trakt_history(
+    request: Request,
+    settings: Settings,
+    user_id: int,
+    attempted_at: datetime | None,
+) -> None:
+    client = build_trakt(request, settings)
+    secret = settings.tasterr_secret_key
+    state = request.app.state
+    tasks = cast("dict[int, asyncio.Task[None]]", state.trakt_history_tasks)
+    if (
+        client is None
+        or secret is None
+        or user_id in tasks
+        or user_id in state.plex_history_resets
+        or (attempted_at is not None and attempted_at > utcnow() - HISTORY_THROTTLE)
+    ):
+        return
+    maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
+
+    async def run() -> None:
+        while user_id in state.seeding:
+            await asyncio.sleep(0.05)
+        await import_trakt_history(maker, client, secret.get_secret_value(), user_id)
+
+    _start_history_task(tasks, user_id, run())
+
+
+async def cancel_trakt_history(request: Request, user_id: int) -> None:
+    tasks = cast("dict[int, asyncio.Task[None]]", request.app.state.trakt_history_tasks)
+    await _cancel_history_task(tasks, user_id)
+
+
+async def _refresh_trakt(
+    maker: async_sessionmaker[AsyncSession],
+    client: TraktClient,
+    secret: str,
+    user_id: int,
+    credential: TraktCredential,
+) -> TraktCredential:
+    rotated = TraktCredential.from_response(await client.refresh(credential.refresh_token))
+    async with maker() as db:
+        link = await get_link(db, user_id, "trakt")
+        if link is None:
+            raise ValueError("trakt link unavailable")
+        link.credential_enc = encrypt_token(secret, rotated.model_dump_json())
+        await finish_io(db.commit())
+    return rotated
+
+
+async def _wait_trakt_refresh(task: asyncio.Task[TraktCredential]) -> TraktCredential:
+    cancelled = False
+    try:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        return task.result()
+    finally:
+        if cancelled:
+            raise asyncio.CancelledError
+
+
+async def _read_trakt_type(
+    client: TraktClient,
+    token: str,
+    media_type: HistoryType,
+    start: datetime | None,
+) -> dict[TitleKey, datetime]:
+    watches: dict[TitleKey, datetime] = {}
+    for page_number in range(1, 11):
+        page = await client.history(
+            token,
+            media_type,
+            page=page_number,
+            limit=250,
+            start_at=start.date().isoformat() if start is not None else None,
+        )
+        if fold_page(watches, page.items, media_type, start):
+            break
+        if page.page_count is not None:
+            if page_number >= page.page_count:
+                break
+        elif len(page.items) < (page.page_limit if page.page_limit is not None else 250):
+            break
+    return watches
+
+
+async def import_trakt_history(
+    maker: async_sessionmaker[AsyncSession],
+    client: TraktClient,
+    secret: str,
+    user_id: int,
+) -> None:
+    cutoff = utcnow()
+    async with maker() as db:
+        try:
+            link = await get_link(db, user_id, "trakt")
+            if (
+                link is None
+                or link.credential_enc is None
+                or (
+                    link.sync_attempted_at is not None
+                    and link.sync_attempted_at > cutoff - HISTORY_THROTTLE
+                )
+            ):
+                return
+            encoded, synced_at = link.credential_enc, link.sync_synced_at
+            await finish_io(db.commit())
+            link.sync_attempted_at = cutoff
+            await finish_io(db.commit())
+            credential = TraktCredential.model_validate_json(decrypt_token(secret, encoded))
+            start = synced_at - WATCH_HISTORY_OVERLAP if synced_at is not None else None
+            watches: dict[TitleKey, datetime] = {}
+            async with asyncio.timeout(TRAKT_SYNC_TIMEOUT):
+                if credential.needs_refresh():
+                    refresh = asyncio.create_task(
+                        _refresh_trakt(maker, client, secret, user_id, credential)
+                    )
+                    credential = await _wait_trakt_refresh(refresh)
+                should_read = True
+                if start is not None:
+                    activities = await client.last_activities(credential.access_token)
+                    times = (activities.movies.watched_at, activities.episodes.watched_at)
+                    should_read = any(
+                        value is None
+                        or value.tzinfo is None
+                        or value.astimezone(UTC).replace(tzinfo=None) >= start
+                        for value in times
+                    )
+                if should_read:
+                    reads = [
+                        asyncio.create_task(
+                            _read_trakt_type(client, credential.access_token, kind, start)
+                        )
+                        for kind in ("movies", "episodes")
+                    ]
+                    try:
+                        results = await asyncio.gather(*reads)
+                    finally:
+                        for read in reads:
+                            if not read.done():
+                                read.cancel()
+                        await asyncio.gather(*reads, return_exceptions=True)
+                    for result in results:
+                        watches.update(result)
+            await _write_watches(db, user_id, "watched_trakt", list(watches.items()))
+            link.sync_synced_at = cutoff
+            await finish_io(db.commit())
+        except asyncio.CancelledError:
+            await db.rollback()
+            raise
+        except Exception:
+            logger.error("trakt history: import failed")
+            await db.rollback()
+
+
+async def _write_watches(
+    db: AsyncSession,
+    user_id: int,
+    kind: SignalKind,
+    watches: list[tuple[TitleKey, datetime]],
+) -> None:
+    for offset in range(0, len(watches), WATCH_HISTORY_WRITE_BATCH):
+        for (media_type, tmdb_id), played in watches[offset : offset + WATCH_HISTORY_WRITE_BATCH]:
+            await store.record_signal(db, user_id, media_type, tmdb_id, kind, played)
+        await finish_io(db.commit())
+
+
 def schedule_plex_history(
     request: Request,
     settings: Settings,
@@ -235,18 +436,20 @@ def schedule_plex_history(
     maker = cast("async_sessionmaker[AsyncSession]", state.sessionmaker)
     seeding = cast("set[int]", state.seeding)
     secret_key = secret.get_secret_value()
+    plex = build_plex_media(request, settings, secret_key)
 
     async def run() -> None:
         while user_id in seeding:
             await asyncio.sleep(0.05)
-        plex = PlexMediaClient(
-            state.http,
-            plex_client_identifier(secret_key),
-            max_connection_probes=settings.tasterr_plex_max_connection_probes,
-            server_id=settings.plex_server_id,
-        )
         history = PlexCatalogService(plex, None, cast("Cache", state.catalog_cache))
-        await import_plex_history(maker, history, secret_key, plex_token_enc, user_id)
+        await import_plex_history(
+            maker,
+            history,
+            secret_key,
+            plex_token_enc,
+            user_id,
+            timedelta(days=settings.tasterr_watch_history_days),
+        )
 
     _start_history_task(tasks, user_id, run())
 
@@ -271,7 +474,9 @@ def schedule_jellyfin_history(
     async def run() -> None:
         while user_id in state.seeding:
             await asyncio.sleep(0.05)
-        await import_jellyfin_history(maker, client, user_id)
+        await import_jellyfin_history(
+            maker, client, user_id, timedelta(days=settings.tasterr_watch_history_days)
+        )
 
     _start_history_task(tasks, user_id, run())
 
@@ -282,7 +487,10 @@ async def cancel_jellyfin_history(request: Request, user_id: int) -> None:
 
 
 async def import_jellyfin_history(
-    maker: "async_sessionmaker[AsyncSession]", client: JellyfinClient, user_id: int
+    maker: "async_sessionmaker[AsyncSession]",
+    client: JellyfinClient,
+    user_id: int,
+    initial_window: timedelta,
 ) -> None:
     cutoff = utcnow()
     async with maker() as db:
@@ -298,20 +506,10 @@ async def import_jellyfin_history(
             link.sync_attempted_at = cutoff
             await finish_io(db.commit())
             start = (
-                cutoff - WATCH_HISTORY_INITIAL_WINDOW
-                if synced_at is None
-                else synced_at - WATCH_HISTORY_OVERLAP
+                cutoff - initial_window if synced_at is None else synced_at - WATCH_HISTORY_OVERLAP
             )
             result = await read_history(client, link.external_id, start, cutoff)
-            watches = list(result.watches.items())
-            for offset in range(0, len(watches), WATCH_HISTORY_WRITE_BATCH):
-                for (media_type, tmdb_id), played in watches[
-                    offset : offset + WATCH_HISTORY_WRITE_BATCH
-                ]:
-                    await store.record_signal(
-                        db, user_id, media_type, tmdb_id, "watched_jellyfin", played
-                    )
-                await finish_io(db.commit())
+            await _write_watches(db, user_id, "watched_jellyfin", list(result.watches.items()))
             if result.complete:
                 link.sync_synced_at = cutoff
                 await finish_io(db.commit())
@@ -329,6 +527,7 @@ async def import_plex_history(
     secret_key: str,
     plex_token_enc: str,
     user_id: int,
+    initial_window: timedelta,
 ) -> None:
     """Commit the attempt, finish all reads, then write facts in small batches."""
     cutoff = utcnow()
@@ -357,28 +556,19 @@ async def import_plex_history(
         except InvalidToken:
             logger.warning("plex history: session token unavailable")
             return
-        start = (
-            cutoff - WATCH_HISTORY_INITIAL_WINDOW
-            if synced_at is None
-            else synced_at - WATCH_HISTORY_OVERLAP
-        )
+        start = cutoff - initial_window if synced_at is None else synced_at - WATCH_HISTORY_OVERLAP
         try:
             result = await history.history(
                 account_token,
                 viewed_after=_unix_seconds(start),
                 viewed_before=_unix_seconds(cutoff),
             )
-            for offset in range(0, len(result.watches), WATCH_HISTORY_WRITE_BATCH):
-                for watch in result.watches[offset : offset + WATCH_HISTORY_WRITE_BATCH]:
-                    await store.record_signal(
-                        db,
-                        user_id,
-                        watch.media_type,
-                        watch.tmdb_id,
-                        "watched_plex",
-                        watch.watched_at,
-                    )
-                await finish_io(db.commit())
+            await _write_watches(
+                db,
+                user_id,
+                "watched_plex",
+                [((watch.media_type, watch.tmdb_id), watch.watched_at) for watch in result.watches],
+            )
             if result.complete:
                 link.sync_synced_at = cutoff
                 await finish_io(db.commit())
@@ -410,6 +600,7 @@ async def schedule_history(
         seerr = await get_link(db, user_id, "seerr")
         plex = await get_link(db, user_id, "plex")
         jellyfin = await get_link(db, user_id, "jellyfin")
+        trakt = await get_link(db, user_id, "trakt")
         excluded = await store.excluded_sources(db, user_id)
     if (
         seerr is not None
@@ -434,6 +625,8 @@ async def schedule_history(
         and source in (None, "jellyfin")
     ):
         schedule_jellyfin_history(request, settings, user_id, jellyfin.sync_attempted_at)
+    if trakt is not None and "trakt" not in excluded and source in (None, "trakt"):
+        schedule_trakt_history(request, settings, user_id, trakt.sync_attempted_at)
 
 
 @asynccontextmanager
@@ -458,6 +651,9 @@ async def cancel_seed(request: Request, user_id: int) -> None:
 async def cancel_source_history(request: Request, user_id: int, source: TasteSource) -> None:
     if source == "browsing":
         return
-    await {"seerr": cancel_seed, "plex": cancel_plex_history, "jellyfin": cancel_jellyfin_history}[
-        source
-    ](request, user_id)
+    await {
+        "seerr": cancel_seed,
+        "plex": cancel_plex_history,
+        "jellyfin": cancel_jellyfin_history,
+        "trakt": cancel_trakt_history,
+    }[source](request, user_id)

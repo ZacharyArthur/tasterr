@@ -4,6 +4,7 @@ import { AccountDialog } from "../components/AccountDialog";
 import { ConnectSeerr } from "../components/ConnectSeerr";
 import { JellyfinCredentialsForm } from "../components/JellyfinCredentialsForm";
 import { PlexConnect } from "../components/PlexConnect";
+import { TraktConnect } from "../components/TraktConnect";
 import {
 	type AccountProvider,
 	type AccountResponse,
@@ -25,10 +26,16 @@ import {
 	setConfirmedSession,
 } from "../lib/auth";
 
-const providerNames = { plex: "Plex", jellyfin: "Jellyfin", seerr: "Seerr" };
+const providerNames = {
+	plex: "Plex",
+	jellyfin: "Jellyfin",
+	seerr: "Seerr",
+	trakt: "Trakt",
+};
 const sourceLabels: Record<TasteSource, string> = {
 	plex: "Plex history",
 	jellyfin: "Jellyfin history",
+	trakt: "Trakt history",
 	seerr: "Seerr request history",
 	browsing: "Browsing activity",
 };
@@ -178,6 +185,23 @@ export function Account({ user }: { user: User }) {
 			</h2>
 			{account.isPending && <p>Loading accounts…</p>}
 			{account.isError && <p role="alert">Could not load accounts.</p>}
+			{account.data &&
+				!account.data.providers.some(
+					(provider) => provider.linked && provider.sign_in,
+				) && (
+					<p
+						role="alert"
+						className="rounded border border-status-warning p-4 text-status-warning"
+					>
+						You will not be able to sign in again after this session ends.
+						{account.data.providers.some((provider) => provider.sign_in)
+							? ` Link an offered method: ${account.data.providers
+									.filter((provider) => provider.sign_in)
+									.map((provider) => providerNames[provider.provider])
+									.join(", ")}.`
+							: " Ask your administrator to offer a configured sign-in method."}
+					</p>
+				)}
 			{account.data?.providers.map((provider) => (
 				<section
 					key={provider.provider}
@@ -189,6 +213,9 @@ export function Account({ user }: { user: User }) {
 					)}
 					{!provider.available && provider.linked && (
 						<p>No longer available on this server</p>
+					)}
+					{provider.available && provider.linked && !provider.sign_in && (
+						<p>Not used for sign-in</p>
 					)}
 					{provider.linked ? (
 						<>
@@ -214,6 +241,12 @@ export function Account({ user }: { user: User }) {
 								pollPin={pollLinkPlexPin}
 								label="Link Plex"
 								onApproved={() => {
+									void refresh();
+								}}
+							/>
+						) : provider.provider === "trakt" ? (
+							<TraktConnect
+								onLinked={() => {
 									void refresh();
 								}}
 							/>
@@ -320,7 +353,7 @@ export function Account({ user }: { user: User }) {
 				>
 					<p>
 						This permanently deletes your Tasterr data. Nothing is deleted in
-						Plex, Jellyfin, or Seerr.
+						Plex, Jellyfin, Seerr, or Trakt. Your Trakt connection is revoked.
 					</p>
 					<label>
 						Type {user.display_name} to confirm

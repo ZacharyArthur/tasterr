@@ -31,6 +31,7 @@ from tasterr.auth.cookies import COOKIE_NAME, session_cookie_header
 from tasterr.auth.pins import PinStore
 from tasterr.auth.ratelimit import TokenBucket
 from tasterr.auth.sessions import sweep_expired
+from tasterr.auth.trakt import DeviceAttempt
 from tasterr.cache import Cache
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
 from tasterr.clients.http import create_http_client
@@ -90,6 +91,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "dict[int, asyncio.Task[None]]", started_app.state.jellyfin_history_tasks
                 ).values()
             )
+            tasks += list(
+                cast(
+                    "dict[int, asyncio.Task[None]]", started_app.state.trakt_history_tasks
+                ).values()
+            )
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -120,7 +126,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(signals_router, prefix="/api/v1")
     app.include_router(onboarding_router, prefix="/api/v1")
     app.include_router(recommendations_router, prefix="/api/v1")
-    app.state.pin_store = PinStore()
+    app.state.pin_store = PinStore[int]()
+    app.state.trakt_pin_store = PinStore[DeviceAttempt]()
     # Tight login bucket (SPEC §9): 10 attempts per client IP, refilling 10/min.
     app.state.login_bucket = TokenBucket(capacity=10, refill_per_second=10 / 60)
     # Loose authenticated mutation bucket: per-user, shared across ordinary writes.
@@ -130,6 +137,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # A separate bounded cache for short-TTL Seerr availability reads, so they
     # never evict the longer-lived TMDB entries (and vice versa).
     app.state.seerr_cache = Cache()
+    # Availability churn must not evict settings retained through an outage.
+    app.state.seerr_settings_cache = Cache(maxsize=1)
     # Seerr history sync uses per-user single-flight and strong task references
     # so background imports aren't garbage-collected mid-flight.
     app.state.seeding = set()
@@ -139,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # strong references reset uses to cancel/await an in-flight import.
     app.state.plex_history_tasks = {}
     app.state.jellyfin_history_tasks = {}
+    app.state.trakt_history_tasks = {}
     app.state.plex_history_resets = set()
     # Catalog failures map to generic browser errors (no upstream detail leaks).
     # UpstreamRejected (TMDB 4xx) that an endpoint doesn't handle itself (title/

@@ -25,7 +25,7 @@ def test_harness_is_ready_and_serves_only_invented_upstreams(
     static_dir = tmp_path / "static"
     static_dir.mkdir()
     (static_dir / "index.html").write_text("fixture spa", encoding="utf-8")
-    monkeypatch.setenv("TASTERR_SEERR_INTERNAL_URL", "https://live.invalid")
+    monkeypatch.setenv("SEERR_INTERNAL_URL", "https://live.invalid")
     original_tmdb_base = tmdb.BASE
 
     with e2e_harness(static_dir) as harness:
@@ -77,3 +77,17 @@ def test_harness_is_ready_and_serves_only_invented_upstreams(
 
     assert not root.exists()
     assert original_tmdb_base == tmdb.BASE
+
+
+def test_harness_never_inherits_operator_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SEERR_EXTERNAL_URL", "https://operator-private.invalid")
+    monkeypatch.setenv("PLEX_SERVER_ID", "operator-private-server")
+    monkeypatch.setenv("TRAKT_CLIENT_SECRET", "operator-private-secret")
+    monkeypatch.setenv("TASTERR_SIGN_IN_METHODS", '["plex"]')
+    with e2e_harness(tmp_path) as harness:
+        assert harness.settings.seerr_external_url is None
+        assert harness.settings.plex_server_id is None
+        assert harness.settings.trakt_client_secret is None
+        assert harness.settings.tasterr_sign_in_methods is None

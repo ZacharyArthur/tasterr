@@ -8,7 +8,11 @@ and bounded background history synchronization for personalized experiences.
 
 ### Requirement: Advertised Plex server connections are verified before use
 
-Resource discovery SHALL request HTTPS and relay connection data. When
+Resource discovery SHALL request HTTPS and relay connection data.
+
+#### Details
+
+When
 `PLEX_SERVER_ID` is set it SHALL retain only the resource whose client identifier
 equals it for both history and Continue Watching; otherwise it SHALL
 retain at most
@@ -110,7 +114,11 @@ response SHALL be used.
 ### Requirement: Plex media maps only through canonical TMDB GUIDs
 
 The system SHALL map Plex movies only from validated `tmdb://<id>` GUIDs and
-SHALL collapse an episode to its containing show's validated TMDB GUID. TMDB ids
+SHALL collapse an episode to its containing show's validated TMDB GUID.
+
+#### Details
+
+TMDB ids
 SHALL satisfy the shared positive database-safe bound. Duplicates across servers
 SHALL merge by `(media_type, tmdb_id)`, keeping the newest relevant watch/progress
 context by the spike-confirmed last-viewed timestamp and then deterministic
@@ -151,7 +159,11 @@ used.
 
 A successful Plex sign-in, a new Plex link, and a Home read by any user with a
 Plex link SHALL evaluate the same per-user single-flight trigger: schedule only
-when the Plex link's `sync_attempted_at` is absent or older than six hours. The
+when the Plex link's `sync_attempted_at` is absent or older than six hours.
+
+#### Details
+
+The
 task SHALL use the token stored on the Plex link, whichever method the user signed
 in with. Plex SHALL use single-flight state separate from the Seerr sync state and
 SHALL only read the latter to wait for that user's Seerr sync to settle. After
@@ -164,7 +176,8 @@ or fail login/Home and SHALL be bounded to four deterministic servers, pages of
 concurrency eight, and a 30-second network/mapping deadline.
 
 Each sync SHALL capture a cutoff. A first sync SHALL request from no earlier than
-365 days before that cutoff; a later sync SHALL start 24 hours before
+the configured initial window (`TASTERR_WATCH_HISTORY_DAYS`, default 365 days, see
+`app-settings`) before that cutoff; a later sync SHALL start 24 hours before
 the Plex link's `sync_synced_at`. For each PMS, the identity validated by `/api/v2/user`
 SHALL resolve to exactly one positive server-local `/accounts` row: first by exact
 numeric `id` or `key`, or, when no numeric match exists, by one case-insensitive
@@ -196,7 +209,13 @@ SHALL be retained.
 
 - **WHEN** a user whose Plex link has no sync timestamps signs in
 - **THEN** sign-in completes normally while one background task imports at most
-  the bounded 365-day history window
+  the bounded history window configured by `TASTERR_WATCH_HISTORY_DAYS`
+
+#### Scenario: Longer configured window reaches older plays
+
+- **WHEN** `TASTERR_WATCH_HISTORY_DAYS` is 730 and a Plex link's first sync runs
+- **THEN** history is requested from 730 days before the cutoff, within the same
+  row and metadata caps
 
 #### Scenario: Sync does not depend on the sign-in method
 
@@ -281,9 +300,14 @@ SHALL be retained.
 
 ### Requirement: Continue Watching composes as a capability-gated rail
 
-For a user with a Plex link and the rail type enabled, the home composer SHALL add
-`continue-watching` titled **Continue Watching** ahead of the other personalized
-providers. It SHALL read bounded items from
+For a user with a usable Plex link or a usable Jellyfin link (as defined in
+`jellyfin-personalization`) and the rail type enabled, the home composer SHALL
+add `continue-watching` titled **Continue Watching** ahead of the other
+personalized providers.
+
+#### Details
+
+For the Plex contribution it SHALL read bounded items from
 `MediaContainer.Hub[].Metadata` on each validated server, retain only
 account-scoped in-progress movie items and eligible in-progress or next-up
 episode items, order them by the first available item, show, or season
@@ -291,16 +315,22 @@ last-viewed timestamp and deterministic resource/input order, de-duplicate equal
 per-server rating keys, and let at most the first `RAIL_SIZE = 20` enter Plex
 metadata/GUID expansion. A next-up episode with none of those timestamps SHALL
 remain eligible in its server-provided hub position rather than be dropped.
-Those candidates SHALL then be canonically mapped/merged and no more than 20
-SHALL enter browser-facing TMDB resolution. Each server hub SHALL return at most
-50 items. The complete load SHALL have a ten-second wall-clock deadline. Final
-secret-free results SHALL be cached per user for five minutes. A failed/timed-out
-load SHALL replace the result with an empty negative entry for five minutes;
+Those candidates SHALL then be canonically mapped, merged with any Jellyfin
+candidates as defined in `jellyfin-personalization`, and no more than 20 merged
+candidates SHALL enter browser-facing TMDB resolution. Each server hub SHALL
+return at most 50 items. Plex source collection and canonical mapping SHALL have
+a ten-second wall-clock deadline, excluding shared browser-facing TMDB resolution.
+That resolution SHALL have its own ten-second deadline after source collection;
+expiry SHALL cancel resolution and cache an empty negative entry for five minutes.
+Final secret-free results SHALL be cached per user for five
+minutes in one entry shared with any Jellyfin contribution. A failed or timed-out
+Plex load SHALL contribute nothing to that entry; when no contributing source
+succeeds, the entry SHALL be an empty negative entry for five minutes;
 stale-on-error SHALL NOT be used. Plex capability gating SHALL happen before
 cache access. Raw Plex payloads, server connections, and access tokens SHALL NOT
-be cached. The provider SHALL use no request DB session and SHALL compose non-
-exclusively; its declared response order SHALL remain first among personalized
-providers.
+be cached. The provider SHALL use no request DB session and SHALL compose
+non-exclusively; its declared response order SHALL remain first among
+personalized providers.
 
 Progress SHALL equal `floor(100 * view_offset / duration)` when the offset is
 finite and non-negative and duration is finite and positive. Started items SHALL
@@ -379,13 +409,22 @@ independent-degradation behavior.
 
 - **WHEN** plex.tv or every accessible PMS is unavailable and no cached result is
   usable
-- **THEN** Continue Watching is omitted while the remaining Home feed returns
+- **THEN** the Plex contribution is omitted while the remaining Home feed returns
 
 #### Scenario: Hanging Continue Watching is negatively cached
 
-- **WHEN** the aggregate Plex load exceeds ten seconds
+- **WHEN** the Plex source collection and canonical mapping exceed ten seconds
+  for a user whose only
+  Continue Watching source is Plex
 - **THEN** Home omits the rail, returns normally, and another request within five
   minutes performs no Plex retry
+
+#### Scenario: Plex failure keeps the Jellyfin contribution
+
+- **WHEN** a user with Plex and Jellyfin links loads Home, the Plex load fails,
+  and Jellyfin returns eligible items
+- **THEN** Continue Watching shows the Jellyfin items and that result is cached for
+  five minutes
 
 #### Scenario: Recovered Continue Watching replaces a negative entry
 
@@ -413,6 +452,12 @@ independent-degradation behavior.
 
 ### Requirement: Live Plex contracts are opt-in and redacted
 
+An opt-in live pytest suite, excluded from `just check` and CI, SHALL validate
+Plex identity, discovery, connection, history, Continue Watching, and canonical
+mapping contracts without exposing credentials or viewing data.
+
+#### Details
+
 An opt-in live pytest suite, excluded from `just check` and CI, SHALL validate the
 current PIN token's account identity, PMS-local `/accounts` resolution or the
 explicit-403 self-only fallback,
@@ -439,7 +484,11 @@ keys, titles, timestamps, URLs, or raw bodies.
 ### Requirement: Plex media reads use only the caller's linked-account material
 
 For an authenticated user with a Plex link, the system SHALL decrypt the token
-stored on that link only inside the server-side request/task that needs it. It
+stored on that link only inside the server-side request/task that needs it.
+
+#### Details
+
+It
 SHALL validate the token against the Plex account endpoint, discover accessible
 Plex Media Server resources through plex.tv, and use each resource's access token
 only as an `X-Plex-Token` request header. A user without a Plex link, or whose

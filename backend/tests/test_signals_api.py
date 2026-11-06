@@ -153,6 +153,7 @@ def test_server_recorded_kinds_are_unrepresentable(tmp_path: Path) -> None:
             "seed_request_history",
             "watched_plex",
             "watched_jellyfin",
+            "watched_trakt",
             "bogus",
         ):
             response = client.post("/api/v1/signals", json=_body(kind))

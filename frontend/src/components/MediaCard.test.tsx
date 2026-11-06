@@ -1,10 +1,23 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { MediaSummary } from "../lib/api";
 import { MediaCard } from "./MediaCard";
 
-afterEach(cleanup);
+const config = vi.hoisted(() => ({
+	language: undefined as string | undefined,
+}));
+vi.mock("../lib/availability", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../lib/availability")>()),
+	useConfig: () => ({
+		data: config.language ? { metadata_language: config.language } : undefined,
+	}),
+}));
+
+afterEach(() => {
+	cleanup();
+	config.language = undefined;
+});
 
 const item = (progress?: number, context?: string): MediaSummary => ({
 	id: 1,
@@ -28,6 +41,23 @@ test("ordinary cards have no progress UI", () => {
 
 	expect(screen.queryByRole("progressbar")).toBeNull();
 });
+
+test.each(["es-ES", "en-US", undefined])(
+	"marks only TMDB card text with loaded language %s",
+	(language) => {
+		config.language = language;
+		render(
+			<MemoryRouter>
+				<MediaCard item={item()} />
+			</MemoryRouter>,
+		);
+		for (const title of screen.getAllByText("Top Gun")) {
+			expect(title.getAttribute("lang")).toBe(language ?? null);
+		}
+		expect(screen.getByRole("link").hasAttribute("lang")).toBe(false);
+		expect(screen.getByText("1986").hasAttribute("lang")).toBe(false);
+	},
+);
 
 test("next-up cards show episode context without a progress bar", () => {
 	render(

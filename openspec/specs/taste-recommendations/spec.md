@@ -35,10 +35,16 @@ only public TMDB-derived metadata, never secret material.
 
 A user's taste profile SHALL be the normalized sum, over their signals, of
 signal weight × title vector, exponentially time-decayed with a half-life of
-approximately 90 days. Signal weights SHALL be: `request` +3.0, `watched_plex`
+approximately 90 days.
+
+#### Details
+
+Signal weights SHALL be: `request` +3.0, `watched_plex`
 +2.5, `watched_jellyfin`
-+2.5, `watchlist` +2.0, `seed_request_history` +2.0, `detail_open` +0.3,
-`not_interested` −3.0. The profile SHALL be materialized per user and recomputed
++2.5, `watched_trakt` +2.5, `watchlist` +2.0, `seed_request_history` +2.0, `detail_open` +0.3,
+`not_interested` −3.0. Among a title's watched signals (every `watched_*` kind)
+whose sources are on, only the newest SHALL contribute, so one watch reported by
+several sources counts once; the other rows stay stored. The profile SHALL be materialized per user and recomputed
 when the user's signals or switched-off sources change or the materialization is
 stale, and SHALL be
 entirely rebuildable from the signals store and the user's switched-off sources
@@ -55,6 +61,18 @@ nothing.
 - **WHEN** a user switches off Plex watch history
 - **THEN** their recomputed profile equals one built without their `watched_plex`
   signals, while those rows remain stored
+
+#### Scenario: One watch from several sources counts once
+
+- **WHEN** a user has `watched_plex` and `watched_trakt` signals for the same
+  title
+- **THEN** the profile includes that title once, weighted +2.5 and decayed from
+  the newer of the two times
+
+#### Scenario: Switching off one source keeps the other's watch
+
+- **WHEN** that user switches Trakt history off
+- **THEN** the title still contributes once through its `watched_plex` signal
 
 #### Scenario: Signals decay by age
 
@@ -76,7 +94,11 @@ nothing.
 
 Candidate titles SHALL be scored as `alpha*cosine(profile, title) +
 beta*quality_prior + gamma*availability_boost`, with the similarity term
-dominating (`alpha` much greater than `beta` and `gamma`). The quality prior SHALL
+dominating (`alpha` much greater than `beta` and `gamma`).
+
+#### Details
+
+The quality prior SHALL
 derive from TMDB vote statistics. The availability boost SHALL apply exactly once
 when a title is in-library per the media-availability capability **or** its
 active-region flatrate provider ids intersect the global selected-service ids.
@@ -85,8 +107,8 @@ wrong-region provider facts SHALL contribute no service boost. Ranked results
 SHALL pass a greedy diversity re-rank penalizing similarity to already-picked
 titles. Titles the user has marked `not_interested` SHALL be excluded from every
 personalized rail; titles the user has already requested, seeded, watchlisted, or
-watched through Plex or Jellyfin SHALL be excluded from the recommended-for-you
-rail.
+watched through Plex, Jellyfin, or Trakt SHALL be excluded from the
+recommended-for-you rail.
 
 Persisted feature records SHALL carry backward-compatible active-region provider
 facts derived from the same TMDB detail as the vector. A missing or different
@@ -136,7 +158,8 @@ change never applies provider ids from the previous region.
 
 #### Scenario: Watched title is not recommended again
 
-- **WHEN** a user has a `watched_plex` or `watched_jellyfin` signal for a title
+- **WHEN** a user has a `watched_plex`, `watched_jellyfin`, or `watched_trakt`
+  signal for a title
 - **THEN** that title is excluded from recommended-for-you while remaining usable
   as a candidate-source signal
 
@@ -152,7 +175,11 @@ candidate pool), **more-like** (TMDB recommendations and similar titles for the
 first usable source in a stable per-user daily shuffle of the three newest unique
 qualifying strong-positive sources, re-ranked locally), **my-list** (active
 watchlist titles), and **unexpected-picks** (quality-gated low-correlation titles).
-When the more-like source is `watched_plex` or `watched_jellyfin`, its title
+
+#### Details
+
+When the more-like source is a watched signal (`watched_plex`, `watched_jellyfin`,
+or `watched_trakt`), its title
 SHALL be **Because You
 Watched {title}**; for every other strong source it SHALL remain **More Like
 {title}**. The provider SHALL attempt no more than the three newest unique,
@@ -172,8 +199,8 @@ failed Home request.
 
 #### Scenario: Plex watch earns an honest source label
 
-- **WHEN** the newest usable strong source is a `watched_plex` or
-  `watched_jellyfin` title
+- **WHEN** the newest usable strong source is a `watched_plex`,
+  `watched_jellyfin`, or `watched_trakt` title
 - **THEN** the related rail is labelled `Because You Watched {title}`
 
 #### Scenario: Non-watch source keeps the existing label
@@ -249,10 +276,13 @@ caller's own profile only.
 
 `POST /api/v1/recommendations/reset` SHALL require a valid session, the
 same-origin (CSRF) check, and the shared loose authenticated-mutation rate limit.
+
+#### Details
+
 It SHALL hold a per-user scheduling guard from before cancelling until its clear
 commits, so no sync trigger can schedule a sync for that user in between; this
 is the guard that unlink, account deletion, and source switch-off also hold.
-It SHALL cancel and await that user's in-flight Seerr, Plex, and Jellyfin syncs, then delete only the
+It SHALL cancel and await that user's in-flight Seerr, Plex, Jellyfin, and Trakt syncs, then delete only the
 calling user's signals and profile and clear the sync attempt/success timestamps
 on only that user's linked accounts. Cancellation SHALL be consumed rather than
 propagated to the reset request, and the wait SHALL remain bounded by the sync
@@ -331,7 +361,11 @@ the Seerr version tested.
 For a user with a non-empty profile, the recommendation service SHALL build a
 broad pool capped by the existing `CANDIDATE_CAP = 150` from existing TMDB
 discovery surfaces, exclude every hidden and strong-positive/engaged title, and
-compute cosine similarity. It SHALL discard negative similarities, sort the
+compute cosine similarity.
+
+#### Details
+
+It SHALL discard negative similarities, sort the
 remainder by `(similarity, media_type, tmdb_id)`, and retain the lowest quarter
 rounded up. It SHALL rank that relative fringe by the existing shrunken quality
 prior and single availability boost, then apply the existing diversity penalty.
@@ -377,7 +411,11 @@ de-duplication priority.
 
 A user's Seerr request history SHALL be imported as `seed_request_history`
 signals backdated to each request's creation date, read through the global API
-key filtered to the linked Seerr account id, paginated and bounded. A sign-in, a
+key filtered to the linked Seerr account id, paginated and bounded.
+
+#### Details
+
+A sign-in, a
 new Seerr link, and a Home read SHALL evaluate one per-user single-flight trigger
 that schedules a background sync only when the Seerr link's
 `sync_attempted_at` is absent or older than six hours. The task SHALL commit the
@@ -418,10 +456,14 @@ fail sign-in or Home.
 
 ### Requirement: Members choose which taste sources count
 
-Each user SHALL have a set of switched-off taste sources, empty by default. The
+Each user SHALL have a set of switched-off taste sources, empty by default.
+
+#### Details
+
+The
 switchable sources and their signal kinds SHALL be: `seerr`
 (`seed_request_history`), `plex` (`watched_plex`), `jellyfin`
-(`watched_jellyfin`), and `browsing` (`detail_open`). `request`, `watchlist`, and
+(`watched_jellyfin`), `trakt` (`watched_trakt`), and `browsing` (`detail_open`). `request`, `watchlist`, and
 `not_interested` SHALL always count. `GET /api/v1/account` SHALL include each
 source's on/off state; `POST /api/v1/account/taste-sources` with
 `{source, enabled}` SHALL require a session, the same-origin check, and the
@@ -458,6 +500,12 @@ without revealing them to other members.
 - **THEN** titles they watched on Plex still never appear in recommended-for-you,
   while those watches no longer shape the profile
 
+#### Scenario: Trakt history is a switchable source
+
+- **WHEN** a member with a Trakt link switches Trakt history off
+- **THEN** their `watched_trakt` rows stop shaping the profile, stay stored, and
+  no Trakt sync is scheduled
+
 #### Scenario: Deliberate signals cannot be switched off
 
 - **WHEN** a client posts a source outside the switchable list
@@ -474,7 +522,11 @@ without revealing them to other members.
 While a source is off, its sync trigger SHALL NOT schedule, and switching it off
 SHALL cancel and await that user's in-flight sync for the source within its
 deadline and hold the per-user scheduling guard until the switch commits, so no
-import commits afterward and no new sync starts in between. While `browsing` is off,
+import commits afterward and no new sync starts in between.
+
+#### Details
+
+While `browsing` is off,
 `POST /api/v1/signals` with `detail_open` SHALL return success without storing
 anything. Switching a source from off to on SHALL clear the corresponding link's
 sync timestamps and evaluate its trigger, so the next sync re-imports the full
@@ -512,7 +564,11 @@ change nothing.
 `POST /api/v1/account/taste-sources/{source}/clear` SHALL require a session, the
 same-origin check, and the mutation bucket; cancel and await that source's
 in-flight sync and hold the per-user scheduling guard until the delete commits; delete only the caller's signals of that source's kinds; and
-invalidate the profile. It SHALL NOT change the source's on/off state or sync
+invalidate the profile.
+
+#### Details
+
+It SHALL NOT change the source's on/off state or sync
 timestamps. With the source on, later syncs read only from the watermark's
 24-hour overlap onward, so older history stays cleared, though activity inside
 that overlap may return; a source that has never completed a sync re-imports its
@@ -535,7 +591,11 @@ The SPA SHALL confirm before calling it.
 The `/account` page SHALL show, on each configured provider's card, linked or
 not, that provider's taste-source toggle and a "Clear imported history" action with a confirmation
 step, and a separate Browsing activity toggle and clear action (with the same
-confirmation) that do not depend on any link. A provider that is no
+confirmation) that do not depend on any link.
+
+#### Details
+
+A provider that is no
 longer configured keeps its toggle and clear action: on its dormant card when
 still linked, or on a card showing only those controls when unlinked with
 imported signals remaining (see `account-linking`), so retained history stays

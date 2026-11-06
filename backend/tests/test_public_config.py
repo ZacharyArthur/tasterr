@@ -63,7 +63,10 @@ def _sentineled_settings() -> Settings:
     values: dict[str, object] = {
         "plex_server_id": f"{SENTINEL}-plex-server-id",
         "tasterr_hide_library_items": True,
+        "tasterr_hide_watched_items": True,
         "tasterr_excluded_service_ids": [8],
+        "tasterr_sign_in_methods": ["jellyfin"],
+        "tasterr_watch_history_days": 730,
         "jellyfin_allow_empty_password": True,
         "jellyfin_internal_url": "http://jellyfin-sentinel:8096",
     }
@@ -83,6 +86,7 @@ def _sentineled_settings() -> Settings:
 def test_serialized_output_contains_no_secret_values() -> None:
     runtime = RuntimeSettings(
         region="GB",
+        language="es-ES",
         service_ids=[8],
         hide_library_items=True,
         excluded_service_ids=[9],
@@ -93,9 +97,16 @@ def test_serialized_output_contains_no_secret_values() -> None:
     assert SENTINEL not in dumped
     assert '"theme":"light"' in dumped
     assert '"accent":"azure"' in dumped
+    assert '"metadata_language":"es-ES"' in dumped
+    assert PublicConfig.model_json_schema()["properties"]["metadata_language"]["pattern"] == (
+        r"^[a-z]{2}-[A-Z]{2}$"
+    )
     assert "service_ids" not in dumped
     assert "hide_library_items" not in dumped
+    assert "hide_watched_items" not in dumped
     assert "excluded_service_ids" not in dumped
+    assert "watch_history" not in dumped
+    assert "sign_in_methods" not in dumped
 
 
 def test_discovery_override_fields_are_not_public() -> None:
@@ -103,10 +114,14 @@ def test_discovery_override_fields_are_not_public() -> None:
     assert names.isdisjoint(
         {
             "hide_library_items",
+            "hide_watched_items",
             "excluded_service_ids",
             "locked_fields",
             "tasterr_hide_library_items",
+            "tasterr_hide_watched_items",
             "tasterr_excluded_service_ids",
+            "disabled_sign_in_methods",
+            "tasterr_sign_in_methods",
         }
     )
 
@@ -143,12 +158,17 @@ def test_v2_private_fields_are_absent_from_browser_contracts() -> None:
             "sync_attempted_at",
             "sync_synced_at",
             "access_token",
+            "refresh_token",
+            "device_code",
+            "trakt_client_id",
+            "trakt_client_secret",
             "account_id",
             "server_url",
             "base_url",
             "machine_identifier",
             "rating_key",
             "tasterr_plex_max_connection_probes",
+            "tasterr_watch_history_days",
             "profile",
             "profiles",
             "similarity",

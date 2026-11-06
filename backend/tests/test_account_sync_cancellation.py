@@ -2,6 +2,7 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportUnknownArgumentType=false
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 from typing import cast
 
@@ -92,6 +93,7 @@ async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
                 SECRET,
                 encrypt_token(SECRET, PLEX_TOKEN),
                 1,
+                timedelta(days=365),
             )
             tasks = state.plex_history_tasks
         elif provider == "seerr":
@@ -100,7 +102,9 @@ async def test_account_mutation_awaits_real_import_and_prevents_later_writes(
             )
             tasks = state.seed_tasks
         else:
-            coroutine = import_jellyfin_history(maker, cast(JellyfinClient, HangingHistory()), 1)
+            coroutine = import_jellyfin_history(
+                maker, cast(JellyfinClient, HangingHistory()), 1, timedelta(days=365)
+            )
             tasks = state.jellyfin_history_tasks
         task = asyncio.create_task(coroutine)
         tasks[1] = task

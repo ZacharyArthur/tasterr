@@ -8,7 +8,7 @@ import asyncio
 
 from tasterr.catalog import facts, normalize
 from tasterr.catalog.availability import AvailabilityService
-from tasterr.catalog.discovery import DiscoveryFilter
+from tasterr.catalog.discovery import DiscoveryFilter, TitleKey
 from tasterr.catalog.models import (
     Genre,
     MediaDetail,
@@ -18,7 +18,7 @@ from tasterr.catalog.models import (
     ServiceOption,
 )
 from tasterr.clients.errors import UpstreamError
-from tasterr.clients.tmdb import TmdbClient
+from tasterr.clients.tmdb import ENGINE_LANGUAGE, TmdbClient
 
 DEFAULT_REGION = "US"  # M5's settings GUI will make this admin-configurable.
 MAX_QUERY_LENGTH = 100
@@ -33,17 +33,20 @@ class CatalogService:
         region: str = DEFAULT_REGION,
         service_ids: list[int] | None = None,
         *,
+        language: str = ENGINE_LANGUAGE,
         availability: AvailabilityService | None = None,
         hide_library_items: bool = False,
         excluded_service_ids: list[int] | None = None,
+        personal: frozenset[TitleKey] = frozenset(),
     ) -> None:
         self._client = client
         self._region = region
+        self._language = language
         self._service_ids = tuple(service_ids or [])
         self.discovery_filter: DiscoveryFilter | None = None
-        if hide_library_items or excluded_service_ids:
+        if hide_library_items or excluded_service_ids or personal:
             self.discovery_filter = DiscoveryFilter(
-                self, availability, hide_library_items, excluded_service_ids or []
+                self, availability, hide_library_items, excluded_service_ids or [], personal
             )
 
     @property
@@ -55,7 +58,7 @@ class CatalogService:
         return self._service_ids
 
     async def trending(self) -> list[MediaSummary]:
-        page = await self._client.trending("all", "day")
+        page = await self._client.trending("all", "day", language=self._language)
         return normalize.to_summaries(page.results, None)
 
     async def discover(
@@ -83,6 +86,7 @@ class CatalogService:
                     result = await self._client.discover(
                         media,
                         region=self._region,
+                        language=self._language,
                         page=source_page,
                         sort_by=sort_by,
                         genres=genres,
@@ -117,35 +121,37 @@ class CatalogService:
         trimmed = query.strip()
         if not trimmed:
             return []  # short-circuit: no upstream call for an empty query
-        page = await self._client.multi_search(trimmed[:MAX_QUERY_LENGTH])
+        page = await self._client.multi_search(trimmed[:MAX_QUERY_LENGTH], language=self._language)
         return normalize.to_summaries(page.results, None)
 
     async def detail(self, media: MediaType, tmdb_id: int) -> MediaDetail:
-        raw = await self._client.detail(media, tmdb_id, self._region)
-        return normalize.to_detail(raw, media, self._region)
+        raw = await self._client.detail(media, tmdb_id, self._region, language=self._language)
+        return normalize.to_detail(raw, media, self._region, self._language.split("-", 1)[0])
 
     async def title_facts(self, media: MediaType, tmdb_id: int) -> facts.TitleFacts:
-        """Feature-oriented facts for the taste engine — same cached fetch as
-        `detail()`, so a warm detail cache serves facts with no TMDB call."""
-        raw = await self._client.detail(media, tmdb_id, self._region)
+        """English engine facts share the display detail cache for English households."""
+        raw = await self._client.detail(media, tmdb_id, self._region, language=ENGINE_LANGUAGE)
         return facts.to_facts(raw, media, self._region)
 
     async def genre_map(self, media: MediaType) -> dict[str, int]:
-        genres = await self._client.genres(media)
+        genres = await self._client.genres(media, language=ENGINE_LANGUAGE)
         return {g.name: g.id for g in genres}
 
     async def genres(self, media: MediaType) -> list[Genre]:
-        genres = await self._client.genres(media)
+        genres = await self._client.genres(media, language=self._language)
         return [Genre(id=g.id, name=g.name) for g in genres]
 
     async def regions(self) -> list[RegionOption]:
-        return normalize.to_regions(await self._client.regions())
+        return normalize.to_regions(await self._client.regions(language=self._language))
+
+    async def languages(self) -> list[str]:
+        return await self._client.languages()
 
     async def services(self, region: str | None = None) -> list[ServiceOption]:
         active = region or self._region
         movie, tv = (
-            await self._client.providers("movie", active),
-            await self._client.providers("tv", active),
+            await self._client.providers("movie", active, language=self._language),
+            await self._client.providers("tv", active, language=self._language),
         )
         return normalize.to_services(movie, tv, active)
 

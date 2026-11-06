@@ -2,6 +2,62 @@ import { expect, test } from "@playwright/test";
 
 const origin = "http://127.0.0.1:8765";
 
+test("Trakt device link imports watched titles and excludes them from Trending", async ({
+	page,
+}) => {
+	await page.goto("/");
+	await page.getByRole("button", { name: "Continue with Seerr" }).click();
+	await page.getByLabel("Email").fill("viewer@example.invalid");
+	await page.getByLabel("Password").fill("placeholder-password");
+	await page.getByRole("button", { name: "Sign in", exact: true }).click();
+	await expect(
+		page.getByRole("heading", { name: "Trending Now" }),
+	).toBeVisible();
+	await expect(
+		page
+			.getByRole("region", { name: "Trending Now" })
+			.getByRole("link", { name: /Fixture Movie 105/ }),
+	).toHaveCount(1);
+	await page.goto("/account");
+	await page.getByRole("button", { name: "Link Trakt" }).click();
+	await expect(page.getByText("TEST1234")).toBeVisible();
+	await expect(page.getByText("Fixture Trakt member")).toBeVisible();
+	await expect(
+		page.getByRole("button", { name: "Unlink Trakt" }),
+	).toBeVisible();
+	await expect
+		.poll(async () =>
+			(await page.request.get("/api/v1/taste-onboarding")).json(),
+		)
+		.toEqual({ state: "done" });
+	await page
+		.getByRole("switch", { name: "Use Trakt history for recommendations" })
+		.click();
+	await expect
+		.poll(async () => (await page.request.get("/api/v1/account")).json())
+		.toMatchObject({ taste_sources: { trakt: false } });
+	await expect(
+		page.getByRole("switch", { name: "Use Trakt history for recommendations" }),
+	).not.toBeChecked();
+	await page.goto("/");
+	await expect(
+		page.getByRole("heading", { name: "Trending Now" }),
+	).toBeVisible();
+	const trending = page
+		.getByRole("heading", { name: "Trending Now" })
+		.locator("..");
+	await expect(
+		trending.getByRole("link", { name: /Fixture Movie 105/ }),
+	).toHaveCount(0);
+	await page.goto("/account");
+	await page.getByRole("button", { name: "Unlink Trakt" }).click();
+	await page
+		.getByLabel("Also delete history imported from this account")
+		.check();
+	await page.getByRole("button", { name: "Confirm unlink" }).click();
+	await expect(page.getByRole("button", { name: "Link Trakt" })).toBeVisible();
+});
+
 test("local login, browse, detail, and request use the real backend", async ({
 	page,
 }) => {

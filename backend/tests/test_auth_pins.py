@@ -88,3 +88,17 @@ def test_pending_count_stays_bounded() -> None:
     assert len(store._pending) <= MAX_PENDING  # pyright: ignore[reportPrivateUsage]
     assert store.get(first) is None  # oldest evicted first
     assert store.get(handles[-1]) is not None
+
+
+def test_per_entry_expiry_and_mutable_payload() -> None:
+    clock = FakeClock()
+    store = PinStore[dict[str, int]](clock=clock)
+    payload = {"interval": 5}
+    short = store.create(payload, ttl=10, session_hash="session")
+    long = store.create({"interval": 5}, session_hash="session")
+    payload["interval"] += 5
+    assert store.get(short, session_hash="session") == {"interval": 10}
+    assert store.get(short, session_hash="foreign") is None
+    clock.advance(10)
+    assert store.get(short, session_hash="session") is None
+    assert store.get(long, session_hash="session") is not None

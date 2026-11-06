@@ -4,7 +4,7 @@
 
 <h1 align="center">Tasterr</h1>
 
-<p align="center">Self-hosted discovery for TMDB, Plex, Jellyfin, and Seerr, with a learned taste profile for every household member.</p>
+<p align="center">Self-hosted discovery with TMDB, Plex, Jellyfin, Seerr, and optional Trakt history, with a learned taste profile for every household member.</p>
 
 <p align="center">
   <a href="https://github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml"><img alt="Gate" src="https://github.com/ZacharyArthur/tasterr/actions/workflows/gate.yml/badge.svg"></a>
@@ -14,45 +14,75 @@
 </p>
 
 Tasterr is a self-hosted, Netflix-style discovery front end for a household media
-stack. It combines the TMDB catalog with optional linked Plex, Seerr, and Jellyfin
-accounts, library state, and requests,
-then learns a separate taste profile for each signed-in user.
+stack. It combines the TMDB catalog in your household's metadata language with
+optional linked Plex, Seerr, Jellyfin, and Trakt accounts, library state, and
+requests, then learns a separate taste profile for each signed-in user.
 
 The pinned `2.3.1` image is the current published release. Linked accounts, direct
-Plex/Jellyfin sign-in, and per-member taste sources described here are unreleased;
-see [unreleased notes](docs/releases/unreleased.md) before upgrading.
+Plex/Jellyfin sign-in, metadata language, discovery exclusions, Jellyfin Continue
+Watching, sign-in choices, Seerr setup awareness, and Trakt history described here
+are unreleased; see [unreleased notes](docs/releases/unreleased.md) before upgrading.
 
 The current source supports Plex, Jellyfin, or local Seerr sign-in, composed discovery rails,
 search, title details, availability badges, requests attributed to the signed-in
-member, per-user taste signals and recommendations, and admin-managed regions,
-services, rails, and appearance. Users with a Plex link also learn from bounded watch
-history, offer Continue Watching, and can request an ephemeral household blend;
-low-correlation picks keep discovery broad. These features need no Plex URL or token
+member, per-user taste signals and recommendations, and admin-managed metadata
+language, regions, services, rails, sign-in methods, and appearance. TMDB text,
+images, and trailers follow the chosen language with fallbacks; Tasterr's UI stays
+English. Watched titles are hidden from discovery by default, and **Not interested**
+always hides dismissed titles. Search, My List, Continue Watching, and direct
+details stay accessible. Admins can turn watched hiding off in Settings.
+
+Users with a Plex link learn from bounded watch history and get Continue Watching
+from their Plex servers. These Plex features need no Plex URL or token
 configuration: they reuse the encrypted token created by Plex sign-in, stored on
 the linked account across sign-in methods, and degrade cleanly when Plex is
-unavailable. Every member can manage
-linked accounts or delete their local Tasterr account from **Account**. Seerr is
+unavailable.
+
+**Picks You Wouldn't Usually Watch** keeps discovery broad, and **Something for
+Everyone Tonight** builds an ephemeral blend for members watching together.
+Both work with member taste profiles built from any of the supported sources.
+
+Every member can manage linked accounts or delete their local Tasterr account
+from **Account**. Seerr is
 optional with Plex or Jellyfin configured; it adds requests, availability, local
 sign-in, and incremental request-history sync. The pinned Plex server's owner is
 an administrator even without Seerr.
 
+Admins choose which configured sign-in methods members see without disabling
+account linking or history. Settings previews affected members and prevents the
+saving admin's self-lockout; see [lockout recovery](docs/CONFIGURATION.md#sign-in-methods-and-lockout-recovery).
+Seerr linking offers the credentials its media server accepts, names the active
+credential form, and explains remaining options. Settings → Connections shows
+detected Seerr login methods and mismatch warnings, with Plex/Jellyfin connection
+tests; see [mixed setups](docs/CONFIGURATION.md#mixed-setups).
+
 Jellyfin links learn taste from played movies and episodes (collapsed to their
 series), with the same bounded background sync and **Because You Watched** rails.
+They also contribute resumable movies and episodes plus next-up episodes to
+Continue Watching. Members with Plex and Jellyfin get one merged rail, with the
+newest known activity per title, cached for five minutes. Jellyfin next-up recency
+uses a bounded recent-episode lookup.
 Only the Jellyfin user id is retained; the sign-in token is immediately logged out.
 Jellyfin administrators also administer Tasterr. All member avatars render as
-initials. Jellyfin playback links, avatars, and Continue Watching are not supported.
+initials. Jellyfin playback links and avatars remain unsupported.
+
+Optional Trakt links import all-time watch history across services: the newest
+500 movies and 500 shows within ten history pages per type. Trakt is a taste
+source, never a sign-in or Continue Watching source. Set `TRAKT_CLIENT_ID` for
+your own development app and add household testers; `TRAKT_CLIENT_SECRET` is optional. See the
+[Trakt setup instructions](docs/CONFIGURATION.md#trakt-watch-history).
 
 Tasterr intentionally does not bundle Seerr, start or control playback, persist raw
-history or Plex progress, persist household groups, or run more than one process.
+history or playback progress, persist household groups, or run more than one process.
 
 Members use `/account` to link/unlink providers, delete their local account, and
-choose whether Seerr request history, Plex/Jellyfin watch history, and browsing
+choose whether Seerr request history, Plex/Jellyfin/Trakt watch history, and browsing
 activity shape their taste. All sources start on. Turning one off stops collection
 and removes its influence without deleting stored history; clearing history is a
 separate action. Explicit requests, My List/onboarding picks, and Not interested
 always count. Sessions slide for 30 days and expire at a 90-day absolute cap.
 
-Upgrades apply migrations `0007`–`0009` automatically and require one forced
+Upgrades apply migrations `0007`–`0009` and `0010` automatically and require one forced
 re-sign-in. Back up first: rollback across these revisions requires a downgrade or
 restoring the matching backup, and can delete accounts/history. See the
 [upgrade and rollback reference](docs/CONFIGURATION.md#upgrade-and-rollback).
@@ -60,13 +90,25 @@ restoring the matching backup, and can delete accounts/history. See the
 ## Screenshots
 
 <a href="docs/screenshots/home.jpg">
-  <img src="docs/screenshots/home.jpg" alt="Tasterr personalized discovery home">
+  <img src="docs/screenshots/home.jpg" alt="Tasterr Home with Continue Watching and personalized recommendations">
 </a>
 
 <p align="center">
-  <a href="docs/screenshots/detail.jpg"><img src="docs/screenshots/detail.jpg" width="49%" alt="Tasterr title details with trailer and request controls"></a>
+  <a href="docs/screenshots/detail.jpg"><img src="docs/screenshots/detail.jpg" width="49%" alt="Tasterr title details with request controls"></a>
   <a href="docs/screenshots/search.jpg"><img src="docs/screenshots/search.jpg" width="49%" alt="Tasterr search results with availability"></a>
 </p>
+
+<p align="center">
+  <a href="docs/screenshots/account.jpg"><img src="docs/screenshots/account.jpg" width="49%" alt="Account with Plex, Jellyfin, Seerr, Trakt, and browsing taste-source controls"></a>
+  <a href="docs/screenshots/household.jpg"><img src="docs/screenshots/household.jpg" width="49%" alt="Something for Everyone Tonight with household selection and shared recommendations"></a>
+</p>
+
+Home shows Continue Watching and personal recommendations; Account controls linked
+providers and taste sources; Something for Everyone Tonight finds shared picks.
+Click any image for the full view.
+
+These screenshots show current source with invented local fixtures and synthetic
+artwork. To regenerate them, see [Documentation screenshots](CONTRIBUTING.md#documentation-screenshots).
 
 ## Quick start
 

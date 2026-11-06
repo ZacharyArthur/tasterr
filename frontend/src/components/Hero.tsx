@@ -1,7 +1,11 @@
 import { useContext, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import type { HeroSlide } from "../lib/api";
-import { AvailabilityContext, availabilityKey } from "../lib/availability";
+import {
+	AvailabilityContext,
+	availabilityKey,
+	useConfig,
+} from "../lib/availability";
 import { backdropUrl, logoUrl } from "../lib/images";
 import { usePrefersReducedMotion } from "../lib/useReducedMotion";
 import { AvailabilityBadge } from "./AvailabilityBadge";
@@ -10,6 +14,7 @@ const ROTATE_MS = 7000;
 
 export function Hero({ slides }: { slides: HeroSlide[] }) {
 	const location = useLocation();
+	const language = useConfig().data?.metadata_language;
 	const reducedMotion = usePrefersReducedMotion();
 	const availabilityMap = useContext(AvailabilityContext);
 	const [index, setIndex] = useState(0);
@@ -49,10 +54,11 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
 					<img
 						src={logo}
 						alt={slide.item.title}
+						lang={language}
 						className="max-h-24 w-auto max-w-xs object-contain object-left"
 					/>
 				) : (
-					<h1 className="text-4xl font-bold text-app-text">
+					<h1 lang={language} className="text-4xl font-bold text-app-text">
 						{slide.item.title}
 					</h1>
 				)}
@@ -66,7 +72,7 @@ export function Hero({ slides }: { slides: HeroSlide[] }) {
 					)}
 					{slide.genres.length > 0 && <span>{slide.genres.join(" · ")}</span>}
 				</div>
-				<p className="line-clamp-3 text-sm text-app-text">
+				<p lang={language} className="line-clamp-3 text-sm text-app-text">
 					{slide.item.overview}
 				</p>
 				<Link

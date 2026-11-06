@@ -1,7 +1,7 @@
 # Security Engineering Guide
 
 **Living document** — unlike PRD/SPEC, this is maintained as the code evolves.
-[AGENTS.md](../AGENTS.md) points here; every OpenSpec change's `design.md` must answer the
+Every OpenSpec change's `design.md` must answer the
 relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 > Scope: how we write secure code day-to-day. The public vulnerability-reporting
@@ -12,7 +12,8 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 - **Exposure:** LAN today, internet via Cloudflare tunnel tomorrow. Write every endpoint as
   if it's already internet-facing.
 - **What we protect:** TMDB/Seerr/Jellyfin API keys, internal URLs, per-user Plex tokens and
-  Seerr session cookies, Tasterr session tokens, and household viewing behavior (privacy).
+  Seerr session cookies, Trakt client values and access/refresh tokens, Tasterr session tokens,
+  and household viewing behavior (privacy).
 - **Adversaries:** internet scanners hitting exposed endpoints; a malicious or compromised
   browser inside the household; XSS smuggled through third-party metadata (TMDB text is
   untrusted input); supply-chain compromise of a dependency.
@@ -23,7 +24,7 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
 
 1. Secrets never reach the client — `PublicConfig` regression test.
 2. Only `clients/` performs outbound HTTP — import-linter contract.
-3. Session tokens stored **hashed**; Plex tokens and Seerr cookies **encrypted**
+3. Session tokens stored **hashed**; Plex/Trakt tokens and Seerr cookies **encrypted**
    at rest on linked accounts, never on sessions.
 4. Lockfiles committed; `just audit` before releases.
 5. Forwarded client/scheme headers are accepted only from an explicit literal-IP/CIDR
@@ -63,11 +64,15 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       configured link grants it. Unconfigured providers neither grant nor error.
 - [ ] `/auth/methods` is explicitly unauthenticated, returns only method booleans,
       and performs no upstream call. `PLEX_SERVER_ID` stays out of `PublicConfig`.
+- [ ] Offered sign-in methods restrict sign-in only; configured integrations still
+      gate linking and reads. Settings rejects the saving admin's self-lockout,
+      and unlink checks another offered linked method. Trakt never counts.
 - [ ] Links come only from successful authentication in the same request, never
       identity/email matching or administrator assignment. PIN link handles are
       bound to their creating session and cannot complete sign-in.
 - [ ] Upstream credentials survive logout on their owning link; unlink and account
-      deletion delete them. Seerr cookies and Plex tokens use Fernet encryption.
+      deletion delete them. Seerr cookies, Plex tokens, and Trakt token sets use
+      Fernet encryption.
 - [ ] Sign-in commits identity resolution before upstream admin/display reads;
       no upstream call runs while a write transaction is open.
 - [ ] Cookie flags: `HttpOnly`, `SameSite=Lax`, `Secure` behind HTTPS.
@@ -121,11 +126,41 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       header, never URL parameters; every call has a timeout and refuses redirects.
 - [ ] The API key authenticates only reads scoped to an explicit Jellyfin user id;
       authentication/logout use no API key. Played items use `/Items?userId=`.
+      The admin connection test may read public server info without a user or key;
+      it must not claim that this verifies the API key.
 - [ ] Episode TMDB ids are never treated as series ids. Pages and series batches
       cap at 100, history at 500 rows per type, network/mapping at 30 seconds,
       and write transactions at 100 canonical facts. No raw item data is retained.
 - [ ] Unconfigured Jellyfin blocks new links and Seerr's Jellyfin method with 503;
       dormant links perform no reads, and unlinking remains available.
+- [ ] Resume, next-up, and recent-episode reads stay scoped to the linked user.
+      Only secret-free merged Continue Watching cards enter the five-minute cache;
+      no item ids or progress enter durable storage.
+
+#### Seerr public settings
+
+- [ ] Read `/api/v1/settings/public` only through the configured server-side Seerr
+      client, parsing typed capability flags with bounded cache/stale lifetimes.
+      Missing or malformed values remain unknown, never invented permissions.
+- [ ] Known-refused methods receive no Plex token or Jellyfin password during
+      auto-link, manual linking, or silent request re-authentication. Unknown
+      preserves the existing attempt path.
+- [ ] Account returns accepted-method booleans; the admin integration summary
+      returns fixed warnings and capabilities, never raw settings or internal URLs.
+      Request permissions are still checked separately. `/auth/methods` stays
+      unauthenticated and free of these upstream reads.
+
+#### Trakt
+
+- [ ] Only fixed `auth.trakt.tv` OAuth and `api.trakt.tv` API hosts; TLS verified,
+      redirects refused, ten-second call timeouts, and an 8 MiB streamed cap.
+- [ ] Client values, device codes, and tokens stay out of URLs, logs, browser
+      responses, and sessions. Only the short user code and session-bound opaque
+      handle leave the server; the activation link is fixed.
+- [ ] Token JSON is Fernet-encrypted on links. Refresh runs in its own task and
+      DB session; repeated sync cancellation waits for rotated tokens to commit.
+- [ ] Trakt is link-only, with no admin, identity, Seerr, or sign-in role.
+      Unlink/delete cancel history, commit locally, then revoke best-effort.
 
 ### Frontend
 
@@ -159,7 +194,9 @@ relevant checklists below (enforced via `openspec/config.yaml` rules).
       integrity check, preserve runtime ownership, and treat backups as sensitive.
 
 Migration `0007` forces one re-sign-in and stores no old session credentials on
-new links. Revisions `0008`–`0009` add Jellyfin signals and taste-source preferences.
+new links. Revisions `0008`–`0010` add Jellyfin/Trakt signals and taste-source preferences.
+Downgrading `0010` deletes Trakt links/history and strips Trakt source preferences,
+while retaining users and their other links.
 An image-only rollback across these revisions is unsupported; `0008` downgrade
 deletes Jellyfin history/links and Jellyfin-only users, while `0007` downgrade
 deletes users without Seerr links and every session. Follow the stopped-writer,
@@ -167,7 +204,7 @@ validated-backup procedure in [CONFIGURATION.md](CONFIGURATION.md#upgrade-and-ro
 
 ### Dependencies & build
 
-- [ ] New dependency: justified against the AGENTS.md stack slate in design.md; check
+- [ ] New dependency: justified against the project stack in design.md; check
       maintenance status and provenance before adding.
 - [ ] `uv.lock` / `package-lock.json` updated and committed together with the change.
 - [ ] Dockerfile: non-root user, minimal digest-pinned base images, no secrets in

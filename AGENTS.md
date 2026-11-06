@@ -94,6 +94,14 @@ No slash commands available? Drive the same flow with the CLI:
 `openspec instructions <artifact> --change <id> --json`, `openspec validate`,
 `openspec archive <id>`.
 
+Long living requirements: strict validation caps a requirement statement at 500
+characters, so some living requirements keep the rest of their text under an
+unlabelled `#### Details` heading. Shrink these over time. When a change modifies
+one, move whole behaviours out into ADDED requirements (each at most 500 characters,
+with real WHEN/THEN scenarios) and trim its Details. The MODIFIED block must keep
+the `#### Details` heading, or validate and archive reject it as a dropped scenario.
+Never add a new Details section: split a long new requirement instead.
+
 ## Security
 
 Security is a design input, not a review step. The invariants above are the

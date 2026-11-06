@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import { type ReactNode, StrictMode, useRef } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { useFocusTrap } from "./useFocusTrap";
@@ -136,4 +142,41 @@ test("StrictMode nesting restores the original trigger after the last trap close
 	view.unmount();
 	expect(document.activeElement).toBe(trigger);
 	expect(background.inert).toBe(false);
+});
+
+test("removing the focused control restores focus within the active trap", async () => {
+	const close = vi.fn();
+	const view = render(
+		<Trap name="dynamic" onEscape={close}>
+			<input aria-label="Temporary" />
+		</Trap>,
+	);
+	screen.getByLabelText("Temporary").focus();
+	view.rerender(<Trap name="dynamic" onEscape={close} />);
+	await waitFor(() =>
+		expect(document.activeElement).toBe(screen.getByText("dynamic first")),
+	);
+});
+
+test("lower trap content changes do not steal focus from the top trap", async () => {
+	const close = vi.fn();
+	const view = render(
+		<>
+			<Trap name="outer" onEscape={close}>
+				<span>Loading</span>
+			</Trap>
+			<Trap name="inner" onEscape={close} />
+		</>,
+	);
+	const focused = screen.getByText("inner first");
+	view.rerender(
+		<>
+			<Trap name="outer" onEscape={close}>
+				<span>Ready</span>
+			</Trap>
+			<Trap name="inner" onEscape={close} />
+		</>,
+	);
+	await waitFor(() => expect(screen.getByText("Ready")).toBeTruthy());
+	expect(document.activeElement).toBe(focused);
 });

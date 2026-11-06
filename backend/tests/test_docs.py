@@ -76,7 +76,7 @@ def test_readme_links_every_living_operator_document() -> None:
     assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg" />' in index
     assert (ROOT / "frontend" / "public" / "favicon.svg").is_file()
 
-    for screenshot in ("home.jpg", "detail.jpg", "search.jpg"):
+    for screenshot in ("home.jpg", "detail.jpg", "search.jpg", "account.jpg", "household.jpg"):
         path = DOCS / "screenshots" / screenshot
         assert f'src="docs/screenshots/{screenshot}"' in readme
         assert path.is_file()

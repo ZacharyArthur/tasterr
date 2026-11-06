@@ -59,6 +59,8 @@ async def test_upgrade_and_downgrade_preserve_children(tmp_path: Path) -> None:
             assert link.credential_enc is link.sync_attempted_at is link.sync_synced_at is None
             assert (await db.scalars(select(UserSession))).all() == []
             assert (await db.get(User, 1)).taste_onboarding_seen  # type: ignore[union-attr]
+            assert await db.get(Profile, 1) is None
+            db.add(Profile(user_id=1, vector="{}"))
             orphan = User(display_name="no-seerr")
             db.add(orphan)
             await db.flush()
@@ -93,7 +95,7 @@ async def test_upgrade_and_downgrade_preserve_children(tmp_path: Path) -> None:
         await upgrade_to_head(engine)
         async with maker() as db:
             assert len((await db.scalars(select(Signal))).all()) == 1
-            assert await db.get(Profile, 1) is not None
+            assert await db.get(Profile, 1) is None
     finally:
         await engine.dispose()
 
@@ -167,7 +169,7 @@ async def test_failed_upgrade_rolls_back_ddl_and_can_be_retried(tmp_path: Path) 
         async with engine.connect() as connection:
             assert (
                 await connection.execute(text("SELECT version_num FROM alembic_version"))
-            ).scalar_one() == "0009"
+            ).scalar_one() == "0010"
             assert (await connection.execute(text("PRAGMA foreign_key_check"))).all() == []
     finally:
         await engine.dispose()

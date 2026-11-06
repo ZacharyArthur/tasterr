@@ -8,7 +8,11 @@ Let signed-in members browse composed discovery rails, search titles, inspect de
 ### Requirement: Home feed of a hero and composed rails
 
 `GET /api/v1/home` SHALL return the enabled hero section and an ordered list of
-enabled rails, each a titled list of media summaries. The global runtime snapshot
+enabled rails, each a titled list of media summaries.
+
+#### Details
+
+The global runtime snapshot
 SHALL gate registered provider types before they fetch. The provider set SHALL
 include non-personalized trending, popular-in-region, recent-release, genre, and
 bounded per-selected-service rails plus the authenticated caller's
@@ -150,6 +154,9 @@ user/day; no presentation seed SHALL be persisted.
 `GET /api/v1/rails?cursor=` SHALL return a page of enabled additional rails
 (top-rated, by-decade, and further genres across movie and TV) together with a
 cursor for the next page or a signal that the bounded catalogue is exhausted.
+
+#### Details
+
 Every available curated movie genre not selected for the Home feed SHALL remain
 reachable through these additional pages. The provider catalogue SHALL be
 filtered by the request's global rail-type gates before slicing and SHALL use the
@@ -180,7 +187,11 @@ that settings snapshot.
 title: metadata (title, overview, genres, runtime, certification, year), backdrop,
 poster, and logo imagery, a trailer when available, top cast and key crew, season
 summaries for TV, where-to-watch provider info for the active global region, and
-lists of similar and recommended titles. `type` SHALL be constrained to `movie`
+lists of similar and recommended titles.
+
+#### Details
+
+`type` SHALL be constrained to `movie`
 or `tv` by input validation, and an unknown title SHALL return a generic `404`.
 The detail SHALL additionally include the title's **library availability**,
 resolved alongside the TMDB detail; when Seerr is unavailable or unconfigured the
@@ -256,7 +267,11 @@ response model.
 The SPA SHALL use a client router so the authenticated shell presents a Home view
 (hero plus horizontally-scrolling rails with infinite scroll), a deep-linkable
 title detail modal at `/title/:type/:id`, and a Search view — all fetched through
-the OpenAPI-generated typed client via TanStack Query. Images SHALL be built
+the OpenAPI-generated typed client via TanStack Query.
+
+#### Details
+
+Images SHALL be built
 responsively from title image paths. TMDB-supplied text SHALL be rendered as text,
 never as HTML, and non-essential animation SHALL be disabled under
 `prefers-reduced-motion`. The SPA SHALL render an **availability badge** on cards,
@@ -400,7 +415,11 @@ available.
 ### Requirement: Detail overlay preserves one browsing context
 
 The SPA detail overlay SHALL preserve the original browse location while the
-user opens related titles. Related-title navigation SHALL replace the active
+user opens related titles.
+
+#### Details
+
+Related-title navigation SHALL replace the active
 detail history entry so closing any related detail returns directly to the
 original browse view. While a detail overlay is mounted, the underlying document
 SHALL NOT scroll, and its prior scroll behavior SHALL be restored when the
@@ -483,7 +502,11 @@ Seerr cookie, internal URL, or raw upstream body SHALL appear in the response.
 ### Requirement: Detail offers resilient Plex Web and Plex App controls
 
 The detail modal SHALL render a Plex Web link alongside the request affordance for
-an available or partially available title with a validated web target. When the chosen variant also
+an available or partially available title with a validated web target.
+
+#### Details
+
+When the chosen variant also
 has a validated app target, it SHALL separately render a Plex App link so the user
 chooses the destination instead of platform detection hiding the recoverable web path.
 On Android, the app link SHALL use the server-provided `intent://` target so Plex
@@ -554,7 +577,11 @@ keyboard/remote navigation and visible-focus behavior as adjacent detail control
 
 The system SHALL allow a media summary and its inherited media-detail shape to
 contain a computed progress percentage from 1 through 99 and short plain-text
-context for a Continue Watching item. MediaCard SHALL render valid progress as
+context for a Continue Watching item.
+
+#### Details
+
+MediaCard SHALL render valid progress as
 both visible text and a visual
 progress bar with an accessible label; it SHALL render context as text. Ordinary
 `MediaSummary` instances, including inherited detail shapes, SHALL
@@ -590,7 +617,11 @@ visibility, availability hydration, and reduced-motion behavior.
 
 Home SHALL render enabled Continue Watching and unexpected-picks results through
 the existing Rail component and SHALL offer the enabled household-blend picker as
-an inline, non-blocking section. Continue Watching and unexpected picks SHALL
+an inline, non-blocking section.
+
+#### Details
+
+Continue Watching and unexpected picks SHALL
 participate in the normal home response/de-duplication order. A requested
 household result SHALL render as one standard dynamic rail and hydrate its own
 availability without delaying the existing Home query. Failure, token absence,
@@ -621,3 +652,19 @@ it SHALL NOT accept browser-supplied visible-title exclusion keys.
 - **WHEN** Plex, exploration scoring, or household blending fails
 - **THEN** no generic Home error replaces unaffected hero, rails, picker, or
   infinite scrolling
+
+### Requirement: TMDB text declares its language
+
+TMDB-sourced titles, overviews, and taglines in media cards, the Home hero, and
+title detail SHALL carry a `lang` attribute equal to the household metadata
+language from `PublicConfig`. Text Tasterr writes itself (labels, buttons, rail
+names it generates) SHALL keep the document language. When the config is not yet
+loaded, no `lang` attribute SHALL be set rather than a guessed one.
+
+#### Scenario: Spanish title is marked
+- **WHEN** the metadata language is `es-ES` and a media card renders
+- **THEN** its title element has `lang="es-ES"` and its surrounding controls do not
+
+#### Scenario: Default language
+- **WHEN** the metadata language is `en-US`
+- **THEN** TMDB text carries `lang="en-US"`

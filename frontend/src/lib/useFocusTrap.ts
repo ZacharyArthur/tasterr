@@ -40,6 +40,11 @@ export function useFocusTrap(
 					!element.hidden && element.getAttribute("aria-hidden") !== "true",
 			);
 		if (openTraps.at(-1) === trap) (focusable()[0] ?? node).focus();
+		const observer = new MutationObserver(() => {
+			if (openTraps.at(-1) === trap && !node.contains(document.activeElement))
+				(focusable()[0] ?? node).focus();
+		});
+		observer.observe(node, { childList: true, subtree: true });
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (openTraps.at(-1) !== trap) return;
 			if (event.key === "Escape") {
@@ -69,6 +74,7 @@ export function useFocusTrap(
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => {
+			observer.disconnect();
 			document.removeEventListener("keydown", onKeyDown);
 			const active = openTraps.at(-1) === trap;
 			openTraps.splice(openTraps.indexOf(trap), 1);

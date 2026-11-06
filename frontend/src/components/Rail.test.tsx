@@ -4,6 +4,11 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { Rail as RailData } from "../lib/api";
 import { Rail } from "./Rail";
 
+vi.mock("../lib/availability", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../lib/availability")>()),
+	useConfig: () => ({ data: undefined }),
+}));
+
 afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();

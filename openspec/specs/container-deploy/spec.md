@@ -21,7 +21,11 @@ runtime MUST run as a non-root user and define a healthcheck against
 `docker-compose.yml` SHALL start Tasterr on a Compose-managed network and, when
 Seerr is configured, reach it
 exclusively through `SEERR_INTERNAL_URL`, without requiring a
-pre-created external network. A separate optional override SHALL let Tasterr join an
+pre-created external network.
+
+#### Details
+
+A separate optional override SHALL let Tasterr join an
 operator-named external network when Seerr runs on the same Docker host in another
 Compose project and service-name discovery is desired. The base example SHALL keep
 the optional Seerr service commented out rather than start a second server by
@@ -104,7 +108,11 @@ failure, and MUST NOT read or print a real `.env` or integration secret.
 
 A GitHub Actions image workflow SHALL run the native container smoke before using
 Buildx to publish the production image for `linux/amd64` and `linux/arm64` to
-`ghcr.io/${{ github.repository }}` on pushes to `main` and stable `v*` tags. Every
+`ghcr.io/${{ github.repository }}` on pushes to `main` and stable `v*` tags.
+
+#### Details
+
+Every
 publish SHALL include an immutable commit tag; `main` SHALL update a moving main tag;
 a stable SemVer tag SHALL publish full/major-minor/major tags and update `latest`.
 The workflow MUST use least-privilege package permissions, immutable third-party
@@ -127,7 +135,11 @@ action pins, and no secret-bearing build args or image layers.
 ### Requirement: Production HTTP metadata is private and hardened
 
 The production server SHALL disable request access logging and its identifying
-server header. Application-owned logs MUST contain generic operational outcomes only
+server header.
+
+#### Details
+
+Application-owned logs MUST contain generic operational outcomes only
 and MUST NOT contain request targets, query strings, search terms, household user
 identifiers, title/viewing data, credentials, tokens, cookies, internal/live URLs, or
 upstream response bodies.

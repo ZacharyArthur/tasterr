@@ -102,6 +102,42 @@ async def test_subscriptions_use_active_region_and_fail_open() -> None:
     assert await filter_.eligible([("movie", 4)]) == {("movie", 4)}
 
 
+@pytest.mark.parametrize("household", [False, True])
+async def test_personal_exclusions_skip_verification_even_after_deadline(
+    household: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(discovery_mod, "VERIFICATION_SECONDS", 0.001)
+    catalog, library = Catalog(), Library()
+    filter_ = DiscoveryFilter(
+        cast("CatalogService", catalog),
+        cast("AvailabilityService", library),
+        household,
+        [8] if household else [],
+        frozenset({("tv", 1), ("movie", 2)}),
+    )
+    from tasterr.catalog.models import MediaSummary
+
+    # Any attempted verification slot acquisition would fail.
+    monkeypatch.setattr(filter_, "_semaphore", None)
+    item = MediaSummary(
+        id=1,
+        media_type="tv",
+        title="Title",
+        overview="",
+        poster_path=None,
+        backdrop_path=None,
+        year=2020,
+        vote_average=7.0,
+    )
+    assert await filter_.filter([item]) == []
+    assert filter_.deadline is not None
+    assert filter_.household_active is household
+    await asyncio.sleep(0.005)
+    assert filter_.expired
+    assert await filter_.eligible([("movie", 2), ("movie", 3)]) == {("movie", 3)}
+    assert library.calls == catalog.calls == []
+
+
 async def test_deadline_shared_across_checks_boosts_and_rails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

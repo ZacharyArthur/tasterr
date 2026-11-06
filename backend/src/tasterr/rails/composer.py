@@ -12,6 +12,7 @@ from datetime import date
 from random import Random
 
 from tasterr.catalog.models import (
+    Genre,
     HeroSlide,
     HomeFeed,
     MediaSummary,
@@ -233,19 +234,19 @@ async def _extended_providers(ctx: RailContext) -> list[RailProvider]:
         providers += [decade_provider(decade) for decade in DECADES]
     if not ctx.enabled(RailType.GENRES):
         return providers
-    movie_map, tv_map = await asyncio.gather(
-        _safe_genre_map(ctx.catalog, "movie"), _safe_genre_map(ctx.catalog, "tv")
+    movie_genres, tv_genres = await asyncio.gather(
+        _safe_genres(ctx.catalog, "movie"), _safe_genres(ctx.catalog, "tv")
     )
-    genres = [genre_provider(gid, name, "movie") for name, gid in movie_map.items()]
-    genres += [genre_provider(gid, name, "tv") for name, gid in tv_map.items()]
+    genres = [genre_provider(g.id, g.name, "movie") for g in movie_genres]
+    genres += [genre_provider(g.id, g.name, "tv") for g in tv_genres]
     user_id = ctx.user.id if ctx.user is not None else 0
     Random(f"genres:{user_id}:{date.today().isoformat()}").shuffle(genres)
     providers += genres
     return providers
 
 
-async def _safe_genre_map(catalog: CatalogService, media: MediaType) -> dict[str, int]:
+async def _safe_genres(catalog: CatalogService, media: MediaType) -> list[Genre]:
     try:
-        return await catalog.genre_map(media)
+        return await catalog.genres(media)
     except UpstreamError:
-        return {}
+        return []

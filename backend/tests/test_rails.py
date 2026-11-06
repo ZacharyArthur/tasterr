@@ -19,6 +19,7 @@ from tasterr.catalog.models import (
     WatchProviders,
 )
 from tasterr.catalog.plex import PlexCatalogService
+from tasterr.catalog.resume import ResumeCandidate
 from tasterr.catalog.service import CatalogService
 from tasterr.clients.errors import UpstreamUnavailable
 from tasterr.db.models import User
@@ -150,6 +151,12 @@ class FakeCatalog:
             raise UpstreamUnavailable("genres down")
         return dict(self.genre_map_result)
 
+    async def genres(self, media: str) -> list[Genre]:
+        self.genre_map_calls.append(media)
+        if self.fail_genre_map:
+            raise UpstreamUnavailable("genres down")
+        return [Genre(id=gid, name=name) for name, gid in self.genre_map_result.items()]
+
     async def detail(self, media: str, tmdb_id: int) -> MediaDetail:
         return _detail(tmdb_id)
 
@@ -161,6 +168,20 @@ class FakeCatalog:
 
 def _ctx(fake: FakeCatalog) -> RailContext:
     return RailContext(cast("CatalogService", fake))
+
+
+async def test_genre_rail_titles_use_display_names_without_engine_map() -> None:
+    class LocalizedCatalog(FakeCatalog):
+        async def genres(self, media: str) -> list[Genre]:
+            return [Genre(id=28, name="Acción")]
+
+        async def genre_map(self, media: str) -> dict[str, int]:
+            raise AssertionError("Engine map must not supply display labels")
+
+    rails = await _all_extra_rails(_ctx(LocalizedCatalog()))
+    genre_rails = [rail for rail in rails if rail.id.startswith("genre-")]
+    assert len(genre_rails) == 2
+    assert all("Acción" in rail.title for rail in genre_rails)
 
 
 async def _all_extra_rails(ctx: RailContext) -> list[Rail]:
@@ -179,13 +200,15 @@ class FakePlexCatalog:
         self.calls = 0
         self.fail = False
 
-    async def continue_watching(self, user_id: int, account_token: str) -> list[MediaSummary]:
+    async def resume_candidates(self, account_token: str) -> list[ResumeCandidate]:
         self.calls += 1
-        assert user_id == 1
         assert account_token == "account-token"
         if self.fail:
             raise UpstreamUnavailable("plex down")
-        return self.items
+        return [
+            ResumeCandidate(item.media_type, item.id, -index, (0, 0), item.progress_percent)
+            for index, item in enumerate(self.items)
+        ]
 
 
 def _resume(*ids: int) -> list[MediaSummary]:
@@ -299,18 +322,18 @@ async def test_continue_watching_fetch_overlaps_but_keeps_response_priority() ->
         await gate.wait()
 
     original_trending = fake.trending
-    original_continue = plex.continue_watching
+    original_continue = plex.resume_candidates
 
     async def trending() -> list[MediaSummary]:
         await wait_for_peer("trending")
         return await original_trending()
 
-    async def continue_watching(user_id: int, account_token: str) -> list[MediaSummary]:
+    async def resume_candidates(account_token: str) -> list[ResumeCandidate]:
         await wait_for_peer("plex")
-        return await original_continue(user_id, account_token)
+        return await original_continue(account_token)
 
     fake.trending = trending  # type: ignore[method-assign]
-    plex.continue_watching = continue_watching  # type: ignore[method-assign]
+    plex.resume_candidates = resume_candidates  # type: ignore[method-assign]
 
     feed = await build_home(_plex_ctx(fake, plex))
 
@@ -579,6 +602,38 @@ async def test_build_home_returns_hero_and_rails() -> None:
     assert feed.hero[0].logo_path == "/logo.png"
     assert feed.hero[0].genres == ["Drama"]
     assert "trending" in {r.id for r in feed.rails}
+
+
+async def test_personal_exclusions_shrink_trending_then_drop_it_and_fall_back_for_hero() -> None:
+    fake = FakeCatalog()
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(
+        ctx.catalog, None, False, [], frozenset({("movie", 1)})
+    )
+    feed = await build_home(ctx)
+    trending = next(rail for rail in feed.rails if rail.id == "trending")
+    assert [item.id for item in trending.items] == [2, 3, 4, 5, 6]
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(
+        ctx.catalog, None, False, [], frozenset({("movie", i) for i in range(1, 5)})
+    )
+    feed = await build_home(ctx)
+    assert "trending" not in {rail.id for rail in feed.rails}
+    assert feed.hero
+    assert [slide.item.id for slide in feed.hero] == [
+        item.id for item in feed.rails[0].items[:HERO_SIZE]
+    ]
+
+
+async def test_personal_exclusions_allow_successful_empty_feed() -> None:
+    fake = FakeCatalog()
+    fake.fixed_discover = list(fake.trending_items)
+    ctx = _ctx(fake)
+    ctx.catalog.discovery_filter = DiscoveryFilter(
+        ctx.catalog, None, False, [], frozenset({("movie", i) for i in range(1, 7)})
+    )
+    feed = await build_home(ctx)
+    assert feed.hero == feed.rails == []
 
 
 class ExcludedCatalog(FakeCatalog):

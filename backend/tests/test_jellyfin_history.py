@@ -49,7 +49,9 @@ async def test_partial_import_commits_at_most_100_facts_and_keeps_watermark(
 
     monkeypatch.setattr(AsyncSession, "commit", commit)
     try:
-        await import_jellyfin_history(maker, cast(JellyfinClient, object()), user_id)
+        await import_jellyfin_history(
+            maker, cast(JellyfinClient, object()), user_id, timedelta(days=365)
+        )
         assert totals == [0, 0, 100, 200, 205]
         async with maker() as db:
             link = await get_link(db, user_id, "jellyfin")
@@ -245,8 +247,12 @@ async def test_import_attempt_throttle_windows_watermark_and_outage(
 
     monkeypatch.setattr("tasterr.api.taste.read_history", read)
     try:
-        await import_jellyfin_history(maker, cast(JellyfinClient, object()), user_id)
-        await import_jellyfin_history(maker, cast(JellyfinClient, object()), user_id)
+        await import_jellyfin_history(
+            maker, cast(JellyfinClient, object()), user_id, timedelta(days=365)
+        )
+        await import_jellyfin_history(
+            maker, cast(JellyfinClient, object()), user_id, timedelta(days=365)
+        )
         assert windows == [
             (
                 previous - timedelta(hours=24) if incremental else CUTOFF - timedelta(days=365),

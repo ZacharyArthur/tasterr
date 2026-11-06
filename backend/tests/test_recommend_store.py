@@ -3,7 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from tests.factories import user_with_links
@@ -90,6 +90,28 @@ async def test_reads_are_isolated_per_user(db: AsyncSession) -> None:
     assert await store.load_profile(db, bob) is None
     assert await store.has_signals(db, alice) is True
     assert len(await store.load_signals(db, alice)) == 1
+
+
+async def test_discovery_exclusions_follow_retained_rows_and_caller(db: AsyncSession) -> None:
+    alice = await _user(db, 1)
+    bob = await _user(db, 2)
+    await store.record_signal(db, alice, "movie", 1, "not_interested")
+    await store.record_signal(db, alice, "movie", 2, "watched_plex")
+    await store.record_signal(db, alice, "tv", 3, "watched_jellyfin")
+    await store.record_signal(db, alice, "movie", 4, "watchlist")
+    await store.record_signal(db, bob, "movie", 5, "not_interested")
+    await store.set_source_enabled(db, alice, "jellyfin", False)
+    assert await store.discovery_exclusions(db, alice, watched=True) == {
+        ("movie", 1),
+        ("movie", 2),
+        ("tv", 3),
+    }
+    assert await store.discovery_exclusions(db, alice, watched=False) == {("movie", 1)}
+    await store.retract_signal(db, alice, "movie", 1, "not_interested")
+    await db.execute(delete(Signal).where(Signal.user_id == alice, Signal.kind == "watched_plex"))
+    assert await store.discovery_exclusions(db, alice, watched=True) == {("tv", 3)}
+    assert await store.discovery_exclusions(db, alice, watched=False) == frozenset()
+    assert await store.discovery_exclusions(db, bob, watched=True) == {("movie", 5)}
 
 
 async def test_features_round_trip_and_staleness(db: AsyncSession) -> None:

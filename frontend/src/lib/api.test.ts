@@ -97,10 +97,13 @@ test("logout tolerates the empty 204 body", async () => {
 test("admin settings replacement uses a typed JSON PUT with same-origin credentials", async () => {
 	const body = {
 		region: "US",
+		language: "en-US",
 		service_ids: [8],
 		hide_library_items: false,
+		hide_watched_items: true,
 		excluded_service_ids: [],
 		disabled_rail_types: ["genres" as const],
+		disabled_sign_in_methods: [],
 		appearance: { theme: "light" as const, accent: "azure" as const },
 	};
 	const mock = stubFetch(200, { settings: body, rail_types: [] });
@@ -168,12 +171,13 @@ test("availability batches stay within the endpoint limit and merge responses", 
 	expect(Object.keys(result)).toHaveLength(101);
 });
 
-test.each([
-	401, 403, 422, 429, 500,
-])("admin failures preserve status %i", async (status) => {
-	stubFetch(status, { detail: "generic failure" });
-	const error = await getServices("US").catch((caught: unknown) => caught);
-	expect(error).toBeInstanceOf(ApiError);
-	expect((error as ApiError).status).toBe(status);
-	expect((error as ApiError).message).toBe("generic failure");
-});
+test.each([401, 403, 422, 429, 500])(
+	"admin failures preserve status %i",
+	async (status) => {
+		stubFetch(status, { detail: "generic failure" });
+		const error = await getServices("US").catch((caught: unknown) => caught);
+		expect(error).toBeInstanceOf(ApiError);
+		expect((error as ApiError).status).toBe(status);
+		expect((error as ApiError).message).toBe("generic failure");
+	},
+);

@@ -6,13 +6,25 @@ makes the env/DB boundary structural rather than convention-based.
 """
 
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StrictInt, field_validator
 
 DEFAULT_REGION = "US"
+LANGUAGE_PATTERN = r"^[a-z]{2}-[A-Z]{2}$"
+LanguageCode = Annotated[str, Field(pattern=LANGUAGE_PATTERN)]
 MAX_SELECTED_SERVICES = 8
-DiscoverySetting = Literal["hide_library_items", "excluded_service_ids"]
+DiscoverySetting = Literal[
+    "hide_library_items", "hide_watched_items", "excluded_service_ids", "disabled_sign_in_methods"
+]
+SignInMethod = Literal["plex", "jellyfin", "seerr"]
+SIGN_IN_METHODS: tuple[SignInMethod, ...] = ("plex", "jellyfin", "seerr")
+
+
+def validate_sign_in_methods(value: list[SignInMethod]) -> list[SignInMethod]:
+    if len(value) != len(set(value)):
+        raise ValueError("sign-in methods must be unique")
+    return value
 
 
 def validate_service_ids(value: list[int]) -> list[int]:
@@ -78,11 +90,16 @@ class Appearance(BaseModel):
 
 class RuntimeSettings(BaseModel):
     region: str = DEFAULT_REGION
+    language: LanguageCode = "en-US"
     service_ids: list[int] = Field(default=[], max_length=MAX_SELECTED_SERVICES)
     hide_library_items: bool = False
+    hide_watched_items: bool = True
     excluded_service_ids: list[StrictInt] = Field(default=[], max_length=MAX_SELECTED_SERVICES)
     disabled_rail_types: list[RailType] = []
+    disabled_sign_in_methods: list[SignInMethod] = Field(default=[], max_length=3)
     appearance: Appearance = Field(default_factory=Appearance)
+
+    _sign_in_methods = field_validator("disabled_sign_in_methods")(validate_sign_in_methods)
 
     @field_validator("region", mode="before")
     @classmethod

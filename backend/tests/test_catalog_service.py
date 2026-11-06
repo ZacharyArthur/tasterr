@@ -36,6 +36,7 @@ class FakeTmdb:
         media: str,
         *,
         region: str,
+        language: str,
         page: int = 1,
         sort_by: str = "popularity.desc",
         genres: list[int] | None = None,
@@ -49,11 +50,13 @@ class FakeTmdb:
         self.last_providers = providers
         return TmdbMediaPage(results=[TmdbMediaResult(id=1, title="A")])  # no media_type
 
-    async def trending(self, media: str = "all", window: str = "day") -> TmdbMediaPage:
+    async def trending(
+        self, media: str = "all", window: str = "day", *, language: str
+    ) -> TmdbMediaPage:
         self.calls += 1
         return TmdbMediaPage(results=[TmdbMediaResult(id=2, media_type="movie", title="T")])
 
-    async def multi_search(self, query: str) -> TmdbMediaPage:
+    async def multi_search(self, query: str, *, language: str) -> TmdbMediaPage:
         self.calls += 1
         if self.raise_not_configured:
             raise CatalogNotConfigured
@@ -64,19 +67,19 @@ class FakeTmdb:
             ]
         )
 
-    async def detail(self, media: str, tmdb_id: int, region: str) -> TmdbDetail:
+    async def detail(self, media: str, tmdb_id: int, region: str, *, language: str) -> TmdbDetail:
         self.calls += 1
         return TmdbDetail(id=tmdb_id, title="D")
 
-    async def genres(self, media: str) -> list[TmdbGenre]:
+    async def genres(self, media: str, *, language: str) -> list[TmdbGenre]:
         self.calls += 1
         return [TmdbGenre(id=28, name="Action")]
 
-    async def regions(self) -> list[TmdbRegion]:
+    async def regions(self, *, language: str) -> list[TmdbRegion]:
         self.calls += 1
         return [TmdbRegion(iso_3166_1="GB", english_name="United Kingdom")]
 
-    async def providers(self, media: str, region: str) -> list[TmdbProvider]:
+    async def providers(self, media: str, region: str, *, language: str) -> list[TmdbProvider]:
         self.calls += 1
         priority = 1 if media == "movie" else 2
         return [
@@ -128,7 +131,9 @@ async def test_discover_refills_after_confirmed_exclusions() -> None:
                 page=page, total_pages=2, results=[TmdbMediaResult(id=page, title="Title")]
             )
 
-        async def detail(self, media: str, tmdb_id: int, region: str) -> TmdbDetail:
+        async def detail(
+            self, media: str, tmdb_id: int, region: str, *, language: str
+        ) -> TmdbDetail:
             return TmdbDetail.model_validate(
                 {
                     "id": tmdb_id,
@@ -148,10 +153,29 @@ async def test_discover_refills_after_confirmed_exclusions() -> None:
     assert fake.calls == 2
 
 
+async def test_personal_only_discovery_refills_an_empty_page_within_three_pages() -> None:
+    class PagedTmdb(FakeTmdb):
+        async def discover(self, media: str, *, page: int = 1, **kwargs: object) -> TmdbMediaPage:
+            self.calls += 1
+            return TmdbMediaPage(
+                page=page, total_pages=10, results=[TmdbMediaResult(id=page, title="Title")]
+            )
+
+    fake = PagedTmdb()
+    service = CatalogService(cast("TmdbClient", fake), personal=frozenset({("movie", 1)}))
+    assert service.discovery_filter is not None
+    assert not service.discovery_filter.household_active
+    assert [item.id for item in await service.discover("movie")] == [2, 3]
+    assert fake.calls == 3
+    assert _service(FakeTmdb()).discovery_filter is None
+
+
 @pytest.mark.parametrize("empty_first", [False, True])
+@pytest.mark.parametrize("personal", [False, True])
 async def test_stalled_refill_stops_at_shared_deadline_and_retains_first_page(
     monkeypatch: pytest.MonkeyPatch,
     empty_first: bool,
+    personal: bool,
 ) -> None:
     monkeypatch.setattr(discovery_mod, "VERIFICATION_SECONDS", 0.03)
     cancelled = asyncio.Event()
@@ -168,11 +192,20 @@ async def test_stalled_refill_stops_at_shared_deadline_and_retains_first_page(
             return TmdbMediaPage(
                 page=page,
                 total_pages=10,
-                results=[] if empty_first else [TmdbMediaResult(id=page, title="Title")],
+                results=[]
+                if empty_first
+                else [TmdbMediaResult(id=page, title="Title")]
+                + ([TmdbMediaResult(id=2, title="Hidden")] if personal else []),
             )
 
     service = _service(StalledTmdb())
-    service.discovery_filter = DiscoveryFilter(service, None, False, [8])
+    service.discovery_filter = DiscoveryFilter(
+        service,
+        None,
+        False,
+        [] if personal else [8],
+        frozenset({("movie", 2)}) if personal else frozenset(),
+    )
     async with asyncio.timeout(0.3):
         assert [item.id for item in await service.discover("movie")] == ([] if empty_first else [1])
     assert pages == [1, 2]
@@ -216,8 +249,12 @@ async def test_refill_timeout_releases_real_cache_single_flight_lock(
             assert [item.id for item in await service.discover("movie")] == [1]
             assert cancelled.is_set()
             # Same client/cache/key: no lingering page-two loader or lock.
-            assert (await client.discover("movie", region="US", page=2)).results[0].id == 2
-            assert (await client.discover("movie", region="US", page=2)).results[0].id == 2
+            assert (await client.discover("movie", region="US", page=2, language="en-US")).results[
+                0
+            ].id == 2
+            assert (await client.discover("movie", region="US", page=2, language="en-US")).results[
+                0
+            ].id == 2
         assert pages == [1, 2, 2]
 
 

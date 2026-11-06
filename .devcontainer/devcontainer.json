@@ -2,7 +2,7 @@
 	"name": "tasterr",
 	"build": { "dockerfile": "Dockerfile" },
 	"features": {
-		"ghcr.io/devcontainers/features/node:1": { "version": "24" },
+		"ghcr.io/devcontainers/features/node:2": { "version": "26" },
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
 		"ghcr.io/devcontainers/features/github-cli:1": {}
 	},
@@ -16,7 +16,7 @@
 		// venv volume and uv cache are different filesystems; copy, don't hardlink
 		"UV_LINK_MODE": "copy"
 	},
-	"postCreateCommand": "sudo chown -R vscode:vscode backend/.venv frontend/node_modules && (cd backend && uv sync) && (cd frontend && npm ci) && npm install --global @fission-ai/openspec@1",
+	"postCreateCommand": "sudo chown -R vscode:vscode backend/.venv frontend/node_modules && (cd backend && uv sync) && (cd frontend && npm ci) && npm install --global @fission-ai/openspec@1.16.0",
 	"remoteUser": "vscode",
 	"customizations": {
 		"vscode": {

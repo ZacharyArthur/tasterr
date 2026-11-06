@@ -33,8 +33,9 @@ Use `$$` for a literal dollar sign inline, and single-quote literal dollars in
 Compose file. See [Docker's substitution reference](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/).
 Never share rendered Compose configuration: it includes secrets.
 
-The example pins `2.3.1`; the linked-account, direct Plex/Jellyfin sign-in, and
-taste-source features in the current source are unreleased. Use a release
+The example pins `2.3.1`; the account work, metadata language, discovery exclusions,
+Jellyfin Continue Watching, sign-in choices, Seerr setup awareness, and Trakt history
+in the current source are unreleased. Use a release
 containing them once available; no version bump is implied by this reference.
 The pinned release requires Seerr and ignores `PLEX_SERVER_ID` and `JELLYFIN_*`;
 in particular, setting `PLEX_SERVER_ID` on `2.3.1` does not restrict sign-in.
@@ -52,17 +53,22 @@ empty volume. Keep the existing `.env` rather than replacing it with placeholder
 | `JELLYFIN_INTERNAL_URL` | For Jellyfin integration | unset | Server-only HTTP(S) base URL with a host and no embedded credentials, query, or fragment. Invalid values leave Jellyfin unconfigured. |
 | `JELLYFIN_API_KEY` | For Jellyfin integration | unset | Secret server-admin API key used only for user-scoped reads. Create one in Jellyfin Dashboard → Advanced → API Keys. |
 | `JELLYFIN_ALLOW_EMPTY_PASSWORD` | No | `false` | Explicitly allow passwordless Jellyfin accounts for sign-in and linking. |
+| `TRAKT_CLIENT_ID` | For Trakt history | unset | Operator-owned Trakt app client id. Requires `TASTERR_SECRET_KEY`; server-side only. |
+| `TRAKT_CLIENT_SECRET` | No | unset | Optional app secret used only for refresh and revoke. Newer apps issue none. |
 | `SEERR_EXTERNAL_URL` | No | unset | Browser-visible HTTP(S) base URL for fallback “Request in Seerr” links. Embedded credentials are rejected. |
 | `SEERR_API_KEY` | For Seerr reads | unset | Server-only Seerr API key. User-attributed request writes use the member's Seerr session instead. |
-| `TASTERR_SECRET_KEY` | For sign-in/requests | unset | Random secret used to encrypt linked Plex tokens and Seerr cookies. Keep it stable across upgrades. |
+| `TASTERR_SECRET_KEY` | For sign-in/requests | unset | Random secret used to encrypt linked Plex tokens, Seerr cookies, and Trakt tokens. Keep it stable across upgrades. |
 | `DATABASE_PATH` | No | `data/tasterr.db` | SQLite path. The image sets `/data/tasterr.db` on its named volume. |
 | `STATIC_DIR` | No | `static` | Compiled SPA directory. The image sets `/app/static`. |
 | `TASTERR_HOST` | No | `0.0.0.0` | Uvicorn bind address. |
 | `TASTERR_PORT` | No | `8000` | Uvicorn container port and healthcheck target. |
 | `TASTERR_FORWARDED_ALLOW_IPS` | No | `127.0.0.1` | Comma-separated direct proxy-peer IP addresses or CIDRs allowed to supply forwarded client/scheme headers. |
 | `TASTERR_PLEX_MAX_CONNECTION_PROBES` | No | `6` | Maximum unauthenticated Plex identity probes per advertised server resource. Accepts 3–12. Up to four resources are probed concurrently, so raising it can increase aggregate bounded discovery traffic. |
+| `TASTERR_WATCH_HISTORY_DAYS` | No | `365` | Initial lookback in days for a link's first Plex or Jellyfin history sync. Accepts 1–3650; invalid, null, or empty values fail boot. Server-side only. |
 | `TASTERR_HIDE_LIBRARY_ITEMS` | No | unset | Override household library hiding with `true` or `false`; locks the admin control. |
+| `TASTERR_HIDE_WATCHED_ITEMS` | No | unset | Override household watched-title hiding (on by default) with `true` or `false`; locks the admin control. |
 | `TASTERR_EXCLUDED_SERVICE_IDS` | No | unset | Override subscription-service exclusions with a JSON array of up to eight unique positive TMDB provider IDs, e.g. `[8]`; `[]` explicitly clears exclusions and locks the control. |
+| `TASTERR_SIGN_IN_METHODS` | No | unset | Override and lock sign-in choices with a JSON array of 1–3 unique names: `plex`, `jellyfin`, `seerr`, e.g. `["jellyfin"]`. Empty arrays/strings, JSON `null`, unknown names and duplicates fail boot. |
 
 Missing integration values do not prevent boot. Seerr URLs must be HTTP(S).
 An explicitly empty or malformed `PLEX_SERVER_ID` fails boot; omit it to use the
@@ -100,7 +106,7 @@ docker run --rm python:3.13-slim python -c "import secrets; print(secrets.token_
 ```
 
 Store the result only in `.env` or your secret manager. Rotating it makes previously
-stored Plex tokens and Seerr cookies unreadable, so affected members must sign in
+stored Plex tokens, Seerr cookies, and Trakt tokens unreadable, so affected members must sign in
 or reconnect the affected accounts. Obtain TMDB, Seerr, and Jellyfin API keys from
 their respective settings pages; do not place them in browser code, Compose build args,
 or image layers.
@@ -139,13 +145,34 @@ and fresh admission/admin checks.
 Administrators manage these non-secret values in the Settings screen:
 
 - two-letter TMDB region (default `US`);
+- household TMDB metadata language (default `en-US`, two lower-case letters,
+  a hyphen, then two upper-case letters, such as `es-ES`);
 - up to eight streaming service identifiers;
 - library hiding and up to eight excluded subscription-service identifiers (both off by default);
+- watched-title hiding (on by default, using each member's own history);
+- offered sign-in methods (every configured method by default; recovery below);
 - enabled/disabled rail types;
 - dark/light theme and crimson, azure, violet, emerald, or amber accent.
 
 They are stored in SQLite, returned through an explicit public response model, and
 never accept URLs, keys, tokens, cookies, or credentials.
+
+The metadata language applies to display-facing TMDB reads: titles, overviews,
+details, genre rail names, regions, and providers. Settings offers TMDB's primary
+translations, labelled with the browser's language names and their codes; the saved
+value remains available even if TMDB omits it or is unavailable. Saving validates
+only the code format and never needs a TMDB call. This is one household preference,
+with no per-member setting or environment override, and the UI stays English.
+Missing translations use TMDB's original text; images and trailers prefer the
+configured language, then English, then language-neutral assets.
+
+The recommendation engine keeps its English vocabulary, including engine-derived
+English genre labels in explanations. Households using a metadata language other
+than `en-US` (including `en-GB`) make extra `en-US` detail reads for newly featurized
+titles and English genre-list reads, covered by the normal cache. Changing language
+does not rebuild stored taste features or need
+a migration. Continue Watching may show the previous language for up to five
+minutes after a change, until its existing per-user rail cache expires.
 
 Discovery exclusions apply to Home, additional rails, featured heroes, household
 picks, and related-title suggestions. Search, My List, Continue Watching, and direct
@@ -155,6 +182,25 @@ remain eligible. Excluded services match subscription availability in the config
 region, even when another service also offers the title. Rental, purchase, free, and
 ad-supported listings alone do not hide it. Exclusions win over selected services;
 a conflicting service rail is omitted and other discovery may become thin or empty.
+
+`hide_watched_items` defaults **on**, including when upgrading an existing settings
+document. Each member's own stored watched titles are hidden from their discovery,
+including any series with one watched episode, even when that history source is
+switched off for taste learning. Clearing the source's history restores eligibility
+unless another retained signal still excludes the title. Not interested always hides
+the member's dismissed titles from discovery, regardless of the watched setting.
+Search, My List, Continue Watching, and direct title detail remain accessible.
+Household blend retains its existing veto for every participant's watched and
+dismissed titles, even with watched hiding off.
+
+This changes generic discovery on upgrade: discover rails refill within three
+pages, while fixed-list Trending only shrinks and can disappear for heavy watchers.
+The hero then uses a surviving discovery rail. Turn off **Hide titles members have
+watched** in Settings or set `TASTERR_HIDE_WATCHED_ITEMS=false` to restore watched
+titles on generic rails. Personal exclusions use stored signals without upstream
+verification and still apply after the shared deadline. With only personal
+exclusions, ranking boosts keep their existing availability lookup outside that
+budget; the first filtering step still starts the deadline for refill.
 
 Verification is best-effort with one five-second budget across a request's checks,
 concurrency eight, and at most three pages per discover source for replacements.
@@ -178,24 +224,55 @@ and are evaluated in the new region.
 
 The rail list includes independent switches for **Continue Watching**, **Picks You
 Wouldn't Usually Watch**, and **Something for Everyone Tonight**. All three default
-enabled. Any user with a Plex link reuses its encrypted account token, including
-after local sign-in. Users without a Plex link perform no live Plex read.
+enabled. Continue Watching uses linked Plex and/or Jellyfin accounts, independently
+of sign-in choice and taste toggles. Plex reuses its encrypted account token;
+Jellyfin uses API-key reads scoped to the linked user id. Users without a Plex
+link perform no live Plex read. Household blends require at least two members
+with taste signals, including the caller; a Plex link is not required.
 `TASTERR_PLEX_MAX_CONNECTION_PROBES` only tunes
 bounded server-side discovery and is never exposed to the browser.
+
+### Sign-in methods and lockout recovery
+
+Settings lets admins choose which configured methods are offered for sign-in.
+Every configured method is offered by default. Hiding a method removes its login
+button and makes its sign-in endpoints return the same generic 503 as an
+unconfigured integration. Configuration still controls linking, dormancy, history,
+Continue Watching, and requests; hiding a method does not disable these features
+or change Seerr auto-linking. Hidden linked accounts say **Not used for sign-in**.
+
+A save cannot remove the saving admin's last linked, offered method. Before
+saving, Settings previews the number of members left without an offered linked
+method. Existing sessions continue within their normal 30/90-day limits; affected
+members see an Account warning naming offered methods to link before signing out.
+Unlinking also requires another linked method currently offered for sign-in.
+
+If locked out, set `TASTERR_SIGN_IN_METHODS` to include a **configured method
+already linked to your account**, for example `'["plex"]'`, and restart/recreate
+the container. Sign in with that method, then remove the variable and restart to
+edit Settings again. The variable locks all method checkboxes and overrides,
+without replacing, the stored denylist. Removing it restores the previous choice;
+keep your session open and correct that choice before signing out. Omit the
+variable entirely to leave Settings editable. This setting requires a release
+after the example's pinned `2.3.1` image.
 
 ## Member accounts and taste sources
 
 Every member can open **Account** (`/account`) from the avatar menu. Link Plex via
-PIN, Jellyfin via username/password, or Seerr via Plex, local credentials, or
-Jellyfin credentials. Prove links before switching sign-in methods: there is no
+PIN, Jellyfin via username/password, Trakt via device authorization, or Seerr via
+the Plex, local, or Jellyfin methods its setup accepts. The Seerr dialog names the
+active credentials and offers a form toggle only when both credential forms are
+accepted; known-refused methods are hidden. Prove links before switching sign-in methods: there is no
 email matching or account merge. Explicitly unlinking Seerr prevents automatic
 reconnection until manually linked again. Unlink requires another usable sign-in
-method; imported history is retained unless its deletion is selected. Deleting a
-Tasterr account removes its local data and sessions, leaving upstream accounts alone.
+method, except that Trakt can always be unlinked and never counts as sign-in;
+imported history is retained unless its deletion is selected. Deleting a Tasterr
+account removes its local data and sessions, leaving upstream accounts alone
+except for best-effort revocation of its Trakt connection.
 Display names follow Seerr → Plex → Jellyfin priority; avatars render as initials.
 
-All four taste sources start on: Seerr request history, Plex watch history,
-Jellyfin watch history, and browsing activity. Turning a source off cancels its
+All five taste sources start on: Seerr request history, Plex watch history,
+Jellyfin watch history, Trakt watch history, and browsing activity. Turning a source off cancels its
 import, stops collection, and excludes retained signals from the profile and rail
 anchors. Turning it back on restores influence and resets that link's sync times
 for a full bounded re-import. Requests made in Tasterr, My List/onboarding picks,
@@ -209,6 +286,58 @@ clearing their signals removes that exclusion. Recommendation reset deletes all
 taste signals, including My List and Not interested, clears sync times, and
 schedules enabled sources in the background. Source preferences and the onboarding
 completion flag are preserved.
+
+`TASTERR_WATCH_HISTORY_DAYS` sets the first-sync lookback for Plex and Jellyfin
+watch history (default 365 days, range 1–3650). Later syncs keep their watermark
+with a 24-hour overlap; changing the value does not re-import existing links.
+After changing it and restarting, use **Reset taste profile** to re-import with
+the new window, or switch the affected source off and back on. Reset deletes all
+taste signals as described above. Caps stay unchanged: Plex reads at most 500
+rows per server with 500 total metadata resolutions; Jellyfin reads at most 500
+rows per item type. Both retain the six-hour throttle and 30-second deadline.
+
+## Trakt watch history
+
+Register an operator-owned app at [Trakt My Apps](https://developer.trakt.tv/apps).
+Link a verified GitHub account in its Developer panel: Trakt requires verification
+to create an app, and for every existing app from 2027-01-01. Choose Development,
+set the Redirect URI to exactly `http://localhost`, and leave allowed origins
+empty. Device authorization needs no callback listener, but token refresh sends
+that registered URI. Set `TRAKT_CLIENT_ID` plus the stable `TASTERR_SECRET_KEY`;
+set `TRAKT_CLIENT_SECRET` only if Trakt issued one. Partial configuration leaves
+Trakt off without preventing startup.
+
+Add household members as testers in the app's Members panel before they connect.
+Development apps admit only the owner and added members. The portal currently
+reports five apps and 16 member seats on the operator's free account; its seat
+counter includes the owner (15 added members). These are observations from
+2026-10-30, not fixed guarantees; use the allowances shown in your portal.
+Production app registration is currently unavailable without contacting Trakt
+support. App/member allowances are separate from the number of community apps
+a free Trakt account can connect. A member at that connection limit must remove
+an app in Trakt's connected-app settings before authorizing another; Trakt
+changes that limit, so no fixed number is assumed here.
+
+From Tasterr's **Account**, choose **Link Trakt**, enter the short code at
+[Trakt Activate](https://auth.trakt.tv/activate), and approve your app. Trakt is
+link-only: it never provides sign-in, admin rights, display identity, Seerr
+requests, or Continue Watching. Unconfiguring Trakt leaves its links dormant.
+
+The first sync reads all time, independent of `TASTERR_WATCH_HISTORY_DAYS`,
+importing at most the newest 500 unique movies and 500 unique shows within ten
+history pages per type. Episode plays count toward their show. Syncs run in the
+background at most every six hours after Seerr history, with a 30-second read
+deadline. Later syncs use a 24-hour overlap. Backdated watches added later need
+a taste reset or switching Trakt off and back on to re-import full bounded
+history. Clearing keeps the watermark, so history older than the overlap stays
+cleared. Across enabled Plex, Jellyfin, and Trakt sources, each title contributes
+one watch to the profile, decayed from its newest watch; source rows stay separate
+for switches and clearing.
+
+Unlinking Trakt or deleting the local account commits locally, then revokes the
+stored access token best-effort within five seconds. No upstream viewing data is
+deleted. An expired token may make revocation a no-op; Tasterr does not refresh
+just to revoke. Remove the connection in Trakt's connected-app settings if needed.
 
 ## Plex-aware operation
 
@@ -229,10 +358,30 @@ available) from `/account`, or their next sign-in creates a new, empty Tasterr a
 
 Plex history sync is best-effort and never blocks sign-in or Home. Tasterr evaluates
 one bounded import per user with a Plex link at most every six hours. Continue Watching is
-live, caller-scoped presentation data cached for five minutes; raw history, progress,
-server URLs, account ids, rating keys, and resource tokens are not stored. Plex
-failure removes the affected rail/import only. TMDB or Seerr degradation keeps its
-existing independent behavior.
+live, caller-scoped presentation data from linked Plex and Jellyfin accounts.
+Jellyfin contributes resumable movies and episodes plus next-up episodes using
+reads scoped to the linked user id. Members with both links get one rail: newest
+activity wins per TMDB title, then non-null progress, then Plex on equal activity.
+At most 20 merged titles enter TMDB resolution. One per-user cache entry lasts
+five minutes, with no stale progress served after expiry. Linking, refreshing, or
+unlinking either source clears the entry. The admin Continue Watching switch gates both sources; member
+taste-source toggles do not affect this rail. Cards open Tasterr title detail;
+Jellyfin playback links remain unsupported.
+
+Jellyfin next-up ordering uses matching activity from one page of the 100 most
+recently played episodes, read with the linked user's id. If a series is outside
+that window, its own last-played date is used when present; otherwise its next-up
+card keeps Jellyfin's supplied position after dated candidates. This presentation
+read does not import taste signals or advance history watermarks.
+
+Raw history, playback positions, Jellyfin item ids, progress, server URLs, account
+ids, rating keys, and resource tokens are not stored in SQLite. Each source has a
+ten-second deadline and a failure removes only its contribution. After source
+collection, shared TMDB resolution has a separate ten-second budget; expiry
+cancels resolution and caches an empty result for five minutes. A cold rail can
+therefore take approximately twenty seconds. When both sources
+fail, or the only linked source fails, the empty result is cached for five minutes.
+TMDB or Seerr degradation keeps its existing independent behavior.
 
 Tasterr only joins Plex media to TMDB through canonical GUIDs. A legacy Plex metadata
 agent may therefore leave an otherwise valid watch unresolved. Upgrade movie
@@ -280,7 +429,45 @@ by YouTube trailers without disclosing household paths or search queries. HSTS i
 emitted only for effective HTTPS requests from a trusted proxy. The proxy may add the
 same headers as defense-in-depth but must not weaken them.
 
+## Mixed setups
+
+Tasterr can link both Plex and Jellyfin, but Seerr uses one media server. Seerr's
+own media-server and local-login toggles decide which credentials it accepts.
+
+| Feature | Requirement |
+| --- | --- |
+| Catalog browsing | TMDB configured; no media-server link required |
+| Plex sign-in and linking | Plex server membership with `PLEX_SERVER_ID`, or Seerr accepting Plex; sign-in additionally requires the method to be offered |
+| Jellyfin sign-in and linking | Jellyfin configured and credentials accepted by Jellyfin; sign-in additionally requires the method to be offered |
+| Media requests | A linked Seerr account with Seerr request permissions |
+| Learned watch history | An enabled taste source and its corresponding linked account |
+| Continue Watching | A configured Plex or Jellyfin integration and the member's link, with the rail enabled; one merged rail when both contribute, independent of taste toggles |
+| Trakt history | Configured operator-owned app, an admitted Trakt member, and a linked account with its taste source on; no sign-in or requests |
+
+- **Plex + Plex-backed Seerr:** Plex sign-in can silently link Seerr when its
+  media-server login is enabled. Local Seerr linking works when local login is on.
+- **Jellyfin + Jellyfin-backed Seerr:** Jellyfin sign-in can silently link Seerr
+  when its media-server login is enabled; otherwise use a Seerr local account.
+- **Plex + Jellyfin + Plex-backed Seerr:** Jellyfin still provides sign-in,
+  history, and Continue Watching, but its credentials cannot link Seerr. A member
+  using only Jellyfin can ask the household admin for a Seerr local account, or
+  link Plex and use that link to connect Seerr. If local login is off, a usable
+  Plex link is required for requests.
+- **No Seerr:** browsing, history, and Continue Watching work with the configured
+  providers. Requests are disabled; Plex sign-in needs `PLEX_SERVER_ID`.
+
+Settings → Connections shows the detected Seerr integration and checks for mixed
+setup problems. Test Plex uses the admin's own linked Plex account. Test Jellyfin
+verifies the API key through the admin's linked Jellyfin user; without that link,
+it checks public reachability only and asks the admin to link Jellyfin.
+
+Detection can lag Seerr changes by five minutes. Test Seerr clears that cache so
+the next read refreshes it. A bounded outage can use the last known settings;
+without cached settings, unknown methods remain offered as before.
+
 ## Degraded modes
+
+For provider combinations and request-link options, see [Mixed setups](#mixed-setups).
 
 - TMDB unset or unavailable: health still responds, but catalog browsing reports a
   generic unavailable state until TMDB recovers or is configured.
@@ -295,17 +482,23 @@ same headers as defense-in-depth but must not weaken them.
   Seerr outage blocks only a would-be new user, preserving the existing-user bridge.
   Jellyfin sign-in follows the same Seerr auto-link rule.
 - A Seerr cookie expires: a member with a Plex link gets one silent re-authentication
-  attempt with its encrypted token. Otherwise the request opens **Connect Seerr**;
+  attempt with its encrypted token unless Seerr's cached settings show it refuses
+  Plex login. Otherwise the request opens **Connect Seerr**;
   successful linking retries the original selection once.
 - Plex token invalid, plex.tv down, or every advertised server unreachable: ordinary
-  Home rails remain available; Continue Watching is omitted and history retries only
-  after the attempt throttle.
+  Home rails remain available; the Plex Continue Watching contribution is omitted
+  while Jellyfin can still contribute. History retries only after the attempt throttle.
 - One Plex server unreachable: successful siblings still contribute; the history
   success watermark waits for a later all-server bounded pass.
 - Jellyfin down: existing sessions keep browsing; history retries after its six-hour
-  attempt throttle. Jellyfin sign-in/linking returns a generic upstream error.
+  attempt throttle. Its Continue Watching contribution is omitted while Plex can
+  still contribute; no resume retry occurs within the five-minute cache lifetime.
+  Jellyfin sign-in/linking returns a generic upstream error.
 - Plex media without a canonical TMDB GUID: only that item is omitted; repair its
   library metadata as described above.
+- Trakt unavailable or refresh rejected: browsing continues and the link remains;
+  sync retries after the six-hour attempt throttle. Relink a revoked connection
+  from Account. Unlink/delete still completes if remote revocation fails.
 
 ## Backup and restore
 
@@ -342,6 +535,14 @@ Keep backups encrypted and access-controlled: they contain identities, taste
 signals, session material, and household viewing behavior.
 
 ## Upgrade and rollback
+
+Migration `0010` adds `watched_trakt` uniqueness and deletes rebuildable profile
+caches so one-watch-per-title scoring applies immediately. To roll back across
+it, stop the writer, back up and validate the database, then use the current
+image's Alembic downgrade to `0009` before starting the older image. This
+**deletes Trakt links and imported Trakt history**, removes Trakt source
+preferences, and invalidates affected profiles; users and their other links
+remain. An image-only rollback across `0010` is unsupported.
 
 Migration `0009` adds per-user taste-source preferences, with every source on by
 default. To roll back across it, stop the writer and back up/validate the database,

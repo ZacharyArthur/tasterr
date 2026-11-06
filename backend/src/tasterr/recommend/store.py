@@ -34,6 +34,7 @@ from tasterr.recommend.signals import (
     SIGNAL_WEIGHTS,
     TOGGLE_KINDS,
     UNIQUE_PER_TITLE_KINDS,
+    WATCHED_KINDS,
     MediaType,
     SignalKind,
     TasteSource,
@@ -80,7 +81,7 @@ async def record_signal(
             weight=SIGNAL_WEIGHTS[kind],
             created_at=moment,
         )
-        if kind in ("watched_plex", "watched_jellyfin"):
+        if kind in WATCHED_KINDS:
             statement = statement.on_conflict_do_update(
                 index_elements=[Signal.user_id, Signal.media_type, Signal.tmdb_id, Signal.kind],
                 index_where=SIGNAL_UNIQUE_INDEX_WHERE,
@@ -161,6 +162,22 @@ async def load_signals(db: AsyncSession, user_id: int) -> list[Signal]:
     return list(result.scalars().all())
 
 
+async def discovery_exclusions(
+    db: AsyncSession, user_id: int, *, watched: bool
+) -> frozenset[TitleKey]:
+    kinds: frozenset[SignalKind] = frozenset(("not_interested",))
+    if watched:
+        kinds |= WATCHED_KINDS
+    rows = await finish_io(
+        db.execute(
+            select(Signal.media_type, Signal.tmdb_id).where(
+                Signal.user_id == user_id, Signal.kind.in_(kinds)
+            )
+        )
+    )
+    return frozenset(("tv" if media == "tv" else "movie", tmdb_id) for media, tmdb_id in rows)
+
+
 async def has_signals(db: AsyncSession, user_id: int) -> bool:
     excluded = excluded_kinds(await excluded_sources(db, user_id))
     result = await finish_io(
@@ -188,7 +205,10 @@ async def load_taste_signals(db: AsyncSession, user_id: int) -> list[Signal]:
 async def load_profile_inputs(db: AsyncSession, user_id: int) -> list[SignalInput]:
     return [
         SignalInput(
-            ("tv" if row.media_type == "tv" else "movie", row.tmdb_id), row.weight, row.created_at
+            ("tv" if row.media_type == "tv" else "movie", row.tmdb_id),
+            row.weight,
+            row.created_at,
+            cast("SignalKind", row.kind),
         )
         for row in await load_taste_signals(db, user_id)
     ]

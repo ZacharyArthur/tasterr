@@ -5,6 +5,8 @@ import {
 } from "../components/RegionServicePicker";
 import {
 	useConnectionTest,
+	useIntegrations,
+	useLanguages,
 	useRegions,
 	useSaveSettings,
 	useServices,
@@ -18,6 +20,12 @@ import {
 } from "../lib/api";
 
 const DEFAULT_APPEARANCE: Appearance = { theme: "dark", accent: "crimson" };
+const CONNECTION_LABELS: Record<ConnectionTarget, string> = {
+	tmdb: "TMDB",
+	seerr: "Seerr",
+	plex: "Plex",
+	jellyfin: "Jellyfin",
+};
 const ACCENTS: { id: Appearance["accent"]; label: string }[] = [
 	{ id: "crimson", label: "Crimson" },
 	{ id: "azure", label: "Azure" },
@@ -29,8 +37,13 @@ const ACCENTS: { id: Appearance["accent"]; label: string }[] = [
 export function Settings() {
 	const settings = useSettings();
 	const regions = useRegions();
+	const languages = useLanguages();
 	const save = useSaveSettings();
 	const probe = useConnectionTest();
+	const integrations = useIntegrations();
+	const integration = integrations.data;
+	const loginLabel = (value: boolean | null) =>
+		value === null ? "Unknown" : value ? "On" : "Off";
 	const [draft, setDraft] = useState<RuntimeSettings | null>(null);
 	const [saved, setSaved] = useState(false);
 	const services = useServices(draft?.region ?? "", draft !== null);
@@ -41,6 +54,7 @@ export function Settings() {
 				...settings.data.settings,
 				appearance: settings.data.settings.appearance ?? DEFAULT_APPEARANCE,
 				hide_library_items: settings.data.settings.hide_library_items ?? false,
+				hide_watched_items: settings.data.settings.hide_watched_items ?? true,
 				excluded_service_ids: settings.data.settings.excluded_service_ids ?? [],
 			});
 		}
@@ -67,10 +81,34 @@ export function Settings() {
 	}
 
 	const appearance = draft.appearance ?? DEFAULT_APPEARANCE;
+	const language = draft.language;
+	const languageCodes = [
+		...new Set([
+			settings.data.settings.language,
+			language,
+			...(languages.data?.languages ?? []),
+		]),
+	].sort();
+	const languageNames = new Intl.DisplayNames(undefined, { type: "language" });
 	const pending = save.isPending;
 	const lockedFields = settings.data.locked_fields ?? [];
 	const libraryLocked = lockedFields.includes("hide_library_items");
+	const watchedLocked = lockedFields.includes("hide_watched_items");
 	const servicesLocked = lockedFields.includes("excluded_service_ids");
+	const signInLocked = lockedFields.includes("disabled_sign_in_methods");
+	const configuredMethods = settings.data.configured_sign_in_methods;
+	const disabledMethods = draft.disabled_sign_in_methods ?? [];
+	const offeredMethods = configuredMethods.filter(
+		(method) => !disabledMethods.includes(method),
+	);
+	const strandedMembers = settings.data.sign_in_link_counts.reduce(
+		(total, group) =>
+			total +
+			(group.methods.some((method) => offeredMethods.includes(method))
+				? 0
+				: group.count),
+		0,
+	);
 	const excludedIds = draft.excluded_service_ids ?? [];
 	const exclusionServices = [
 		...(services.data?.services ?? []),
@@ -105,6 +143,63 @@ export function Settings() {
 				Household-wide discovery and appearance controls.
 			</p>
 			<form className="mt-8 flex flex-col gap-8" onSubmit={submit}>
+				<SettingsSection title="Sign-in methods">
+					<p className="mb-4 text-sm text-app-subtle">
+						Choose which configured methods appear at sign-in. Linking, history,
+						Continue Watching, and requests stay available.
+					</p>
+					{(["plex", "jellyfin", "seerr"] as const).map((method) => {
+						const configured = configuredMethods.includes(method);
+						const checked = offeredMethods.includes(method);
+						const name = { plex: "Plex", jellyfin: "Jellyfin", seerr: "Seerr" }[
+							method
+						];
+						return (
+							<label
+								key={method}
+								className="flex min-h-11 items-center gap-3 text-app-text"
+							>
+								<input
+									type="checkbox"
+									checked={checked}
+									disabled={
+										pending ||
+										signInLocked ||
+										!configured ||
+										(checked && offeredMethods.length === 1)
+									}
+									onChange={() =>
+										setDraft({
+											...draft,
+											disabled_sign_in_methods: checked
+												? [...disabledMethods, method]
+												: disabledMethods.filter((id) => id !== method),
+										})
+									}
+									className="h-5 w-5 accent-app-accent"
+								/>
+								{name}
+								{!configured && " (Not configured)"}
+							</label>
+						);
+					})}
+					<p className="mt-2 text-sm text-app-subtle">
+						Keep at least one configured method selected.
+					</p>
+					{signInLocked && (
+						<p className="mt-2 text-sm text-app-subtle">
+							Sign-in methods are controlled by TASTERR_SIGN_IN_METHODS.
+						</p>
+					)}
+					<output
+						className="mt-3 block text-sm text-status-warning"
+						aria-live="polite"
+					>
+						{strandedMembers} member{strandedMembers === 1 ? "" : "s"} would
+						have no way to sign in. Existing sessions continue; affected members
+						should link an offered method from Account.
+					</output>
+				</SettingsSection>
 				<SettingsSection title="Catalog">
 					<RegionServicePicker
 						region={draft.region}
@@ -125,7 +220,31 @@ export function Settings() {
 						onSelectedIdsChange={(service_ids) =>
 							setDraft({ ...draft, service_ids })
 						}
-					/>
+					>
+						<label className="flex max-w-sm flex-col gap-1 text-sm text-app-subtle">
+							Metadata language
+							<select
+								value={language}
+								disabled={pending}
+								onChange={(event) =>
+									setDraft({ ...draft, language: event.target.value })
+								}
+								className="min-h-11 rounded border border-app-border bg-app-surface px-3 text-app-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-app-accent"
+							>
+								{languageCodes.map((code) => (
+									<option key={code} value={code}>
+										{languageNames.of(code)} ({code})
+									</option>
+								))}
+							</select>
+						</label>
+					</RegionServicePicker>
+					{languages.isError && (
+						<p role="alert" className="mt-3 text-sm text-status-error">
+							Language options are unavailable. Your saved language is still
+							available.
+						</p>
+					)}
 				</SettingsSection>
 
 				<SettingsSection title="Discovery exclusions">
@@ -154,6 +273,27 @@ export function Settings() {
 					{libraryLocked && (
 						<p className="mt-2 text-sm text-app-subtle">
 							Library hiding is controlled by an environment variable.
+						</p>
+					)}
+					<label className="mt-4 flex min-h-11 items-center gap-3 text-app-text">
+						<input
+							type="checkbox"
+							checked={draft.hide_watched_items ?? true}
+							disabled={pending || watchedLocked}
+							onChange={(event) =>
+								setDraft({ ...draft, hide_watched_items: event.target.checked })
+							}
+							className="h-5 w-5 accent-app-accent"
+						/>
+						Hide titles members have watched
+					</label>
+					<p className="text-sm text-app-subtle">
+						Each member's own watched titles are hidden from their discovery.
+						Not interested always hides a title from discovery.
+					</p>
+					{watchedLocked && (
+						<p className="mt-2 text-sm text-app-subtle">
+							Watched-title hiding is controlled by an environment variable.
 						</p>
 					)}
 					<fieldset disabled={pending || servicesLocked} className="mt-6">
@@ -316,32 +456,70 @@ export function Settings() {
 						here.
 					</p>
 					<div className="mt-3 flex flex-wrap gap-3">
-						{(["tmdb", "seerr"] as ConnectionTarget[]).map((target) => (
-							<button
-								key={target}
-								type="button"
-								disabled={probe.isPending || pending}
-								onClick={() => probe.mutate(target)}
-								className="min-h-11 rounded border border-app-border px-4 font-medium text-app-text hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60"
-							>
-								Test {target.toUpperCase()}
-							</button>
-						))}
+						{(Object.keys(CONNECTION_LABELS) as ConnectionTarget[]).map(
+							(target) => (
+								<button
+									key={target}
+									type="button"
+									disabled={probe.isPending || pending}
+									onClick={() => probe.mutate(target)}
+									className="min-h-11 rounded border border-app-border px-4 font-medium text-app-text hover:bg-app-muted focus-visible:outline-2 focus-visible:outline-app-accent disabled:opacity-60"
+								>
+									Test {CONNECTION_LABELS[target]}
+								</button>
+							),
+						)}
 					</div>
 					{probe.data?.ok && (
 						<output className="mt-3 block text-status-success">
-							{probe.data.target.toUpperCase()}: {probe.data.detail}
+							{CONNECTION_LABELS[probe.data.target]}: {probe.data.detail}
 						</output>
 					)}
 					{probe.data && !probe.data.ok && (
 						<p role="alert" className="mt-3 text-status-error">
-							{probe.data.target.toUpperCase()}: {probe.data.detail}
+							{CONNECTION_LABELS[probe.data.target]}: {probe.data.detail}
 						</p>
 					)}
 					{probe.isError && (
 						<p role="alert" className="mt-3 text-status-error">
 							Connection test could not run.
 						</p>
+					)}
+					{integration?.seerr && (
+						<div className="mt-5 space-y-2">
+							<h3 className="font-semibold">Seerr integration</h3>
+							<p>
+								Seerr:{" "}
+								{integration.seerr.configured ? "Configured" : "Not configured"}
+							</p>
+							<p>Media server: {integration.seerr.media_server}</p>
+							<p>
+								Plex login: {loginLabel(integration.seerr.plex)}; Jellyfin
+								login: {loginLabel(integration.seerr.jellyfin)}; Local login:{" "}
+								{loginLabel(integration.seerr.local)}
+							</p>
+							{!integration.plex_server_pinned &&
+								integration.seerr.plex === false && (
+									<p role="alert">
+										Plex sign-in and Plex linking will fail. Set PLEX_SERVER_ID.
+									</p>
+								)}
+							{integration.jellyfin_configured &&
+								integration.seerr.jellyfin === false && (
+									<>
+										<p role="alert">
+											Members who only use Jellyfin need a Seerr local account
+											{integration.seerr.plex === true ? " or a Plex link" : ""}{" "}
+											before they can request.
+										</p>
+										{integration.seerr.local === false && (
+											<p role="alert">
+												These members cannot request unless they link Plex.
+											</p>
+										)}
+									</>
+								)}
+						</div>
 					)}
 				</SettingsSection>
 
@@ -358,7 +536,9 @@ export function Settings() {
 					)}
 					{save.isError && (
 						<p role="alert" className="text-status-error">
-							Could not save settings.
+							{save.error instanceof ApiError
+								? save.error.message
+								: "Could not save settings."}
 						</p>
 					)}
 				</div>

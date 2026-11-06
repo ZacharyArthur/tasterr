@@ -47,7 +47,11 @@ export function useTasteToggle(
 		},
 		onSuccess: (_data, _wasActive, sessionEpoch) => {
 			if (isSessionCurrent(queryClient, sessionEpoch)) {
-				return queryClient.invalidateQueries({ queryKey: ["home"] });
+				return Promise.all([
+					queryClient.invalidateQueries({ queryKey: ["home"] }),
+					queryClient.invalidateQueries({ queryKey: ["rails"] }),
+					queryClient.invalidateQueries({ queryKey: ["title"] }),
+				]);
 			}
 		},
 	});

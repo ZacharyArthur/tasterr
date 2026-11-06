@@ -5,6 +5,7 @@ entries when they ship.
 
 | Item | Why deferred | Lands with |
 |---|---|---|
+| TypeScript 7 compiler upgrade | openapi-typescript 7.13.0 requires TypeScript 5.x; keep the supported single-toolchain setup | Recheck generator compatibility during the next dependency-bump chore |
 | Starlette TestClient → httpx2 migration (currently a deprecation warning under pytest) | Upstream transition, non-failing today | dependency-bump chore |
 | `static_dir` default is a CWD-relative path | Container sets an absolute `STATIC_DIR`; only affects non-container runs, which are not a supported workflow yet | If local uvicorn runs ever become supported |
 | Richer where-to-watch categories | Catalog models retain rent/buy/free categories, but the detail UI still renders flatrate providers only | A dedicated detail presentation change |
@@ -12,7 +13,7 @@ entries when they ship.
 | Direct-detail Close then browser Back reopens the last detail | This is pre-existing history behavior outside the feedback fix; Close still returns Home as specified | Route-history UX polish, with a browser Back regression |
 | Stable desktop scrollbar gutter while a modal is open | Locking body scroll can cause a small width shift; it is cosmetic and has not been reported by users | If layout shift is reported |
 | Per-server Plex history watermarks | One global success timestamp plus a six-hour attempt throttle is sufficient at household scale; successful siblings may be reread after one server fails | If repeated multi-server failures materially omit history beyond the bounded newest-first cap |
-| Jellyfin playback links, Continue Watching, and avatar proxy | Sign-in and history are supported; playback/resume need a browser-facing URL, and internal avatar URLs cannot reach browsers. All avatars currently render as initials | A dedicated Jellyfin presentation change |
+| Jellyfin playback links and avatar proxy | Sign-in, history, and Continue Watching have shipped; playback links still need a browser-facing URL, and internal avatar URLs cannot reach browsers. All avatars currently render as initials | A dedicated Jellyfin presentation change |
 | Immediate member revocation and administrator user management | Linked-account admission/admin checks rerun at sign-in; sessions have a 90-day absolute cap. No account merge or manual identity assignment | A dedicated account-management change |
 | Per-source taste weights | `/account` supplies on/off toggles and clear actions; deliberate signals always count | Only after on/off proves insufficient |
 | Plex JWT device-flow migration | The [live contract spike](PLEX-V2-SPIKE.md) proved current PIN-issued traditional tokens can perform every required read | A supported token can no longer satisfy the account/resource/PMS contracts |

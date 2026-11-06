@@ -33,13 +33,21 @@ export function ConnectSeerr({
 			void cache.invalidateQueries({ queryKey: ["home"] });
 		},
 	});
-	const plex = account.data?.providers.some(
-		(provider) =>
-			provider.provider === "plex" && provider.linked && provider.available,
-	);
-	const jellyfin = account.data?.providers.some(
-		(provider) => provider.provider === "jellyfin" && provider.available,
-	);
+	const accepts = account.data?.seerr_accepts;
+	const plex =
+		accepts?.plex !== false &&
+		account.data?.providers.some(
+			(provider) =>
+				provider.provider === "plex" && provider.linked && provider.available,
+		);
+	const jellyfin =
+		accepts?.jellyfin !== false &&
+		account.data?.providers.some(
+			(provider) => provider.provider === "jellyfin" && provider.available,
+		);
+	const local = accepts?.local !== false;
+	const showJellyfin = jellyfin && (!local || jellyfinExpanded);
+	const showGuidance = account.isSuccess && !plex && !jellyfin;
 	function connect(body: SeerrLinkBody) {
 		link.mutate(body, {
 			onSuccess: (_data, _body, epoch) => {
@@ -60,24 +68,32 @@ export function ConnectSeerr({
 					Use my Plex account
 				</button>
 			)}
-			{jellyfin && (
+			{local && jellyfin && (
 				<button
 					type="button"
-					aria-expanded={jellyfinExpanded}
 					disabled={link.isPending}
 					className="min-h-11 rounded border border-app-border px-4"
 					onClick={() => setJellyfinExpanded(!jellyfinExpanded)}
 				>
-					Use Jellyfin credentials
+					{jellyfinExpanded
+						? "Use Seerr email instead"
+						: "Use Jellyfin credentials"}
 				</button>
 			)}
-			{jellyfinExpanded ? (
+			{(local || jellyfin) && (
+				<p className="text-sm text-app-subtle">
+					{showJellyfin
+						? "Sign in with your Jellyfin username and password."
+						: "Sign in with your Seerr account email and password."}
+				</p>
+			)}
+			{showJellyfin ? (
 				<JellyfinCredentialsForm
 					onSubmit={(body) => connect({ method: "jellyfin", ...body })}
 					pending={link.isPending}
 					submitLabel="Connect Seerr"
 				/>
-			) : (
+			) : local ? (
 				<form
 					className="flex flex-col gap-3"
 					onSubmit={(event) => {
@@ -117,6 +133,16 @@ export function ConnectSeerr({
 						Connect Seerr
 					</button>
 				</form>
+			) : null}
+			{showGuidance && (
+				<p className="text-sm text-app-subtle">
+					{accepts?.plex !== false &&
+						"Link Plex on your Account page to enable requests. "}
+					{local && "Ask your household admin for a Seerr local account. "}
+					{accepts?.plex === false &&
+						!local &&
+						"Requests are unavailable for this account."}
+				</p>
 			)}
 			{link.isError && (
 				<p role="alert">

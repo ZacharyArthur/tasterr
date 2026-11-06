@@ -300,6 +300,9 @@ async def test_public_request_settings_contract() -> None:
         policy = await SeerrClient(http, URL, API_KEY).request_settings()
         assert isinstance(policy.enable_special_episodes, bool)
         assert isinstance(policy.partial_requests_enabled, bool)
+        assert policy.media_server_type in (1, 2, 3, 4)
+        assert isinstance(policy.media_server_login, bool)
+        assert isinstance(policy.local_login, bool)
 
 
 @requires_availability
@@ -444,9 +447,6 @@ async def test_request_destination_override_stores_chosen_destination(is_4k: boo
     The separate 4K title is disposable too: deleting a request does not undo
     an autoapproved download. Administrator rules can rewrite supplied choices.
     """
-    if is_4k and not REQUEST_4K_TMDB_ID:
-        pytest.skip("TASTERR_LIVE_REQUEST_4K_TMDB_ID not set")
-    tmdb_id = int(REQUEST_4K_TMDB_ID if is_4k else REQUEST_TMDB_ID)
     async with httpx.AsyncClient(timeout=10.0) as http:
         version_response = await http.get(f"{URL}/api/v1/status")
         version_response.raise_for_status()
@@ -458,6 +458,9 @@ async def test_request_destination_override_stores_chosen_destination(is_4k: boo
         servers = [server for server in await client.list_servers("movie") if server.is_4k == is_4k]
         if not servers:
             pytest.skip("operator has no configured destination for this variant")
+        if is_4k and not REQUEST_4K_TMDB_ID:
+            pytest.skip("TASTERR_LIVE_REQUEST_4K_TMDB_ID not set")
+        tmdb_id = int(REQUEST_4K_TMDB_ID if is_4k else REQUEST_TMDB_ID)
         user = await client.user(login.user.id)
         if not user.can_override or not user.can_request("movie", is_4k=is_4k):
             pytest.skip("operator account lacks variant or advanced permission")

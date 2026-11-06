@@ -7,16 +7,18 @@ The api_key is attached server-side only and never surfaces to a client.
 """
 
 import asyncio
+import re
 from typing import Literal, TypeVar
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 
 from tasterr.cache import Cache, CacheOpts
 from tasterr.clients.errors import UpstreamRejected, UpstreamUnavailable
+from tasterr.runtime_settings import LANGUAGE_PATTERN
 
 BASE = "https://api.themoviedb.org/3"
-LANGUAGE = "en-US"
+ENGINE_LANGUAGE = "en-US"
 TIMEOUT_SECONDS = 10.0
 MAX_RETRIES = 2
 BACKOFF_BASE_SECONDS = 0.25
@@ -133,6 +135,7 @@ class TmdbVideo(BaseModel):
     type: str = ""
     name: str = ""
     official: bool = False
+    iso_639_1: str | None = None
 
 
 class TmdbImage(BaseModel):
@@ -314,6 +317,15 @@ class TmdbDetail(BaseModel):
 M = TypeVar("M", bound=BaseModel)
 
 
+class TmdbLanguages(RootModel[list[object]]):
+    pass
+
+
+def media_languages(language: str) -> str:
+    code = language.split("-", 1)[0]
+    return "en,null" if code == "en" else f"{code},en,null"
+
+
 async def _sleep(seconds: float) -> None:  # indirection so tests can stub the backoff
     await asyncio.sleep(seconds)
 
@@ -340,6 +352,7 @@ class TmdbClient:
         media: MediaType,
         *,
         region: str,
+        language: str,
         page: int = 1,
         sort_by: str = "popularity.desc",
         genres: list[int] | None = None,
@@ -349,7 +362,7 @@ class TmdbClient:
         providers: list[int] | None = None,
     ) -> TmdbMediaPage:
         params: dict[str, str | int] = {
-            "language": LANGUAGE,
+            "language": language,
             "watch_region": region,
             "sort_by": sort_by,
             "page": page,
@@ -373,54 +386,73 @@ class TmdbClient:
         self,
         media: Literal["all", "movie", "tv"] = "all",
         window: Literal["day", "week"] = "day",
+        *,
+        language: str,
     ) -> TmdbMediaPage:
         return await self._cached(
-            f"/trending/{media}/{window}", {"language": LANGUAGE}, TTL_TRENDING, TmdbMediaPage
+            f"/trending/{media}/{window}", {"language": language}, TTL_TRENDING, TmdbMediaPage
         )
 
-    async def multi_search(self, query: str) -> TmdbMediaPage:
+    async def multi_search(self, query: str, *, language: str) -> TmdbMediaPage:
         params: dict[str, str | int] = {
-            "language": LANGUAGE,
+            "language": language,
             "query": query,
             "include_adult": "false",
             "page": 1,
         }
         return await self._cached("/search/multi", params, TTL_SEARCH, TmdbMediaPage)
 
-    async def detail(self, media: MediaType, tmdb_id: int, region: str) -> TmdbDetail:
+    async def detail(
+        self, media: MediaType, tmdb_id: int, region: str, *, language: str
+    ) -> TmdbDetail:
         params: dict[str, str | int] = {
-            "language": LANGUAGE,
+            "language": language,
             "append_to_response": DETAIL_APPEND,
-            "include_image_language": "en,null",
+            "include_image_language": media_languages(language),
+            "include_video_language": media_languages(language),
         }
         # region varies the cache key so certifications/providers stay correct.
         return await self._cached(
             f"/{media}/{tmdb_id}", {**params, "region": region}, TTL_DETAIL, TmdbDetail
         )
 
-    async def genres(self, media: MediaType) -> list[TmdbGenre]:
+    async def genres(self, media: MediaType, *, language: str) -> list[TmdbGenre]:
         result = await self._cached(
-            f"/genre/{media}/list", {"language": LANGUAGE}, TTL_GENRES, TmdbGenreList
+            f"/genre/{media}/list", {"language": language}, TTL_GENRES, TmdbGenreList
         )
         return result.genres
 
-    async def regions(self) -> list[TmdbRegion]:
+    async def regions(self, *, language: str) -> list[TmdbRegion]:
         result = await self._cached(
             "/watch/providers/regions",
-            {"language": LANGUAGE},
+            {"language": language},
             TTL_REGIONS,
             TmdbRegionList,
         )
         return result.results
 
-    async def providers(self, media: MediaType, region: str) -> list[TmdbProvider]:
+    async def providers(
+        self, media: MediaType, region: str, *, language: str
+    ) -> list[TmdbProvider]:
         result = await self._cached(
             f"/watch/providers/{media}",
-            {"language": LANGUAGE, "watch_region": region},
+            {"language": language, "watch_region": region},
             TTL_PROVIDERS,
             TmdbProviderList,
         )
         return result.results
+
+    async def languages(self) -> list[str]:
+        result = await self._cached(
+            "/configuration/primary_translations", {}, TTL_REGIONS, TmdbLanguages
+        )
+        return sorted(
+            {
+                code
+                for code in result.root
+                if isinstance(code, str) and re.fullmatch(LANGUAGE_PATTERN, code)
+            }
+        )
 
     async def probe(self) -> None:
         if self._api_key is None:

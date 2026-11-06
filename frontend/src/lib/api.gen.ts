@@ -276,6 +276,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/links/trakt/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Trakt Device */
+        post: operations["create_trakt_device_api_v1_account_links_trakt_device_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/links/trakt/device/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll Trakt Device */
+        post: operations["poll_trakt_device_api_v1_account_links_trakt_device_poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account/links/{provider}/unlink": {
         parameters: {
             query?: never;
@@ -310,6 +344,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Integrations */
+        get: operations["get_integrations_api_v1_integrations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -337,6 +388,23 @@ export interface paths {
         };
         /** Get Regions */
         get: operations["get_regions_api_v1_regions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Languages */
+        get: operations["get_languages_api_v1_languages_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -616,9 +684,11 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "plex" | "jellyfin" | "seerr";
+            provider: "plex" | "jellyfin" | "seerr" | "trakt";
             /** Available */
             available: boolean;
+            /** Sign In */
+            sign_in: boolean;
             /** Linked */
             linked: boolean;
             /** Display Name */
@@ -639,6 +709,7 @@ export interface components {
             taste_sources: {
                 [key: string]: boolean;
             };
+            seerr_accepts: components["schemas"]["SeerrAccepts"];
         };
         /** Appearance */
         Appearance: {
@@ -705,7 +776,7 @@ export interface components {
          * ConnectionTarget
          * @enum {string}
          */
-        ConnectionTarget: "tmdb" | "seerr";
+        ConnectionTarget: "tmdb" | "seerr" | "plex" | "jellyfin";
         /** ConnectionTestRequest */
         ConnectionTestRequest: {
             target: components["schemas"]["ConnectionTarget"];
@@ -816,12 +887,25 @@ export interface components {
             /** Has Taste Signals */
             has_taste_signals: boolean;
         };
+        /** IntegrationsResponse */
+        IntegrationsResponse: {
+            seerr: components["schemas"]["SeerrIntegration"];
+            /** Plex Server Pinned */
+            plex_server_pinned: boolean;
+            /** Jellyfin Configured */
+            jellyfin_configured: boolean;
+        };
         /** JellyfinLoginRequest */
         JellyfinLoginRequest: {
             /** Username */
             username: string;
             /** Password */
             password: string;
+        };
+        /** LanguagesResponse */
+        LanguagesResponse: {
+            /** Languages */
+            languages: string[];
         };
         /** LinkPollResponse */
         LinkPollResponse: {
@@ -1006,6 +1090,8 @@ export interface components {
             /** Seerr Configured */
             seerr_configured: boolean;
             appearance: components["schemas"]["Appearance"];
+            /** Metadata Language */
+            metadata_language: string;
         };
         /** Rail */
         Rail: {
@@ -1167,6 +1253,11 @@ export interface components {
              */
             region: string;
             /**
+             * Language
+             * @default en-US
+             */
+            language: string;
+            /**
              * Service Ids
              * @default []
              */
@@ -1177,6 +1268,11 @@ export interface components {
              */
             hide_library_items: boolean;
             /**
+             * Hide Watched Items
+             * @default true
+             */
+            hide_watched_items: boolean;
+            /**
              * Excluded Service Ids
              * @default []
              */
@@ -1186,6 +1282,11 @@ export interface components {
              * @default []
              */
             disabled_rail_types: components["schemas"]["RailType"][];
+            /**
+             * Disabled Sign In Methods
+             * @default []
+             */
+            disabled_sign_in_methods: ("plex" | "jellyfin" | "seerr")[];
             appearance?: components["schemas"]["Appearance"];
         };
         /** SearchResponse */
@@ -1206,6 +1307,31 @@ export interface components {
             episode_count: number;
             /** Air Date */
             air_date: string | null;
+        };
+        /** SeerrAccepts */
+        SeerrAccepts: {
+            /** Plex */
+            plex: boolean;
+            /** Jellyfin */
+            jellyfin: boolean;
+            /** Local */
+            local: boolean;
+        };
+        /** SeerrIntegration */
+        SeerrIntegration: {
+            /** Configured */
+            configured: boolean;
+            /**
+             * Media Server
+             * @enum {string}
+             */
+            media_server: "plex" | "jellyfin" | "emby" | "none" | "unknown";
+            /** Plex */
+            plex: boolean | null;
+            /** Jellyfin */
+            jellyfin: boolean | null;
+            /** Local */
+            local: boolean | null;
         };
         /** SeerrLinkBody */
         SeerrLinkBody: {
@@ -1257,7 +1383,18 @@ export interface components {
              * Locked Fields
              * @default []
              */
-            locked_fields: ("hide_library_items" | "excluded_service_ids")[];
+            locked_fields: ("hide_library_items" | "hide_watched_items" | "excluded_service_ids" | "disabled_sign_in_methods")[];
+            /** Configured Sign In Methods */
+            configured_sign_in_methods: ("plex" | "jellyfin" | "seerr")[];
+            /** Sign In Link Counts */
+            sign_in_link_counts: components["schemas"]["SignInLinkCount"][];
+        };
+        /** SignInLinkCount */
+        SignInLinkCount: {
+            /** Methods */
+            methods: ("plex" | "jellyfin" | "seerr")[];
+            /** Count */
+            count: number;
         };
         /** SignalBody */
         SignalBody: {
@@ -1342,7 +1479,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "seerr" | "plex" | "jellyfin" | "browsing";
+            source: "seerr" | "plex" | "jellyfin" | "trakt" | "browsing";
             /** Enabled */
             enabled: boolean;
         };
@@ -1351,6 +1488,33 @@ export interface components {
          * @enum {string}
          */
         Theme: "dark" | "light";
+        /** TraktDeviceResponse */
+        TraktDeviceResponse: {
+            /** Handle */
+            handle: string;
+            /** User Code */
+            user_code: string;
+            /** Interval */
+            interval: number;
+            /** Expires In */
+            expires_in: number;
+        };
+        /** TraktPollBody */
+        TraktPollBody: {
+            /** Handle */
+            handle: string;
+        };
+        /** TraktPollResponse */
+        TraktPollResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "expired" | "denied" | "linked";
+            /** Interval */
+            interval?: number | null;
+            account?: components["schemas"]["AccountResponse"] | null;
+        };
         /** UnlinkBody */
         UnlinkBody: {
             /**
@@ -1681,7 +1845,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                source: "seerr" | "plex" | "jellyfin" | "browsing";
+                source: "seerr" | "plex" | "jellyfin" | "trakt" | "browsing";
             };
             cookie?: never;
         };
@@ -1840,12 +2004,65 @@ export interface operations {
             };
         };
     };
+    create_trakt_device_api_v1_account_links_trakt_device_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraktDeviceResponse"];
+                };
+            };
+        };
+    };
+    poll_trakt_device_api_v1_account_links_trakt_device_poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TraktPollBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraktPollResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     unlink_account_api_v1_account_links__provider__unlink_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                provider: "plex" | "jellyfin" | "seerr";
+                provider: "plex" | "jellyfin" | "seerr" | "trakt";
             };
             cookie?: never;
         };
@@ -1900,6 +2117,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_integrations_api_v1_integrations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationsResponse"];
                 };
             };
         };
@@ -1973,6 +2210,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RegionsResponse"];
+                };
+            };
+        };
+    };
+    get_languages_api_v1_languages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanguagesResponse"];
                 };
             };
         };

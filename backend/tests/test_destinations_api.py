@@ -324,3 +324,36 @@ def test_tv_request_policy_preserves_ordinary_destinations(
     assert body["available"] and body["can_request_standard"]
     assert len(body["destinations"]) == 1
     assert not {"ignored", "enableSpecialEpisodes", "partialRequestsEnabled"} & body.keys()
+
+
+@pytest.mark.parametrize(
+    "login_metadata",
+    [
+        {"mediaServerType": "1"},
+        {"mediaServerLogin": 1},
+        {"localLogin": "false"},
+    ],
+)
+def test_malformed_login_metadata_preserves_season_destinations(
+    tmp_path: Path, login_metadata: dict[str, object]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/settings/public":
+            return httpx.Response(
+                200,
+                json={
+                    "enableSpecialEpisodes": True,
+                    "partialRequestsEnabled": True,
+                    **login_metadata,
+                },
+            )
+        assert request.url.path == "/api/v1/service/sonarr"
+        return httpx.Response(200, json=[])
+
+    app = _app(tmp_path)
+    _override(app, handler)
+    with _authed_client(app, tmp_path / "tasterr.db") as client:
+        response = client.get("/api/v1/tv/7/destinations")
+    assert response.status_code == 200
+    assert response.json()["can_request_specials"] is True
+    assert response.json()["can_request_partial"] is True

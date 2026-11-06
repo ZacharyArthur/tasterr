@@ -4,7 +4,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from tasterr.runtime_settings import RuntimeSettings
-from tasterr.settings import Settings
+from tasterr.settings import PublicConfig, Settings
 
 
 def test_discovery_environment_overrides_include_false_and_empty(
@@ -13,12 +13,18 @@ def test_discovery_environment_overrides_include_false_and_empty(
     stored = RuntimeSettings(hide_library_items=True, excluded_service_ids=[8])
     assert Settings().resolve_runtime(stored) == stored
     monkeypatch.setenv("TASTERR_HIDE_LIBRARY_ITEMS", "false")
+    monkeypatch.setenv("TASTERR_HIDE_WATCHED_ITEMS", "false")
     monkeypatch.setenv("TASTERR_EXCLUDED_SERVICE_IDS", "[]")
     settings = Settings()
     resolved = settings.resolve_runtime(stored)
     assert resolved.hide_library_items is False
+    assert resolved.hide_watched_items is False
     assert resolved.excluded_service_ids == []
-    assert settings.locked_discovery_fields == ["hide_library_items", "excluded_service_ids"]
+    assert settings.locked_discovery_fields == [
+        "hide_library_items",
+        "hide_watched_items",
+        "excluded_service_ids",
+    ]
     assert stored.hide_library_items is True
     assert stored.excluded_service_ids == [8]
 
@@ -34,11 +40,12 @@ def test_discovery_environment_rejects_invalid_ids(
         Settings()
 
 
-@pytest.mark.parametrize("value", ["", "null"])
+@pytest.mark.parametrize("value", ["", "null", "maybe"])
+@pytest.mark.parametrize("field", ["TASTERR_HIDE_LIBRARY_ITEMS", "TASTERR_HIDE_WATCHED_ITEMS"])
 def test_library_override_rejects_invalid_values(
-    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str, field: str
 ) -> None:
-    monkeypatch.setenv("TASTERR_HIDE_LIBRARY_ITEMS", value)
+    monkeypatch.setenv(field, value)
     with pytest.raises(ValidationError):
         Settings()
 
@@ -59,8 +66,11 @@ ENV_VARS = (
     "TASTERR_PORT",
     "TASTERR_FORWARDED_ALLOW_IPS",
     "TASTERR_PLEX_MAX_CONNECTION_PROBES",
+    "TASTERR_WATCH_HISTORY_DAYS",
     "TASTERR_HIDE_LIBRARY_ITEMS",
+    "TASTERR_HIDE_WATCHED_ITEMS",
     "TASTERR_EXCLUDED_SERVICE_IDS",
+    "TASTERR_SIGN_IN_METHODS",
 )
 
 
@@ -113,6 +123,29 @@ def test_boot_with_nothing_set(clean_env: None) -> None:
     assert settings.database_path == Path("data/tasterr.db")
     assert settings.tasterr_forwarded_allow_ips == "127.0.0.1"
     assert settings.tasterr_plex_max_connection_probes == 6
+    assert settings.tasterr_watch_history_days == 365
+
+
+@pytest.mark.parametrize("value", ["730", "1", "3650"])
+def test_watch_history_window_from_environment(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("TASTERR_WATCH_HISTORY_DAYS", value)
+    assert Settings().tasterr_watch_history_days == int(value)
+
+
+@pytest.mark.parametrize("value", ["0", "3651", "1.5", "true", "null", ""])
+def test_watch_history_window_rejects_invalid_environment_values(
+    clean_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("TASTERR_WATCH_HISTORY_DAYS", value)
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_watch_history_window_is_deployment_only() -> None:
+    for model in (PublicConfig, RuntimeSettings):
+        assert not any("watch_history" in field for field in model.model_fields)
 
 
 @pytest.mark.parametrize(

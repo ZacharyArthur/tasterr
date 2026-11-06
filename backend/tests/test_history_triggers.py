@@ -30,7 +30,7 @@ def test_dormant_plex_link_gets_no_home_sync_or_continue_watching(
 
     monkeypatch.setattr("tasterr.api.taste.schedule_seed", unexpected)
     monkeypatch.setattr("tasterr.api.taste.schedule_plex_history", unexpected)
-    monkeypatch.setattr("tasterr.api.home.PlexMediaClient", unexpected)
+    monkeypatch.setattr("tasterr.api.home.build_plex_media", unexpected)
     with TestClient(app) as client:
         client.cookies.set("tasterr_session", token)
         assert client.get("/api/v1/home").status_code == 200

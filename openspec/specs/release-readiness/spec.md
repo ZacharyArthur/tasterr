@@ -9,7 +9,11 @@ that make a stable Tasterr release repeatable and safe to operate.
 ### Requirement: Release-facing documentation is complete and linked
 
 The repository SHALL provide a root quick start plus living configuration,
-architecture, releasing, licensing, and vulnerability-reporting documents. The
+architecture, releasing, licensing, and vulnerability-reporting documents.
+
+#### Details
+
+The
 configuration guide SHALL cover every supported environment variable, secret
 generation, existing Seerr networking across routable-LAN and optional same-host
 Docker-network paths, loopback-by-default and explicit LAN publication, trusted
@@ -93,7 +97,11 @@ releases, and protected version tags before stable publication.
 
 The repository SHALL provide a documented deterministic release command that runs
 the ordinary quality gate, the real-backend Playwright smoke, and the native
-container/Compose smoke. The release procedure SHALL separately require both locked
+container/Compose smoke.
+
+#### Details
+
+The release procedure SHALL separately require both locked
 dependency audits, the full relevant security checklist, placeholder-only env
 verification, and the live Seerr, owner/managed/shared Plex, and Jellyfin
 contract suites
@@ -148,7 +156,11 @@ fresh automated pass.
 Before a stable tag is created, the repository SHALL contain a release record naming
 the release version/date, deterministic check results, dependency-audit disposition,
 security-review scope/result, live Seerr and Plex versions plus generic
-exercised/skipped cases, known limitations, and migration-aware rollback basis. The
+exercised/skipped cases, known limitations, and migration-aware rollback basis.
+
+#### Details
+
+The
 record MUST NOT contain credentials, tokens, cookies, household identities, request
 titles, internal/live URLs, rating keys, server/account identifiers, viewing data,
 or raw upstream output. A live case MAY be recorded as skipped only when its
@@ -199,7 +211,11 @@ GitHub Release rather than a post-release source commit.
 ### Requirement: Stable versioning and release order are explicit
 
 The current stable release SHALL use SemVer `2.3.1` in backend/frontend package and
-lock metadata and Git tag `v2.3.1`. Its release preparation and any applicable archived
+lock metadata and Git tag `v2.3.1`.
+
+#### Details
+
+Its release preparation and any applicable archived
 OpenSpec changes SHALL be squash-merged through required `check`, `e2e`,
 `container-smoke`, and CodeQL gates before tagging. The main workflow SHALL publish
 an immutable commit-SHA candidate with verifiable provenance. Before the stable tag,

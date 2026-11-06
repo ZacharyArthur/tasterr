@@ -7,6 +7,8 @@ export type AuthMethods = components["schemas"]["AuthMethodsResponse"];
 export type JellyfinCredentials = components["schemas"]["JellyfinLoginRequest"];
 export type AccountResponse = components["schemas"]["AccountResponse"];
 export type AccountProvider = components["schemas"]["AccountProvider"];
+export type TraktDeviceResponse = components["schemas"]["TraktDeviceResponse"];
+export type TraktPollResponse = components["schemas"]["TraktPollResponse"];
 export type TasteSourceBody = components["schemas"]["TasteSourceBody"];
 export type TasteSource = TasteSourceBody["source"];
 export type SeerrLinkBody = Pick<
@@ -54,9 +56,12 @@ export type RuntimeSettings = components["schemas"]["RuntimeSettings"];
 export type SettingsResponse = components["schemas"]["SettingsResponse"];
 export type RegionOption = components["schemas"]["RegionOption"];
 export type RegionsResponse = components["schemas"]["RegionsResponse"];
+export type LanguagesResponse = components["schemas"]["LanguagesResponse"];
 export type ServiceOption = components["schemas"]["ServiceOption"];
 export type ServicesResponse = components["schemas"]["ServicesResponse"];
 export type ConnectionTarget = components["schemas"]["ConnectionTarget"];
+export type IntegrationsResponse =
+	components["schemas"]["IntegrationsResponse"];
 export type ConnectionTestResponse =
 	components["schemas"]["ConnectionTestResponse"];
 
@@ -169,6 +174,12 @@ export function pollLinkPlexPin(
 export function linkSeerr(body: SeerrLinkBody): Promise<void> {
 	return postJson<void>("/api/v1/account/links/seerr", body);
 }
+export function createTraktDevice(): Promise<TraktDeviceResponse> {
+	return postJson("/api/v1/account/links/trakt/device");
+}
+export function pollTraktDevice(handle: string): Promise<TraktPollResponse> {
+	return postJson("/api/v1/account/links/trakt/device/poll", { handle });
+}
 export function unlinkAccount(
 	provider: AccountProvider["provider"],
 	deleteHistory: boolean,
@@ -215,6 +226,10 @@ export function getSettings(): Promise<SettingsResponse> {
 	return request<SettingsResponse>("/api/v1/settings");
 }
 
+export function getIntegrations(): Promise<IntegrationsResponse> {
+	return request<IntegrationsResponse>("/api/v1/integrations");
+}
+
 export function saveSettings(
 	settings: RuntimeSettings,
 ): Promise<SettingsResponse> {
@@ -223,6 +238,10 @@ export function saveSettings(
 
 export function getRegions(): Promise<RegionsResponse> {
 	return request<RegionsResponse>("/api/v1/regions");
+}
+
+export function getLanguages(): Promise<LanguagesResponse> {
+	return request<LanguagesResponse>("/api/v1/languages");
 }
 
 export function getServices(region: string): Promise<ServicesResponse> {

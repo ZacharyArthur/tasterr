@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
-from tasterr.clients.jellyfin import JELLYFIN_PAGE_SIZE, JellyfinClient, JellyfinItem
-from tasterr.recommend.signals import MAX_TMDB_ID, TitleKey
+from tasterr.catalog.jellyfin_ids import tmdb_id as _tmdb_id
+from tasterr.clients.jellyfin import JELLYFIN_PAGE_SIZE, JellyfinClient
+from tasterr.recommend.signals import TitleKey
 
 HISTORY_DEADLINE_SECONDS = 30.0
 HISTORY_MAX_PER_TYPE = 500
@@ -16,14 +17,6 @@ HISTORY_MAX_PER_TYPE = 500
 class JellyfinHistoryResult:
     watches: dict[TitleKey, datetime]
     complete: bool
-
-
-def _tmdb_id(item: JellyfinItem) -> int | None:
-    raw = item.provider_ids.get("Tmdb", "")
-    if not raw.isascii() or not raw.isdecimal() or len(raw) > 10:
-        return None
-    value = int(raw)
-    return value if 0 < value <= MAX_TMDB_ID else None
 
 
 async def read_history(
