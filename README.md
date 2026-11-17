@@ -192,6 +192,10 @@ curl --fail http://127.0.0.1:8000/api/v1/health
 The example pins the `2.4.0` image. See the [configuration
 reference](docs/CONFIGURATION.md) for networking, secrets, and upgrades.
 
+## One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Tasterr/)
+
 ## Living documentation
 
 - [Configuration and operations](docs/CONFIGURATION.md): every variable, proxy/TLS,
